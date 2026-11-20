@@ -3,9 +3,10 @@
 /**
  * VClimateStatus: read-only BMW MGU climate monitor.
  *
- * The public SDK kit confirms an A/C status signal, but does not document the
- * driver/passenger setpoint fields. Those values stay unavailable until their
- * exact names, types and units are checked against this car's SOME/IP catalog.
+ * ClimateMaster.statusTemperature is catalog-confirmed as an array of
+ * StatusTemperature records. Each record carries targetTemperature (Float)
+ * and operationZone. Its unit/scale is not stated in the catalog, so live
+ * values are intentionally shown without a °C suffix until verified in-car.
  */
 const mgu = require('./kit/mgu');
 const G = require('./kit/gauges');
@@ -18,6 +19,7 @@ const C = {
 };
 const SIGNAL_POLL_MS = 5000;
 const SIGNAL_STALE_MS = 15000;
+const ZONE_NAMES = { 1: 'driver', 2: 'passenger', DRIVER: 'driver', PASSENGER: 'passenger' };
 
 function findValues(value, key, out) {
     out = out || [];
@@ -36,16 +38,60 @@ function acState(value) {
     return null;
 }
 
-function temperatureDisplay(value) {
+function temperatureRecords(value, out, seen, depth) {
+    out = out || [];
+    seen = seen || [];
+    depth = depth || 0;
+    if (!value || typeof value !== 'object' || depth > 12 || seen.indexOf(value) >= 0) return out;
+    seen.push(value);
+    if (Array.isArray(value)) {
+        value.forEach((item) => temperatureRecords(item, out, seen, depth + 1));
+    } else if (Object.prototype.hasOwnProperty.call(value, 'targetTemperature') &&
+        Object.prototype.hasOwnProperty.call(value, 'operationZone')) {
+        out.push(value);
+    } else {
+        Object.keys(value).forEach((key) => temperatureRecords(value[key], out, seen, depth + 1));
+    }
+    return out;
+}
+
+function hasPayloadContent(value, seen) {
+    if (value === null || value === undefined) return false;
+    if (typeof value !== 'object') return true;
+    seen = seen || [];
+    if (seen.indexOf(value) >= 0) return false;
+    seen.push(value);
+    return Object.keys(value).some((key) => hasPayloadContent(value[key], seen));
+}
+
+function zoneName(value) {
+    if (typeof value === 'number' && (value === 1 || value === 2)) return ZONE_NAMES[value];
+    if (typeof value === 'string') return ZONE_NAMES[value.trim().toUpperCase()] || null;
+    return null;
+}
+
+function diagnosticValue(value) {
+    if (typeof value === 'number' && !isFinite(value)) return String(value);
+    if (value === undefined) return 'undefined';
+    try {
+        const text = JSON.stringify(value);
+        return text === undefined ? String(value) : text;
+    } catch (e) {
+        return '[unserializable]';
+    }
+}
+
+function temperatureDisplay(value, showUnit) {
     if (typeof value === 'number' && isFinite(value)) {
-        const text = Math.abs(value - Math.round(value)) < 0.05 ? String(Math.round(value)) : value.toFixed(1);
-        return { text, size: 104, font: 'num', color: C.white, unit: true };
+        const rounded = Math.round(value * 10) / 10;
+        const text = Math.abs(rounded - Math.round(rounded)) < 0.05 ? String(Math.round(rounded)) : rounded.toFixed(1);
+        return { text, size: 104, font: 'num', color: C.white, unit: !!showUnit };
     }
     if (typeof value === 'string') {
         const text = value.trim().toUpperCase();
         if (text === 'HI' || text === 'LO') return { text, size: 104, font: 'bold', color: C.white, unit: false };
     }
-    return { text: '--', size: 91, font: 'num', color: '#777777', unit: true };
+    return { text: '--', size: 91, font: 'num', color: '#777777', unit: !!showUnit };
 }
 
 mgu.run({
@@ -54,9 +100,15 @@ mgu.run({
         const live = {
             ac: null, signalError: false, signalAvailable: false,
             seenAc: false, invalidAc: false, stale: false,
+            setpointAvailable: false,
+            zones: {
+                driver: { value: null, state: 'waiting', lastSeen: 0 },
+                passenger: { value: null, state: 'waiting', lastSeen: 0 },
+            },
         };
-        let renderQueued = false, renderTimer = null, staleTimer = null;
-        let stopped = false, subscription = null;
+        let renderQueued = false, renderTimer = null, staleTimer = null, freshnessTimer = null;
+        let stopped = false;
+        const subscriptions = [];
 
         // DEMO is only a host preview mode. The car runtime does not expose
         // ctx.preview, and the installed manifest declares no demo setting.
@@ -69,6 +121,87 @@ mgu.run({
         function clearStaleTimer() {
             if (staleTimer) { clearTimeout(staleTimer); staleTimer = null; }
         }
+
+        function onSetpointAvailability(available) {
+            if (stopped) return;
+            live.setpointAvailable = !!available;
+            Object.keys(live.zones).forEach((name) => {
+                const zone = live.zones[name];
+                if (!available) {
+                    zone.value = null;
+                    zone.lastSeen = 0;
+                    zone.state = 'unavailable';
+                } else if (zone.state === 'unavailable') {
+                    zone.state = 'waiting';
+                }
+            });
+            queueRender();
+        }
+
+        function onTemperatureSignal(value) {
+            if (stopped) return;
+            live.setpointAvailable = true;
+            const records = temperatureRecords(value);
+            const now = Date.now();
+            if (settings.get('climateDiagnostics') === true) {
+                const receivedAt = new Date(now).toISOString();
+                if (records.length) {
+                    records.forEach((record) => {
+                        const mapped = zoneName(record.operationZone);
+                        log.info('CLIMATE_DIAG statusTemperature rx=' + receivedAt +
+                            ' zoneRaw=' + diagnosticValue(record.operationZone) +
+                            ' zone=' + (mapped ? mapped.toUpperCase() : 'UNMAPPED') +
+                            ' targetRaw=' + diagnosticValue(record.targetTemperature) +
+                            ' saveLUMRaw=' + diagnosticValue(record.saveLUM));
+                    });
+                } else {
+                    let raw = diagnosticValue(value);
+                    if (raw.length > 240) raw = raw.slice(0, 240) + '…';
+                    log.info('CLIMATE_DIAG statusTemperature rx=' + receivedAt +
+                        ' records=0 payloadRaw=' + raw);
+                }
+            }
+            if (!records.length && hasPayloadContent(value)) {
+                Object.keys(live.zones).forEach((name) => {
+                    live.zones[name].value = null;
+                    live.zones[name].lastSeen = now;
+                    live.zones[name].state = 'invalid';
+                });
+                queueRender();
+                return;
+            }
+            records.forEach((record) => {
+                const name = zoneName(record.operationZone);
+                if (!name) return; // Ignore ALL_ZONES and the second/third row enum values.
+                const zone = live.zones[name];
+                zone.lastSeen = now;
+                if (typeof record.targetTemperature === 'number' && isFinite(record.targetTemperature)) {
+                    zone.value = record.targetTemperature;
+                    zone.state = 'live';
+                } else {
+                    zone.value = null;
+                    zone.state = 'invalid';
+                }
+            });
+            queueRender();
+        }
+
+        function checkSetpointFreshness() {
+            if (stopped || !live.setpointAvailable) return;
+            const now = Date.now();
+            let changed = false;
+            Object.keys(live.zones).forEach((name) => {
+                const zone = live.zones[name];
+                if (zone.lastSeen && now - zone.lastSeen > SIGNAL_STALE_MS && zone.state !== 'stale') {
+                    zone.value = null;
+                    zone.state = 'stale';
+                    changed = true;
+                }
+            });
+            if (changed) queueRender();
+        }
+
+        freshnessTimer = setInterval(checkSetpointFreshness, 3000);
 
         function armStaleTimer() {
             clearStaleTimer();
@@ -109,13 +242,13 @@ mgu.run({
             stopped = true;
             if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
             clearStaleTimer();
-            const sub = subscription;
-            subscription = null;
-            if (sub && typeof sub.shutdown === 'function') {
-                Promise.resolve().then(() => sub.shutdown()).catch((e) => {
+            if (freshnessTimer) { clearInterval(freshnessTimer); freshnessTimer = null; }
+            const subs = subscriptions.splice(0);
+            subs.forEach((sub) => {
+                if (sub && typeof sub.shutdown === 'function') Promise.resolve().then(() => sub.shutdown()).catch((e) => {
                     log.warn('signal shutdown: ' + (e && e.message || e));
                 });
-            }
+            });
         }
 
         // kit/runtime/mgu.js exposes the actual OAP OnlineApp EventEmitter in
@@ -135,9 +268,9 @@ mgu.run({
         }
         Promise.resolve(watch).then((result) => {
             if (!result) return;
-            subscription = result;
+            subscriptions.push(result);
             if (stopped) {
-                subscription = null;
+                subscriptions.splice(subscriptions.indexOf(result), 1);
                 cleanupSubscription(result);
                 return;
             }
@@ -157,6 +290,36 @@ mgu.run({
             live.stale = true;
             log.warn('A/C status signal: ' + (e && e.message || e));
             queueRender();
+        });
+
+        let setpointWatch;
+        try {
+            setpointWatch = ctx.signals.watch(
+                'de.bmw.infotainment.climate.climatemaster.ClimateMaster', '1',
+                { statusTemperature: onTemperatureSignal }, log,
+                { pollMs: SIGNAL_POLL_MS, onAvailability: onSetpointAvailability }
+            );
+        } catch (e) {
+            log.warn('setpoint signal: ' + (e && e.message || e));
+        }
+        Promise.resolve(setpointWatch).then((result) => {
+            if (!result) return;
+            subscriptions.push(result);
+            if (stopped) {
+                subscriptions.splice(subscriptions.indexOf(result), 1);
+                cleanupSubscription(result);
+                return;
+            }
+            if (result.error) {
+                onSetpointAvailability(false);
+                log.warn('setpoint signal: ' + result.error);
+            } else if (typeof result.available === 'boolean') {
+                onSetpointAvailability(result.available);
+            }
+        }).catch((e) => {
+            if (stopped) return;
+            onSetpointAvailability(false);
+            log.warn('setpoint signal: ' + (e && e.message || e));
         });
 
         function cleanupSubscription(sub) {
@@ -179,10 +342,18 @@ mgu.run({
                     demo: true,
                     driver: previewValue('demoDriver', 22),
                     passenger: previewValue('demoPassenger', 21),
+                    driverStatus: 'demo', passengerStatus: 'demo',
                     ac: true,
                 };
             }
-            return { demo: false, driver: null, passenger: null, ac: live.ac };
+            return {
+                demo: false,
+                driver: live.zones.driver.state === 'live' ? live.zones.driver.value : null,
+                passenger: live.zones.passenger.state === 'live' ? live.zones.passenger.value : null,
+                driverStatus: live.zones.driver.state,
+                passengerStatus: live.zones.passenger.state,
+                ac: live.ac,
+            };
         }
 
         function badge(cv, label, demo) {
@@ -192,7 +363,7 @@ mgu.run({
             cv.text(label, x + w / 2 + 2, y + 27, 18, C.white, { align: 'center', font: 'bold', spacing: 2 });
         }
 
-        function climateCard(cv, x, title, value, demo) {
+        function climateCard(cv, x, title, value, demo, signalStatus) {
             const y = 160, w = 700, h = 274;
             cv.roundRect(x, y, w, h, 12, C.card);
             cv.fillRect(x, y + 20, 5, h - 40, C.red);
@@ -200,7 +371,7 @@ mgu.run({
             cv.text(title, x + 38, y + 42, 22, C.white, { font: 'bold', spacing: 3 });
             cv.text('SET TEMPERATURE', x + 38, y + 91, 17, C.muted, { font: 'bold', spacing: 2 });
 
-            const shown = temperatureDisplay(value);
+            const shown = temperatureDisplay(value, demo);
             const maxWidth = w - 76;
             let size = shown.size;
             const unitSize = 34, gap = 13;
@@ -212,7 +383,13 @@ mgu.run({
             cv.text(shown.text, valueX, y + 198, size, shown.color, { font: shown.font });
             if (shown.unit) cv.text('°C', valueX + valueWidth + gap, y + 194, unitSize, C.muted, { font: 'bold' });
             cv.fillRect(x + 38, y + 224, w - 76, 1, C.border);
-            cv.text(demo ? 'LOCAL PREVIEW VALUE' : 'SIGNAL UNAVAILABLE', x + 38, y + 257, 15, demo ? C.red : C.muted, { font: 'bold', spacing: 1.3 });
+            const labels = {
+                demo: 'LOCAL PREVIEW VALUE', live: 'LIVE VALUE · UNIT UNVERIFIED',
+                waiting: 'WAITING FOR SIGNAL', stale: 'SIGNAL STALE',
+                invalid: 'INVALID SIGNAL', unavailable: 'SIGNAL UNAVAILABLE',
+            };
+            const statusText = labels[demo ? 'demo' : signalStatus] || 'SIGNAL UNAVAILABLE';
+            cv.text(statusText, x + 38, y + 257, 15, demo ? C.red : signalStatus === 'live' ? C.green : C.muted, { font: 'bold', spacing: 1.3 });
         }
 
         async function render() {
@@ -223,11 +400,11 @@ mgu.run({
             cv.fillRect(48, 50, 5, 76, C.red);
             cv.text('VKPERFORMANCE', 72, 72, 16, C.red, { font: 'bold', spacing: 2.5 });
             cv.text('VClimateStatus', 72, 112, 31, C.white, { font: 'bold', spacing: 0.4 });
-            badge(cv, s.demo ? 'DEMO' : 'LIVE', s.demo);
+            badge(cv, s.demo ? 'DEMO' : (live.signalAvailable || live.setpointAvailable) ? 'LIVE' : 'WAIT', s.demo);
             cv.fillRect(48, 139, 1472, 1, C.border);
 
-            climateCard(cv, 72, 'DRIVER', s.driver, s.demo);
-            climateCard(cv, 828, 'PASSENGER', s.passenger, s.demo);
+            climateCard(cv, 72, 'DRIVER', s.driver, s.demo, s.driverStatus);
+            climateCard(cv, 828, 'PASSENGER', s.passenger, s.demo, s.passengerStatus);
 
             cv.fillRect(72, 464, 1456, 1, C.border);
             cv.text('CLIMATE STATUS', 72, 499, 15, C.muted, { font: 'bold', spacing: 1.8 });
@@ -236,7 +413,13 @@ mgu.run({
                 !live.seenAc ? 'WAITING FOR DATA' : s.ac === null ? 'SIGNAL UNAVAILABLE' : s.ac ? 'A/C ON' : 'A/C OFF';
             cv.fillRect(267, 483, 5, 16, s.ac === true ? C.red : C.muted);
             cv.text(acText, 286, 499, 17, s.ac === true ? C.white : C.muted, { font: 'bold', spacing: 1.1 });
-            const sourceText = s.demo ? 'DEMO VALUES · NOT VEHICLE DATA' : 'SETPOINT SIGNALS · SIGNAL UNAVAILABLE';
+            const zoneStates = Object.keys(live.zones).map((name) => live.zones[name].state);
+            const hasLiveTemperature = zoneStates.indexOf('live') >= 0;
+            const sourceText = s.demo ? 'DEMO VALUES · NOT VEHICLE DATA' :
+                hasLiveTemperature ? 'VEHICLE VALUE · UNIT UNVERIFIED' :
+                    zoneStates.indexOf('invalid') >= 0 ? 'INVALID SETPOINT PAYLOAD' :
+                        zoneStates.indexOf('stale') >= 0 ? 'SETPOINT DATA STALE' :
+                            live.setpointAvailable ? 'WAITING FOR SETPOINT DATA' : 'SETPOINT SIGNAL · UNAVAILABLE';
             cv.text(sourceText, 1528, 499, 15, s.demo ? C.red : C.muted, { align: 'right', spacing: 0.7 });
 
             G.frame(cv, ctx.theme(), ['Climate'], 0);

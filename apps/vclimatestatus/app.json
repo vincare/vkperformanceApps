@@ -2,7 +2,7 @@
   "id": "vclimatestatus",
   "title": "VClimateStatus",
   "description": "Read-only driver and passenger climate setpoint monitor",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "vendor": "VKPERFORMANCE",
   "loggingId": "OAA5",
   "iconGlyph": "temp",
@@ -10,9 +10,18 @@
   "signals": {
     "de.bmw.infotainment.climate.Climate2": {
       "statusACFront": "rs"
+    },
+    "de.bmw.infotainment.climate.climatemaster.ClimateMaster": {
+      "statusTemperature": "rs"
     }
   },
   "settings": [
+    {
+      "key": "climateDiagnostics",
+      "label": "Climate signal diagnostics (raw)",
+      "type": "bool",
+      "default": false
+    },
     {
       "key": "repoCredit",
       "label": "Repository credit",
