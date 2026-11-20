@@ -2,7 +2,7 @@
   "id": "vclimatestatus",
   "title": "VClimateStatus",
   "description": "Read-only driver and passenger climate setpoint monitor",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "vendor": "VKPERFORMANCE",
   "loggingId": "OAA5",
   "iconGlyph": "temp",
@@ -18,9 +18,10 @@
   "settings": [
     {
       "key": "climateDiagnostics",
-      "label": "Climate signal diagnostics (raw)",
+      "label": "Temporary climate diagnostics (raw)",
       "type": "bool",
-      "default": false
+      "default": true,
+      "reset": 1
     },
     {
       "key": "repoCredit",
@@ -34,7 +35,8 @@
     {
       "name": "MAIN",
       "kind": "canvas",
-      "title": "VClimateStatus"
+      "title": "VClimateStatus",
+      "buttons": [["BTN_SETTINGS", "Settings"]]
     }
   ]
 }

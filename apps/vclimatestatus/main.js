@@ -12,6 +12,8 @@ const mgu = require('./kit/mgu');
 const G = require('./kit/gauges');
 
 const W = 1600, H = 520;
+const NO_PAYLOAD_MS = 30000;
+const SAME_PAYLOAD_LOG_MS = 30000;
 const C = {
     bg: '#090909', card: '#171717', border: '#292929',
     red: '#E02020', darkRed: '#8B1010', white: '#FFFFFF', muted: '#969696',
@@ -97,6 +99,7 @@ function temperatureDisplay(value, showUnit) {
 mgu.run({
     async start(ctx) {
         const { ui, settings, log } = ctx;
+        const diagnosticsEnabled = settings.get('climateDiagnostics') === true;
         const live = {
             ac: null, signalError: false, signalAvailable: false,
             seenAc: false, invalidAc: false, stale: false,
@@ -107,8 +110,97 @@ mgu.run({
             },
         };
         let renderQueued = false, renderTimer = null, staleTimer = null, freshnessTimer = null;
+        let noPayloadTimer = null;
         let stopped = false;
         const subscriptions = [];
+        let lastSetpointAvailability;
+        let setpointWatchResolved = false;
+        let payloadCount = 0, lastPayloadSignature = null, lastPayloadLoggedAt = 0;
+        const lastDiagnosticLog = Object.create(null);
+
+        log.info('CLIMATE_DIAG startup version=' + (ctx.spec && ctx.spec.version || 'unknown') +
+            ' enabled=' + (diagnosticsEnabled ? 'true' : 'false'));
+
+        function climateDiag(stage, detail, level) {
+            if (!diagnosticsEnabled) return;
+            let info = '';
+            if (detail) {
+                Object.keys(detail).forEach((key) => {
+                    let value = diagnosticValue(detail[key]).replace(/[\r\n]+/g, ' ');
+                    if (value.length > 260) value = value.slice(0, 257) + '...';
+                    info += ' ' + key + '=' + value;
+                });
+            }
+            const method = level || (/error|failed|missing/i.test(stage) ? 'warn' : 'info');
+            log[method]('CLIMATE_DIAG at=' + new Date().toISOString() + ' stage=' + stage + info);
+        }
+
+        function clearNoPayloadTimer() {
+            if (noPayloadTimer) { clearTimeout(noPayloadTimer); noPayloadTimer = null; }
+        }
+
+        function armNoPayloadTimer() {
+            if (!diagnosticsEnabled || payloadCount || stopped) return;
+            clearNoPayloadTimer();
+            noPayloadTimer = setTimeout(() => {
+                noPayloadTimer = null;
+                climateDiag('no_payload_timeout', {
+                    waitSeconds: NO_PAYLOAD_MS / 1000,
+                    providerAvailable: live.setpointAvailable,
+                    watchResolved: setpointWatchResolved,
+                });
+            }, NO_PAYLOAD_MS);
+        }
+
+        function diagnosticSignalEvent(event) {
+            if (!event || !diagnosticsEnabled) return;
+            // Raw payloads are logged below with the corresponding event/getter source.
+            // Avoid a second line for every successful 5-second getter poll.
+            if (event.stage === 'payload_received' || event.stage === 'getter_started' ||
+                event.stage === 'provider_availability') return;
+            if (event.stage === 'getter_error') {
+                const detail = event.detail || {};
+                const signature = String(detail.field || '') + ':' + String(detail.error || '');
+                const now = Date.now();
+                if (lastDiagnosticLog[signature] && now - lastDiagnosticLog[signature] < SAME_PAYLOAD_LOG_MS) return;
+                lastDiagnosticLog[signature] = now;
+            }
+            climateDiag('signal_' + event.stage, Object.assign({
+                iface: event.iface,
+                instance: event.instance,
+            }, event.detail || {}));
+        }
+
+        function logTemperaturePayload(value, source, records, now) {
+            if (!diagnosticsEnabled) return;
+            payloadCount++;
+            clearNoPayloadTimer();
+            const signature = (source || 'unknown') + ':' + (records.length ? records.map((record) =>
+                diagnosticValue(record.operationZone) + ':' + diagnosticValue(record.targetTemperature) + ':' +
+                diagnosticValue(record.saveLUM)).join('|') : diagnosticValue(value).slice(0, 500));
+            if (signature === lastPayloadSignature && now - lastPayloadLoggedAt < SAME_PAYLOAD_LOG_MS) return;
+            lastPayloadSignature = signature;
+            lastPayloadLoggedAt = now;
+            const receivedAt = new Date(now).toISOString();
+            if (records.length) {
+                records.forEach((record, index) => {
+                    const mapped = zoneName(record.operationZone);
+                    log.info('CLIMATE_DIAG statusTemperature rx=' + receivedAt +
+                        ' source=' + (source || 'unknown') + ' record=' + index +
+                        ' zoneRaw=' + diagnosticValue(record.operationZone) +
+                        ' zone=' + (mapped ? mapped.toUpperCase() : 'UNMAPPED') +
+                        ' targetRaw=' + diagnosticValue(record.targetTemperature) +
+                        ' saveLUMRaw=' + diagnosticValue(record.saveLUM));
+                });
+            } else {
+                let raw = diagnosticValue(value);
+                if (raw.length > 500) raw = raw.slice(0, 497) + '...';
+                log.info('CLIMATE_DIAG statusTemperature rx=' + receivedAt +
+                    ' source=' + (source || 'unknown') + ' records=0 payloadRaw=' + raw);
+            }
+        }
+
+        armNoPayloadTimer();
 
         // DEMO is only a host preview mode. The car runtime does not expose
         // ctx.preview, and the installed manifest declares no demo setting.
@@ -124,7 +216,13 @@ mgu.run({
 
         function onSetpointAvailability(available) {
             if (stopped) return;
-            live.setpointAvailable = !!available;
+            const current = !!available;
+            if (lastSetpointAvailability !== current) {
+                lastSetpointAvailability = current;
+                climateDiag('setpoint_provider_availability', { available: current });
+                if (current && !payloadCount) armNoPayloadTimer();
+            }
+            live.setpointAvailable = current;
             Object.keys(live.zones).forEach((name) => {
                 const zone = live.zones[name];
                 if (!available) {
@@ -138,29 +236,12 @@ mgu.run({
             queueRender();
         }
 
-        function onTemperatureSignal(value) {
+        function onTemperatureSignal(value, source) {
             if (stopped) return;
-            live.setpointAvailable = true;
+            onSetpointAvailability(true);
             const records = temperatureRecords(value);
             const now = Date.now();
-            if (settings.get('climateDiagnostics') === true) {
-                const receivedAt = new Date(now).toISOString();
-                if (records.length) {
-                    records.forEach((record) => {
-                        const mapped = zoneName(record.operationZone);
-                        log.info('CLIMATE_DIAG statusTemperature rx=' + receivedAt +
-                            ' zoneRaw=' + diagnosticValue(record.operationZone) +
-                            ' zone=' + (mapped ? mapped.toUpperCase() : 'UNMAPPED') +
-                            ' targetRaw=' + diagnosticValue(record.targetTemperature) +
-                            ' saveLUMRaw=' + diagnosticValue(record.saveLUM));
-                    });
-                } else {
-                    let raw = diagnosticValue(value);
-                    if (raw.length > 240) raw = raw.slice(0, 240) + '…';
-                    log.info('CLIMATE_DIAG statusTemperature rx=' + receivedAt +
-                        ' records=0 payloadRaw=' + raw);
-                }
-            }
+            logTemperaturePayload(value, source, records, now);
             if (!records.length && hasPayloadContent(value)) {
                 Object.keys(live.zones).forEach((name) => {
                     live.zones[name].value = null;
@@ -242,6 +323,7 @@ mgu.run({
             stopped = true;
             if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
             clearStaleTimer();
+            clearNoPayloadTimer();
             if (freshnessTimer) { clearInterval(freshnessTimer); freshnessTimer = null; }
             const subs = subscriptions.splice(0);
             subs.forEach((sub) => {
@@ -297,19 +379,29 @@ mgu.run({
             setpointWatch = ctx.signals.watch(
                 'de.bmw.infotainment.climate.climatemaster.ClimateMaster', '1',
                 { statusTemperature: onTemperatureSignal }, log,
-                { pollMs: SIGNAL_POLL_MS, onAvailability: onSetpointAvailability }
+                {
+                    pollMs: SIGNAL_POLL_MS,
+                    onAvailability: onSetpointAvailability,
+                    onDiagnostic: diagnosticsEnabled ? diagnosticSignalEvent : undefined,
+                }
             );
         } catch (e) {
+            climateDiag('watch_call_error', { error: e && e.message || e });
             log.warn('setpoint signal: ' + (e && e.message || e));
         }
         Promise.resolve(setpointWatch).then((result) => {
-            if (!result) return;
+            setpointWatchResolved = true;
+            if (!result) {
+                climateDiag('watch_completed', { result: 'no-result' });
+                return;
+            }
             subscriptions.push(result);
             if (stopped) {
                 subscriptions.splice(subscriptions.indexOf(result), 1);
                 cleanupSubscription(result);
                 return;
             }
+            climateDiag('watch_completed', { error: result.error || 'none', available: result.available === true });
             if (result.error) {
                 onSetpointAvailability(false);
                 log.warn('setpoint signal: ' + result.error);
@@ -318,6 +410,8 @@ mgu.run({
             }
         }).catch((e) => {
             if (stopped) return;
+            setpointWatchResolved = true;
+            climateDiag('watch_rejected', { error: e && e.message || e });
             onSetpointAvailability(false);
             log.warn('setpoint signal: ' + (e && e.message || e));
         });

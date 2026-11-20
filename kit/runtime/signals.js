@@ -71,11 +71,32 @@ function loadConfig(iface) {
 async function watch(iface, instance, handlers, log, opts) {
     let stopped = false, pollTimer = null, availabilitySeen = false;
     const res = { iface, available: false, proxy: null, error: null, shutdown: () => Promise.resolve() };
-    if (!someip) { res.error = 'someip native module not available'; return res; }
+    const fields = Object.keys(handlers || {});
+    const diagnostic = (stage, detail) => {
+        if (!opts || typeof opts.onDiagnostic !== 'function') return;
+        try { opts.onDiagnostic({ iface, instance: String(instance), stage, detail: detail || {} }); }
+        catch (e) { if (log) log.warn('diagnostic callback ' + iface + ': ' + e); }
+    };
+    diagnostic('watch_started', { fields });
+    if (!someip) {
+        res.error = 'someip native module not available';
+        diagnostic('watch_error', { error: res.error });
+        return res;
+    }
     try {
+        diagnostic('config_load_started');
         const cfg = loadConfig(iface);
+        const configFields = {};
+        fields.forEach((f) => {
+            const field = cfg.fields && cfg.fields[f];
+            configFields[f] = { declared: !!field, getter: !!(field && field.getter) };
+            diagnostic('field_config', { field: f, declared: !!field, getter: !!(field && field.getter) });
+        });
+        diagnostic('config_loaded', { fields: configFields });
+        diagnostic('proxy_build_started');
         const p = await nativeTick(() => someip.buildProxy(cfg, String(instance)).then((px) => px.init().then(() => px)));
         res.proxy = p;
+        diagnostic('proxy_ready');
         res.shutdown = () => {
             if (stopped) return Promise.resolve();
             stopped = true;
@@ -86,40 +107,73 @@ async function watch(iface, instance, handlers, log, opts) {
         };
         const notifyAvailability = (available) => {
             if (stopped) return;
+            const changed = !availabilitySeen || res.available !== !!available;
             res.available = !!available;
             availabilitySeen = true;
+            if (changed) diagnostic('provider_availability', { available: res.available });
             if (opts && typeof opts.onAvailability === 'function') {
                 try { opts.onAvailability(res.available); } catch (e) {
                     if (log) log.warn('availability ' + iface + ': ' + e);
                 }
             }
         };
-        const fields = Object.keys(handlers || {});
         const fetchAll = () => fields.forEach((f) => {
             if (!stopped && res.available && cfg.fields && cfg.fields[f] && cfg.fields[f].getter) {
+                diagnostic('getter_started', { field: f });
                 p.getValue(f, 3000).then((v) => {
-                    if (!stopped && res.available && handlers[f]) handlers[f](v);
-                }).catch(() => {});
+                    if (!stopped && res.available && handlers[f]) {
+                        diagnostic('payload_received', { field: f, source: 'getter' });
+                        handlers[f](v, 'getter');
+                    }
+                }).catch((e) => {
+                    const error = String(e && e.message || e);
+                    diagnostic('getter_error', { field: f, error });
+                    if ((!opts || typeof opts.onDiagnostic !== 'function') && log) log.warn('get ' + iface + '.' + f + ': ' + error);
+                });
             }
         });
+        diagnostic('availability_subscribe_started');
         await nativeTick(() => {
-            try { return p.subscribeToAvailability((a) => { notifyAvailability(a); if (a) setImmediate(fetchAll); }); } catch (e) { return null; /* older binding */ }
+            try {
+                return Promise.resolve(p.subscribeToAvailability((a) => { notifyAvailability(a); if (a) setImmediate(fetchAll); }))
+                    .then((result) => {
+                        diagnostic('availability_subscribe_call_resolved');
+                        return result;
+                    }).catch((e) => {
+                        diagnostic('availability_subscribe_error', { error: String(e && e.message || e) });
+                        if (log) log.warn('availability subscribe ' + iface + ': ' + (e && e.message || e));
+                        return null; /* older binding */
+                    });
+            } catch (e) {
+                diagnostic('availability_subscribe_error', { error: String(e && e.message || e) });
+                if (log) log.warn('availability subscribe ' + iface + ': ' + (e && e.message || e));
+                return null; /* older binding */
+            }
         });
         for (const f of fields) {
+            diagnostic('field_subscribe_started', { field: f });
             try {
                 await nativeTick(() => p.subscribe({ name: f, onReceive: (v) => {
                     if (stopped || !handlers[f]) return;
-                    try { handlers[f](v); } catch (e) { if (log) log.warn(iface + '.' + f + ': ' + e); }
+                    diagnostic('payload_received', { field: f, source: 'event' });
+                    try { handlers[f](v, 'event'); } catch (e) {
+                        diagnostic('payload_handler_error', { field: f, error: String(e && e.message || e) });
+                        if (log) log.warn(iface + '.' + f + ': ' + e);
+                    }
                 } }));
+                diagnostic('field_subscribe_call_resolved', { field: f });
             } catch (e) {
+                diagnostic('field_subscribe_error', { field: f, error: String(e && e.message || e) });
                 if (log) log.warn('subscribe ' + iface + '.' + f + ': ' + e);
             }
         }
         if (p.isAvailable && p.isAvailable()) { notifyAvailability(true); fetchAll(); }
         else if (!availabilitySeen) notifyAvailability(false);
         if (opts && opts.pollMs) pollTimer = setInterval(() => { if (!stopped && res.available) setImmediate(fetchAll); }, opts.pollMs);
+        diagnostic('watch_ready', { available: res.available });
     } catch (e) {
         res.error = String(e);
+        diagnostic('watch_error', { error: String(e && e.message || e) });
         if (log) log.warn('signals ' + iface + ': ' + e);
     }
     return res;

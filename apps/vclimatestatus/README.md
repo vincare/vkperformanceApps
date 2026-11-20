@@ -7,7 +7,7 @@ declares no climate setters, commands, or write permissions.
 
 ## Implementation
 
-- App id/title: `vclimatestatus` / `VClimateStatus`; version `0.4.0`.
+- App id/title: `vclimatestatus` / `VClimateStatus`; version `0.4.1`.
 - English UI, dark BMW M-style colors, 1600 x 520 logical canvas.
 - A/C: `de.bmw.infotainment.climate.Climate2.statusACFront` (`rs`). The
   nested `statusAircon` enum maps `0` to off, `1` to on, and all other values
@@ -40,14 +40,24 @@ declares no climate setters, commands, or write permissions.
   module, and the preview-only `demo=on` setting. They are explicitly marked
   `DEMO VALUES · NOT VEHICLE DATA` and `LOCAL PREVIEW VALUE`. The installed
   manifest contains no demo setting; the live path never falls back to them.
-- The optional `Climate signal diagnostics (raw)` app setting is off by default.
-  When enabled, each received `statusTemperature` record writes its UTC receive
-  time, raw `operationZone`, mapped zone name, raw `targetTemperature`, and
-  `saveLUM` value through `ctx.log`. The MGU kit writes this to the app's own
-  `data/vclimatestatus.log` and the system log; its file log rotates at 256 KiB.
-  Unsupported payloads are logged in a short, capped form. The main screen is
-  unchanged, and diagnostics can be switched off after the test.
-  Example: `CLIMATE_DIAG statusTemperature rx=2026-11-20T12:00:00.000Z zoneRaw=1 zone=DRIVER targetRaw=24 saveLUMRaw=false`.
+- Temporary raw diagnostics are enabled on first install/update of 0.4.1 by the
+  `climateDiagnostics` setting (`default: true`, `reset: 1`). The main screen
+  remains unchanged. Startup logs whether diagnostics are active; setpoint
+  diagnostics record interface-config lookup, whether `statusTemperature` is
+  declared with a getter, proxy initialization, availability subscription,
+  field-subscription result, provider availability, getter errors, and a
+  30-second no-payload result. Each distinct raw payload records UTC receive
+  time, its source (`event` or `getter`), raw `operationZone`, mapped zone,
+  raw `targetTemperature`, and `saveLUM`. An unchanged value is repeated in
+  the log at most every 30 seconds. The MGU kit writes this to the app's own
+  `data/vclimatestatus.log` and the system log; the file log rotates at 256 KiB.
+  Example: `CLIMATE_DIAG statusTemperature rx=2026-11-21T12:00:00.000Z source=getter record=0 zoneRaw=1 zone=DRIVER targetRaw=25 saveLUMRaw=false`.
+- `app.json` settings are built into the app's HMI interface; they are not
+  toggled from MGU Store's own Settings page. In 0.4.0 the canvas had no
+  `BTN_SETTINGS` action, so the generated app Settings screen had no route from
+  the screen the user opened. Version 0.4.1 adds that standard action. Open
+  `Settings` in the app header to reach the app settings and its `QR log` row.
+  The existing QR log shows the recent app log as scannable pages, without SSH.
 - On the OAP app `shutdown` event, redraw/freshness timers are cleared and each
   resolved watcher is shut down. The kit watcher stops its poll interval,
   ignores subsequent callbacks, and shuts down its SOME/IP proxy.
@@ -156,19 +166,26 @@ vehicle as part of this change.
 2. After the updated branch is available in MGU Store, review the single-app
    install details. Do not proceed if it proposes a factory-file/service
    change or a system-process restart.
-3. Once installation is separately approved, enable `Climate signal diagnostics
-   (raw)` in the app settings. Use the factory climate controls to set Driver to
+3. Once installation is separately approved, diagnostics should already be on
+   from the 0.4.1 update. Confirm `Temporary climate diagnostics (raw)` is On
+   under the app's Settings. Use the factory climate controls to set Driver to
    24°C and Passenger to 27°C, changing one side at a time. The app itself has
    no climate controls.
-4. In `Settings > QR log` or the app's `data/vclimatestatus.log`, confirm log
-   entries with `zoneRaw=1 zone=DRIVER targetRaw=24` and
-   `zoneRaw=2 zone=PASSENGER targetRaw=27`, each with its UTC `rx` time. The
-   QR log may shorten long lines; the app data log retains the full entry.
-5. Confirm Celsius/no scale conversion and prompt updates against the factory
+4. In the app, open `Settings > QR log`, photograph every page, and share the
+   images. The project decoder can reconstruct them on a computer with
+   `python kit/tools/qrlog_decode.py <folder-of-photos>` (requires `zxing-cpp`
+   and `pillow`). Alternatively, retrieve the full
+   `data/vclimatestatus.log` from the app's own data directory. The QR view is
+   the simpler path and does not need SSH.
+5. Check whether the log says the field is declared, has a getter, the event
+   subscription call resolved, the provider became available, and whether a
+   `statusTemperature` payload arrived. If it did, compare raw zone IDs and
+   values against the factory display; do not assume units or scale.
+6. Confirm Celsius/no scale conversion and prompt updates against the factory
    display before adding `°C` to live values. Do not infer HI/LO or invalid
    sentinels from Float values. Switch diagnostics off after capturing the
-   short test.
-6. Remove the app only through MGU Store if needed. Do not run a system-level
+   short test from the app's Settings.
+7. Remove the app only through MGU Store if needed. Do not run a system-level
    install/restore procedure without separate approval.
 
 No vehicle settings, system files, or installation state were changed.
