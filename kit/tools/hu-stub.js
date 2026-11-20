@@ -81,7 +81,7 @@ function headUnit(stage, o) {
     hu.widgetFn = null;
     hu.settingsRows = [];
     const ctx = hu.ctx = {
-        ui, settings, spec, dataDir: out, log, display,
+        ui, settings, spec, dataDir: out, log, display, preview: !live,
         canvas: (w, h) => display.canvas(w, h),
         onTab(fn) { display.onTab = fn; },
         // as kit/mgu.js: the kit's own screen (tabs, page buttons, sheets, scrolling) where the renderer has the app
@@ -94,7 +94,11 @@ function headUnit(stage, o) {
         onScroll(fn) { display.onScroll = fn; },
         onLayout(fn) { display.onLayout(fn); },
         controller: { grab(on) { display.grab(on); }, onInput(fn) { display.onCcu = fn; } },
-        signals: live ? liveSignals(hu) : { watch: async (iface) => ({ iface, error: 'preview' }), proxy: async () => { throw new Error('preview'); } },
+        signals: live ? liveSignals(hu) : {
+            watch: async (iface) => ({ iface, error: 'preview' }),
+            proxy: async () => { throw new Error('preview'); },
+            hasNative: () => false,
+        },
         theme: themeFn,
         loop: live ? liveLoop(hu) : (n, fps, fn) => { loops[n] = fn; return { stop() {}, kick() {} }; },
         // home-screen widget (app.json "startWidget"): preview places one small and one big ("render" draws them);

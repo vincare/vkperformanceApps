@@ -1,0 +1,31 @@
+{
+  "id": "vclimatestatus",
+  "title": "VClimateStatus",
+  "description": "Read-only driver and passenger climate setpoint monitor",
+  "version": "0.2.0",
+  "vendor": "VKPERFORMANCE",
+  "loggingId": "OAA5",
+  "iconGlyph": "temp",
+  "mguHmi": ["ID7"],
+  "signals": {
+    "de.bmw.infotainment.climate.Climate2": {
+      "statusACFront": "rs"
+    }
+  },
+  "settings": [
+    {
+      "key": "repoCredit",
+      "label": "Repository credit",
+      "type": "bool",
+      "default": false,
+      "hidden": true
+    }
+  ],
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "VClimateStatus"
+    }
+  ]
+}
