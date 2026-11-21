@@ -159,14 +159,19 @@ function drawStatus(cv, G, t, valve) {
     cv.text(lines[1], x + 24, y + 244, 29, color,
         { font: 'bold', spacing: 1.8 });
     cv.fillRect(x + 24, y + 266, w - 48, 2, G.withAlpha(t.accent, 0.72));
+    const feedback = valve.commandStatus || 'READY FOR COMMAND';
+    const feedbackColor = /DISARMED|UNAVAILABLE|REJECTED|BLOCKED|WAITING/.test(feedback)
+        ? (t.crit || RED) : (valve.busy ? t.accent2 : t.dim);
+    cv.text(feedback, x + 24, y + 302, 12, feedbackColor,
+        { font: 'bold', spacing: 0.35, literal: true });
     if (label === 'DRIVE') {
-        cv.text('DRIVING MODE', x + 24, y + 316, 12, t.dim, { font: 'bold', spacing: 1.8 });
+        cv.text('DRIVING MODE', x + 24, y + 344, 12, t.dim, { font: 'bold', spacing: 1.8 });
         const driveMode = valve.drivingMode || (valve.driveModeLoading ? 'READING VEHICLE MODE' : 'UNAVAILABLE');
-        cv.text(driveMode.toUpperCase(), x + 24, y + 360,
+        cv.text(driveMode.toUpperCase(), x + 24, y + 380,
             driveMode.length > 15 ? 17 : 22, driveMode === 'UNAVAILABLE' ? t.dim : t.text,
             { font: 'bold', spacing: 1.8 });
     }
-    cv.text('PHYSICAL VALVE POSITION NOT SENSED', x + 24, y + 410, 10, t.dim,
+    cv.text('PHYSICAL VALVE POSITION NOT SENSED', x + 24, y + 438, 10, t.dim,
         { font: 'bold', spacing: 0.2 });
 }
 

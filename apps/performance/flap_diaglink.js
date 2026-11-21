@@ -128,7 +128,14 @@ class DiagLink {
     async sendTo(addr, sid, data, timeoutMs) {
         if (!this.available) return { ok: false, reason: 'no diagnostic link' };
         this.log.info('UDS -> ' + (addr === this.dme ? 'DME ' : 'DME ' + hex(addr) + ' ') + hex(sid) + ' ' + bytesToHex(data));
-        const reply = await this.diag.physical(addr, sid, data, timeoutMs || 3000, replyTo(sid, data));
+        // A guarded flap request should not sit through Diag's generic 1+2+3+4 s
+        // back-off when another app temporarily owns TASU. Retry the same request
+        // with short pauses; a busy verdict means TASU did not accept the request.
+        const commandOpts = sid === 0x2F
+            ? { maxRetries: 4, retryBaseMs: 100, callTimeoutMs: 3000 }
+            : undefined;
+        const reply = await this.diag.physical(addr, sid, data, timeoutMs || 3000,
+            replyTo(sid, data), commandOpts);
         if (!reply || !reply.length) return { ok: false, reason: 'timeout' };
         if (reply[0] === 0x7F) return { ok: false, nrc: reply[2], reason: NRC[reply[2]] || ('NRC ' + hex(reply[2])) };
         return { ok: true, sid: reply[0], data: reply.slice(1) };

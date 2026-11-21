@@ -89,7 +89,8 @@ mgu.run({
         let carVisual = null, carVisualKey = '';
         let mSoundEnabled = false;
         let mSoundBusy = false;
-        let mSoundFeedback = 'OFF · BMW CONTROL';
+        let mSoundFeedback = 'OFF · VALVE CONTROL ONLY · SPORT+ UNCHANGED';
+        let valveCommandActive = false, valvePriorityUntil = 0;
 
         function selectedCarVisual(theme) {
             const selected = CarImages.model(settings.get('carModel'));
@@ -378,8 +379,18 @@ mgu.run({
             const selectedMode = valveAuto.selected();
             const effectiveMode = valveAuto.effective();
             const modeLabel = selectedMode === 'DRIVE' ? 'DRIVE' : effectiveMode;
+            let commandStatus;
+            if (!valveReady) commandStatus = 'DIAGNOSTIC LINK STARTING';
+            else if (!armed) commandStatus = 'DISARMED · NO COMMAND SENT';
+            else if (control.comm !== 'OK') commandStatus = 'DIAGNOSTIC LINK UNAVAILABLE';
+            else if (!matched) commandStatus = 'WAITING FOR MATCHED DME';
+            else if (control.blocked) commandStatus = 'CONTROL BLOCKED';
+            else if (valveCommandActive || control.busy) commandStatus = 'COMMAND IN PROGRESS';
+            else if (control.accepted === false) commandStatus = 'LAST COMMAND NOT ACCEPTED';
+            else if (control.accepted === true) commandStatus = 'DME ACCEPTED · POSITION UNKNOWN';
+            else commandStatus = 'READY FOR COMMAND';
             return Object.assign({}, control, {
-                ready: valveReady, armed, matched, status, lines, visualState,
+                ready: valveReady, armed, matched, status, lines, visualState, commandStatus,
                 // The exhaust art follows the requested mode as a visual cue only;
                 // the DME's reported position is separately labelled unverified.
                 exhaustMode: valveAuto.effective(),
@@ -459,10 +470,34 @@ mgu.run({
 
         const valvePress = (mode) => () => {
             if (mode === 'DRIVE' && drivingMode === null) startDriveModePoll();
-            if (!valveCanActuate()) return null;
+            if (!valveCanActuate()) {
+                diagLog('valve_command_blocked', { mode, ready: valveReady,
+                    armed: valveController.armedSetting,
+                    matched: !!(valveController.ident && valveController.ident.elAgk && valveController.ident.elAgk.supported) });
+                return null;
+            }
+            const startedAt = Date.now();
+            valveCommandActive = true;
             const pending = valveAuto.press(mode);
+            diagLog('valve_command_started', { mode });
             queueRender();
-            return pending.then(queueRender).catch((e) => log.warn('exhaust valve: ' + shortError(e)));
+            const finish = () => {
+                const elapsedMs = Date.now() - startedAt;
+                valveCommandActive = false;
+                valvePriorityUntil = Date.now() + 1200;
+                const result = valveController.state;
+                const details = { mode, elapsedMs, accepted: result.accepted, confirmed: result.confirmed };
+                diagLog('valve_command_finished', details);
+                log.info('exhaust ' + mode + ' request finished in ' + elapsedMs + ' ms; accepted=' + result.accepted + ', physical position unverified');
+                queueRender();
+            };
+            return pending.then(finish, (e) => {
+                valveCommandActive = false;
+                valvePriorityUntil = Date.now() + 1200;
+                diagLog('valve_command_error', { mode, elapsedMs: Date.now() - startedAt, error: shortError(e) });
+                log.warn('exhaust valve: ' + shortError(e));
+                queueRender();
+            });
         };
         const valveActions = {
             open() { resetMSound('OPEN REQUEST · POSITION UNKNOWN'); return valvePress('OPEN')(); },
@@ -481,14 +516,14 @@ mgu.run({
                 if (!pending) { mSoundBusy = false; queueRender(); return null; }
                 return pending.then(() => {
                     if (valveController.state.requested === 'OEM' && valveController.state.accepted === false)
-                        mSoundFeedback = 'BMW CONTROL NOT ACCEPTED · POSITION UNKNOWN';
+                    mSoundFeedback = 'BMW CONTROL NOT ACCEPTED · SPORT+ UNCHANGED';
                     mSoundBusy = false;
                     queueRender();
                 });
             }
 
             mSoundEnabled = true;
-            mSoundFeedback = 'OPEN REQUEST IN PROGRESS · POSITION UNKNOWN';
+            mSoundFeedback = 'OPEN REQUEST · SPORT+ WILL NOT CHANGE';
             queueRender();
             const pending = valvePress('OPEN')();
             if (!pending) {
@@ -500,9 +535,9 @@ mgu.run({
             return pending.then(() => {
                 const state = valveController.state;
                 if (state.requested === 'OPEN' && state.accepted === true) {
-                    mSoundFeedback = 'OPEN REQUEST ACCEPTED · POSITION UNKNOWN';
+                    mSoundFeedback = 'VALVES OPEN REQUEST ACCEPTED · SPORT+ UNCHANGED';
                 } else {
-                    resetMSound('OPEN REQUEST NOT ACCEPTED · POSITION UNKNOWN');
+                    resetMSound('OPEN REQUEST NOT ACCEPTED · SPORT+ UNCHANGED');
                 }
                 mSoundBusy = false;
                 queueRender();
@@ -557,7 +592,8 @@ mgu.run({
         async function pollDme() {
             const now = Date.now();
             if (state.stopped || state.dmeBusy || settings.get('demo') === 'on' ||
-                settings.get('readDmeCandidates') !== true) return;
+                settings.get('readDmeCandidates') !== true || valveCommandActive ||
+                valveController.state.busy || now < valvePriorityUntil) return;
             if (!fresh(state.rpm, now) || state.rpm.value < 500 || now - lastDmeCycle < DME_POLL_MS) return;
             const boostSource = settings.get('boostSource') || 'auto';
             const needsDmeBoost = boostSource === 'dme' ||
@@ -813,9 +849,9 @@ mgu.run({
             });
             if (mSoundEnabled && !valveCanActuate()) resetMSound('CONTROL UNAVAILABLE · POSITION UNKNOWN');
             const mSoundReady = valveCanActuate() && !valveController.state.busy && !mSoundBusy;
-            const mSoundMessage = !valveController.armedSetting ? 'ARM CAR CONTROL IN SETTINGS'
+            const mSoundMessage = !valveController.armedSetting ? 'ARM CAR CONTROL · SPORT+ NOT CHANGED'
                 : !valveCanActuate() ? 'WAITING FOR MATCHED DME · POSITION UNKNOWN'
-                    : mSoundBusy || valveController.state.busy ? 'DME REQUEST IN PROGRESS · POSITION UNKNOWN' : mSoundFeedback;
+                    : mSoundBusy || valveController.state.busy ? 'DME REQUEST IN PROGRESS · SPORT+ NOT CHANGED' : mSoundFeedback;
             drawMSoundButton(cv, t, mSoundReady, mSoundEnabled, mSoundMessage, toggleMSoundMode);
         }
 

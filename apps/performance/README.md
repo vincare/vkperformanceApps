@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.10 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.11 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -89,18 +89,28 @@ only after the setting is armed and a read-only flap match succeeds. It requests
 reports testing on an MG1 and a G20 320i, but this has not been verified on this
 M340i. The DME reply and `0x62FD` commanded target are shown as command feedback;
 `0x64FD` output bytes are not decoded here, so the graphic does not claim that
-the physical flap moved. Closing the app stops hold repeats; the DME is expected
-to resume its own strategy after its short-term override expires.
+the physical flap moved. The command response no longer waits on two extra
+sequential target reads that did not verify physical movement. During a command,
+read-only boost polling pauses, then resumes after a short priority window. Flap
+commands also use short TASU-busy retry intervals instead of the generic multi-
+second back-off. The screen now reports whether control is disarmed, still
+starting, missing a matched DME, busy, or accepted. Closing the app stops hold
+repeats; the DME is expected to resume its own strategy after its short-term
+override expires.
 
 On Engine Data, **M SOUND MODE** requests OPEN from the same guarded controller;
 pressing it again requests OEM control. The button is red while the app's open
 request is active and grey when it is off or unavailable. It requires the same
 explicit Car control arming and matched-DME checks as the Engine Config buttons.
-The DME acceptance and commanded target do not prove the flap is physically at
-100%, because the `0x64FD` output-position payload has not been decoded or
-validated on this car. Opening the flap also does not select Sport Plus or
-command pops and bangs; those sounds remain under BMW's driving-mode and DME
-strategy.
+It only requests the exhaust flap: it does not select Sport Plus or command pops
+and bangs. The local SOME/IP catalog exposes a write setter for BMW's FES drive-
+mode control, but the operation/update-field semantics and safe preconditions
+have not been validated, so this version deliberately does not send a guessed
+drive-mode write. The UI states that Sport+ is unchanged. Selecting Sport Plus
+requires a verified setter contract or a validated vehicle-side capture before
+it can be implemented safely. The DME acceptance and commanded target do not
+prove the flap is physically at 100%, because the `0x64FD` output-position
+payload has not been decoded or validated on this car.
 
 ## Virtual Dyno card
 

@@ -66,6 +66,10 @@ const Mg1ElAgk = {
     id: 'mg1-el-agk',
     name: 'Electric flap (MG1 / V8)',
     simulated: false,
+    // 0x62FD / 0x64FD are read during the capability scan. Re-reading them after
+    // every command adds two sequential UDS timeouts and 0x64FD is not decoded into
+    // a verified physical position, so the command reply remains the fast feedback.
+    readAfterCommand: false,
     armed: false,                            // DISARMED by default; the controller sets this true at
                                              // runtime when the "Car control" setting is Armed. Even
                                              // then it needs a matching DME; OEM always hands back.

@@ -160,8 +160,13 @@ class Controller {
             this.state.busy = false;
         }
         if (this._oemQueued) { this._oemQueued = false; return this.setMode('OEM'); }
-        // a real adapter that can read back: confirm a moment later (no assumption)
-        if (this.real && this.adapter.read) { try { await this._readBack(); } catch (e) { /* ignore */ } }
+        // Some adapters can read a commanded target after a request. Do not hold the
+        // user interaction open for that optional read unless the adapter explicitly
+        // needs it. MG1's target read is two sequential UDS reads and does not prove
+        // the physical flap moved.
+        if (this.real && this.adapter.read && this.adapter.readAfterCommand !== false) {
+            try { await this._readBack(); } catch (e) { /* ignore */ }
+        }
         return this.state;
     }
 
