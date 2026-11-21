@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.6 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.7 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -33,16 +33,16 @@ that do not fall on a regular tick interval.
 ## ENGINE CONFIG page
 
 The second page opens on a section menu with **EXHAUST SYSTEM**. Selecting it
-opens the BMW exhaust controls; **ALL SYSTEMS** returns to the section menu.
-The left OEM-style sidebar holds the exhaust title and controls. The right card
-shows the selected valve request and the current driving mode. Physical valve
-position remains unverified. **Car Model** in Settings selects one of
-the six original PNGs supplied in `assets/car-models/`; the default is
+opens the BMW exhaust controls. The taller OEM-style sidebar has a one-line
+**BMW EXHAUST SYSTEM** title and small-corner control buttons. The right card
+shows the selected valve request; the driving mode appears only when **BY DRIVE
+MODE** is selected. Physical valve position remains unverified.
+**Car Model** in Settings selects one of the six original PNGs supplied in
+`assets/car-models/`; the default is
 `M340i_Blue.png`. The selection is saved by the app's normal settings storage
 and is used again when PERFORMANCE starts. The selected car uses a contain fit
-that preserves its full aspect ratio. **BMW EXHAUST SYSTEM** appears in the left
-sidebar. Transparent image areas use the screen background, without a grey
-panel behind the car.
+that preserves its full aspect ratio. Transparent image areas use the screen
+background, without a grey panel behind the car.
 
 The PNG source files are kept byte-for-byte as supplied. The two Blue files
 provide transparent body cutouts. The Red and Black files have baked studio

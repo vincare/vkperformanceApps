@@ -404,18 +404,9 @@ mgu.run({
                 if (!smokeTick) smokeTick = setInterval(queueRender, 180);
                 queueRender();
             },
-            back() {
-                engineConfigView = 'sections';
-                if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
-                queueRender();
-            },
         };
         ui.onClick('BTN_SECTION', sectionActions.open);
-        ui.onClick('BTN_SECTION_BACK', sectionActions.back);
-        if (ctx.hideButton) {
-            ctx.hideButton('BTN_SECTION');
-            ctx.hideButton('BTN_SECTION_BACK');
-        }
+        if (ctx.hideButton) ctx.hideButton('BTN_SECTION');
 
         const CDS = 'de.bmw.infotainment.vehicle.CDS';
         const CDS2 = 'de.bmw.infotainment.vehicle.CDS2';

@@ -50,24 +50,24 @@ function drawCar(cv, G, t, valve, car, bounds, now, effects) {
 }
 
 function drawSectionMenu(cv, G, t, car, onOpen) {
-    const x = 54, y = 92, w = 1492, h = 390;
-    cv.roundRect(x, y, 610, h, 12, G.withAlpha('#ffffff', 0.025));
-    cv.strokeRoundRect(x, y, w, h, 12, 1.5, G.withAlpha('#ffffff', 0.16));
-    cv.fillRect(x + 1, y + 26, 4, 74, t.accent);
-    cv.text('ENGINE CONFIG', x + 38, y + 56, 15, t.dim,
+    const x = 54, y = 80, w = 1492, h = 422;
+    cv.roundRect(x, y, 610, h, 10, G.withAlpha('#ffffff', 0.025));
+    cv.strokeRoundRect(x, y, w, h, 10, 1.5, G.withAlpha('#ffffff', 0.16));
+    cv.fillRect(x + 1, y + 30, 4, 78, t.accent);
+    cv.text('ENGINE CONFIG', x + 38, y + 62, 15, t.dim,
         { font: 'bold', spacing: 2.4 });
-    cv.text('VEHICLE SYSTEMS', x + 38, y + 91, 13, t.accent,
+    cv.text('VEHICLE SYSTEMS', x + 38, y + 99, 13, t.accent,
         { font: 'bold', spacing: 2 });
-    cv.text('EXHAUST SYSTEM', x + 38, y + 166, 43, t.text,
+    cv.text('EXHAUST SYSTEM', x + 38, y + 176, 43, t.text,
         { font: 'bold', spacing: 2.5 });
-    cv.text('BMW EXHAUST FLAP CONTROL', x + 40, y + 198, 16, t.dim,
+    cv.text('BMW EXHAUST FLAP CONTROL', x + 40, y + 210, 16, t.dim,
         { font: 'bold', spacing: 1.7 });
-    cv.text('Select a system to view its controls and status.', x + 40, y + 239, 16, t.dim,
+    cv.text('Select a system to view its controls and status.', x + 40, y + 253, 16, t.dim,
         { font: 'label' });
-    cv.roundRect(x + 38, y + 285, 250, 54, 27, G.withAlpha(t.accent, 0.92));
-    cv.text('OPEN SECTION', x + 163, y + 319, 17, '#ffffff',
+    cv.roundRect(x + 38, y + 302, 250, 54, 6, G.withAlpha(t.accent, 0.92));
+    cv.text('OPEN SECTION', x + 163, y + 336, 17, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.8 });
-    cv.fillRect(x + 38, y + h - 20, 264, 2, G.withAlpha(t.accent, 0.9));
+    cv.fillRect(x + 38, y + h - 22, 264, 2, G.withAlpha(t.accent, 0.9));
 
     // The image is composited against the page background, so its transparent
     // pixels do not leave a grey rectangle behind the car.
@@ -76,14 +76,14 @@ function drawSectionMenu(cv, G, t, car, onOpen) {
 }
 
 function drawSidebar(cv, G, t, valve, car, actions, now) {
-    const x = 24, y = 72, w = 278, h = 414;
-    cv.roundRect(x, y, w, h, 8, G.withAlpha('#090a0c', 0.88));
-    cv.strokeRoundRect(x, y, w, h, 8, 1.5, G.withAlpha('#ffffff', 0.14));
-    cv.fillRect(x + 1, y + 24, 4, 62, t.accent);
-    cv.text('BMW', x + 24, y + 51, 12, t.dim, { font: 'bold', spacing: 2.5 });
-    cv.text('EXHAUST', x + 24, y + 81, 23, t.text, { font: 'bold', spacing: 1.8 });
-    cv.text('SYSTEM', x + 24, y + 108, 23, t.text, { font: 'bold', spacing: 1.8 });
-    cv.text('FLAP CONTROL', x + 24, y + 132, 11, t.accent, { font: 'bold', spacing: 1.6 });
+    const x = 24, y = 70, w = 310, h = 432;
+    cv.roundRect(x, y, w, h, 7, G.withAlpha('#090a0c', 0.88));
+    cv.strokeRoundRect(x, y, w, h, 7, 1.5, G.withAlpha('#ffffff', 0.14));
+    cv.fillRect(x + 1, y + 28, 4, 54, t.accent);
+    // Jersey 93 is not in the project and its public license prohibits
+    // redistribution; use the bundled heavy display face and tight tracking.
+    cv.text('BMW EXHAUST SYSTEM', x + 18, y + 62, 24, '#ffffff',
+        { font: 'bold', spacing: 0.8, literal: true });
 
     const modes = [
         ['OPEN', 'OPEN VALVES', actions.open],
@@ -92,26 +92,18 @@ function drawSidebar(cv, G, t, valve, car, actions, now) {
         ['DRIVE', 'BY DRIVE MODE', actions.drive],
     ];
     const controlEnabled = valve.ready && valve.armed && valve.matched && !valve.blocked;
-    let buttonY = y + 145;
+    let buttonY = y + 112;
     modes.forEach(([key, label, run]) => {
         const selected = !!valve.selected && key === valve.selected;
         const disabled = !controlEnabled || valve.busy && key !== 'OEM';
         const opts = { key: 'performance_flap_' + key, busy: disabled };
         if (selected) Object.assign(opts, { color: t.crit || RED, primary: true });
-        drawActionButton(cv, G, t, x + 16, buttonY, w - 32, 44, label,
+        drawActionButton(cv, G, t, x + 18, buttonY, w - 36, 54, label,
             disabled ? null : run, opts);
-        buttonY += 49;
+        buttonY += 66;
     });
 
-    cv.fillRect(x + 18, y + h - 66, w - 36, 1, G.withAlpha('#ffffff', 0.14));
-    cv.roundRect(x + 16, y + h - 54, w - 32, 40, 20, G.withAlpha('#ffffff', 0.04));
-    cv.strokeRoundRect(x + 16, y + h - 54, w - 32, 40, 20, 1.2, G.withAlpha('#ffffff', 0.2));
-    cv.text('ALL SYSTEMS', x + w / 2, y + h - 28, 13, t.dim,
-        { align: 'center', font: 'bold', spacing: 1.4 });
-    if (cv.own && actions.back) cv.target(x + 16, y + h - 54, w - 32, 40,
-        actions.back, 'performance_config_back');
-
-    drawCar(cv, G, t, valve, car, { x: 310, y: 90, w: 856, h: 376 }, now, true);
+    drawCar(cv, G, t, valve, car, { x: 350, y: 82, w: 816, h: 408 }, now, true);
 }
 
 function drawValveFlaps(cv, G, t, car, imageRect, valveMode, now) {
@@ -147,38 +139,42 @@ function contain(rect, width, height) {
 }
 
 function drawStatus(cv, G, t, valve) {
-    const x = 1184, y = 82, w = 392, h = 384;
+    const x = 1184, y = 70, w = 392, h = 432;
     G.panel(cv, t, x, y, w, h, 'VALVE MODE');
     const label = valve.modeLabel || 'OEM';
     const lines = label === 'OPEN' ? ['OPENED', 'VALVES']
         : label === 'CLOSED' ? ['CLOSED', 'VALVES']
             : label === 'DRIVE' ? ['BY DRIVE', 'MODE'] : ['OEM', 'VALVES'];
     const color = label === 'OPEN' ? t.accent2 : label === 'CLOSED' ? t.crit : t.text;
-    cv.text('CURRENT REQUEST', x + 28, y + 108, 12, t.dim, { font: 'bold', spacing: 1.8 });
-    cv.text(lines[0], x + 28, y + 173, label === 'DRIVE' ? 31 : 38, color,
+    cv.text('CURRENT REQUEST', x + 28, y + 120, 12, t.dim, { font: 'bold', spacing: 1.8 });
+    cv.text(lines[0], x + 28, y + 194, label === 'DRIVE' ? 31 : 38, color,
         { font: 'bold', spacing: 2.4 });
-    cv.text(lines[1], x + 28, y + 214, 30, color,
+    cv.text(lines[1], x + 28, y + 238, 30, color,
         { font: 'bold', spacing: 2.3 });
-    cv.fillRect(x + 28, y + 236, w - 56, 2, G.withAlpha(t.accent, 0.72));
-    cv.text('DRIVING MODE', x + 28, y + 276, 12, t.dim, { font: 'bold', spacing: 1.8 });
-    const driveMode = valve.drivingMode || 'UNAVAILABLE';
-    cv.text(driveMode.toUpperCase(), x + 28, y + 319,
-        driveMode.length > 15 ? 20 : 25, driveMode === 'UNAVAILABLE' ? t.dim : t.text,
-        { font: 'bold', spacing: 1.8 });
-    cv.text('PHYSICAL VALVE POSITION NOT SENSED', x + 28, y + 354, 12, t.dim,
+    cv.fillRect(x + 28, y + 260, w - 56, 2, G.withAlpha(t.accent, 0.72));
+    if (label === 'DRIVE') {
+        cv.text('DRIVING MODE', x + 28, y + 310, 12, t.dim, { font: 'bold', spacing: 1.8 });
+        const driveMode = valve.drivingMode || 'UNAVAILABLE';
+        cv.text(driveMode.toUpperCase(), x + 28, y + 356,
+            driveMode.length > 15 ? 20 : 25, driveMode === 'UNAVAILABLE' ? t.dim : t.text,
+            { font: 'bold', spacing: 1.8 });
+    }
+    cv.text('PHYSICAL VALVE POSITION NOT SENSED', x + 28, y + 402, 12, t.dim,
         { font: 'bold', spacing: 0.4 });
 }
 
 function drawActionButton(cv, G, t, x, y, w, h, label, run, opts) {
-    if (cv.own) return G.button(cv, t, x, y, w, h, label, run, opts);
-    // Offline/software preview: show the page's controls even though the preview
-    // head unit has no input owner and cannot register touch targets.
+    // Draw square controls identically in the offline preview and on the head unit.
     const color = opts && opts.color || t.accent;
     const primary = !!(opts && opts.primary);
-    cv.roundRect(x, y, w, h, h / 2, primary ? G.withAlpha(color, 0.28) : G.withAlpha('#ffffff', 0.07));
-    cv.strokeRoundRect(x, y, w, h, h / 2, 1.5, G.withAlpha(color, primary ? 0.75 : 0.3));
+    const busy = !!(opts && opts.busy), radius = 5;
+    cv.roundRect(x, y, w, h, radius, primary
+        ? G.withAlpha(color, busy ? 0.32 : 0.88) : G.withAlpha('#ffffff', busy ? 0.035 : 0.07));
+    cv.strokeRoundRect(x, y, w, h, radius, 1.5,
+        G.withAlpha(color, busy ? 0.24 : primary ? 0.78 : 0.42));
     cv.text(String(label).toUpperCase(), x + w / 2, y + h / 2 + h * 0.15, h * 0.4,
-        t.text, { align: 'center', font: 'bold', spacing: 1.5 });
+        busy && !primary ? t.dim : '#ffffff', { align: 'center', font: 'bold', spacing: 1.5 });
+    if (cv.own && run) cv.target(x, y, w, h, run, opts && opts.key || label);
 }
 
 function draw(cv, G, t, v, act, car, now, view, sectionActions) {
@@ -188,9 +184,7 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     ]);
     if (view !== 'exhaust') drawSectionMenu(cv, G, t, car, sectionActions && sectionActions.open);
     else {
-        drawSidebar(cv, G, t, v, car, Object.assign({}, act, {
-            back: sectionActions && sectionActions.back,
-        }), now);
+        drawSidebar(cv, G, t, v, car, act, now);
         drawStatus(cv, G, t, v);
     }
     return cv;
