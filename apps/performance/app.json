@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, road-estimate dyno, and guarded BMW exhaust-flap controls",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": ["ID7"],

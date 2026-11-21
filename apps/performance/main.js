@@ -364,6 +364,9 @@ mgu.run({
             const visualState = control.simulated ? 'UNKNOWN' : (control.confirmed || 'UNKNOWN');
             return Object.assign({}, control, {
                 ready: valveReady, armed, matched, status, lines, visualState,
+                // The exhaust art follows the requested mode as a visual cue only;
+                // the DME's reported position is separately labelled unverified.
+                exhaustMode: valveAuto.effective(),
                 page, selected: control.simulated || !matched || control.blocked ? null : valveAuto.selected(),
                 requested: valveAuto.desired,
                 note: note && note.text,

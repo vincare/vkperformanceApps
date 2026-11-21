@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.3 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.5 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -36,8 +36,9 @@ The second page is **ENGINE CONFIG**. **Car Model** in Settings selects one of
 the six original PNGs supplied in `assets/car-models/`; the default is
 `M340i_Blue.png`. The selection is saved by the app's normal settings storage
 and is used again when PERFORMANCE starts. The page title follows the selected
-body: **G20 REAR · EXHAUST SYSTEM** or **G22 REAR · EXHAUST SYSTEM**. The image
-is shown with a contain fit, preserving its complete original aspect ratio.
+body art is shown under **BMW EXHAUST SYSTEM** with a contain fit, preserving
+its complete original aspect ratio. The car panel is enlarged and the four
+exhaust controls sit vertically along the far left.
 
 The PNG source files are kept byte-for-byte as supplied. The two Blue files
 provide transparent body cutouts. The Red and Black files have baked studio
@@ -49,10 +50,12 @@ fit the renderer's 1024-pixel texture limit; it does not rewrite the source
 artwork. The native MGU renderer receives the image through its documented
 pixmap protocol, which supports images alongside touch and controller input.
 
-Subtle animated grey wisps are anchored to separately measured coordinates for
-each of the six files. They are only a visual effect and are not a reading of
-exhaust, smoke, or valve position. The positions are normalized against each
-source image, so they follow the four tips through contain scaling.
+Animated grey wisps are anchored to separately measured coordinates for each
+of the six files. Closed, OEM, and Comfort-by-drive-mode show wisps from the
+left pair; an Open request shows wisps from all four tips. Small animated
+butterfly markers inside the outlets follow the requested valve mode. Smoke
+and valve graphics are visual effects, not measurements or confirmation of
+physical valve position.
 
 The page offers **OPEN VALVES**, **CLOSE VALVES**, **OEM CONTROL**, and **BY DRIVE MODE**.
 Drive Mode follows the existing Engine Config mapping: Sport opens, Comfort and
