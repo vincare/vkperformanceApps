@@ -1,6 +1,6 @@
 'use strict';
 
-// Read-only road-dyno pull detector and curve analysis, adapted from apps/dyno.
+// Read-only road-dyno pull detector and curve analysis, adapted from upstream Virtual Dyno logic.
 const BIN_RPM = 100;
 const MIN_RPM_SPAN = 1500;
 const AIR_DENSITY = 1.2;

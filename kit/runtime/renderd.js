@@ -14,8 +14,8 @@
  * opts.native: ask for mgu-render's own dialect (mgu-render/1, the Store's renderer). There touch
  * claims and the controller grab work on one connection, and X_STATE says when the renderer has
  * the app on screen. A renderer that does not speak it answers READY alone and the connection
- * stays in the upstream dialect. Pixel images (op 18) are upstream only: an app that draws them
- * (Doom) connects without opts.native.
+ * stays in the upstream dialect. Pixel images are uploaded as native pixmaps where available;
+ * IMAGE draw commands are translated to the native field order for that connection.
  */
 const net = require('net');
 const fs = require('fs');
@@ -44,6 +44,77 @@ function msg(type, payload) {
     return b;
 }
 function words(u32) { return Buffer.from(u32.buffer, u32.byteOffset, u32.byteLength); }
+
+/* record.js writes IMAGE in the upstream layout (id, ver, x, y, w, h). The
+ * Store renderer's native protocol uses (x, y, w, h, radius, id). Keep the
+ * shared recorder format unchanged for the software/upstream paths and adapt
+ * only the native frame sent to mgu-render. */
+function nativeFrameWords(source) {
+    let out = null;
+    let i = 0;
+    const n = source.length;
+    const need = (count) => i + count <= n;
+    while (i < n) {
+        const op = source[i++];
+        let count;
+        switch (op) {
+        case 1: count = 1; break;                         // CLEAR
+        case 2: count = 5; break;                         // RECT
+        case 3: case 6: {                                  // GRAD / CARD
+            const fixed = op === 3 ? 5 : 6;
+            if (!need(fixed)) return source;
+            const stops = source[i + fixed - 1];
+            if (stops > 64) return source;
+            count = fixed + stops * 2;
+            break;
+        }
+        case 4: count = 6; break;                         // RRECT
+        case 5: count = 7; break;                         // RSTROKE
+        case 7: count = 8; break;                         // RAMPRECT
+        case 8: count = 11; break;                        // ARC
+        case 9: count = 6; break;                         // LINE
+        case 10: {                                         // TRIS
+            if (!need(1)) return source;
+            const triangles = source[i];
+            if (triangles > 100000) return source;
+            count = 1 + triangles * 9;
+            break;
+        }
+        case 11: {                                         // GLYPHS
+            if (!need(3)) return source;
+            const glyphs = source[i + 2];
+            if (glyphs > 4096) return source;
+            count = 3 + glyphs * 8;
+            break;
+        }
+        case 12: count = 3; break;                         // LAYER
+        case 13: count = 4; break;                         // CLIP
+        case 14: count = 0; break;                         // NOCLIP
+        case 15: count = 9; break;                         // QUAD
+        case 16: count = 1; break;                         // ALPHA
+        case 17: count = 3; break;                         // XF
+        case 18: {                                         // IMAGE
+            count = 6;
+            if (!need(count)) return source;
+            if (!out) out = new Uint32Array(source);
+            const id = source[i];
+            // Preserve x/y/w/h float bits; the car artwork uses no corner radius.
+            out[i] = source[i + 2];
+            out[i + 1] = source[i + 3];
+            out[i + 2] = source[i + 4];
+            out[i + 3] = source[i + 5];
+            out[i + 4] = 0;
+            out[i + 5] = id;
+            break;
+        }
+        default:
+            return source;
+        }
+        if (!need(count)) return source;
+        i += count;
+    }
+    return out || source;
+}
 
 class RenderClient extends EventEmitter {
     constructor(appId, log, opts) {
@@ -361,7 +432,8 @@ class RenderClient extends EventEmitter {
         this._ensureRes(L);
         const head = Buffer.alloc(12);
         head.writeUInt32LE(id, 0); head.writeFloatLE(L.w, 4); head.writeFloatLE(L.h, 8);
-        this._write(msg(M.LAYER, Buffer.concat([head, words(L.words)])));
+        const layerWords = this.native ? nativeFrameWords(L.words) : L.words;
+        this._write(msg(M.LAYER, Buffer.concat([head, words(layerWords)])));
         this.sent.layer.add(id);
     }
     dropLayer(id) {
@@ -373,8 +445,9 @@ class RenderClient extends EventEmitter {
         if (!this.ready || !this.placement) return false;
         this._ensureRes(r);
         this.waiting = true;
-        return this._write(msg(M.FRAME, words(r.words())));
+        const frameWords = r.words();
+        return this._write(msg(M.FRAME, words(this.native ? nativeFrameWords(frameWords) : frameWords)));
     }
 }
 
-module.exports = { RenderClient, SOCKET, SOCKETS };
+module.exports = { RenderClient, SOCKET, SOCKETS, nativeFrameWords };

@@ -59,8 +59,8 @@ Drive Mode follows the existing Engine Config mapping: Sport opens, Comfort and
 Adaptive return control to BMW, and Eco Pro closes, with the same plug-in hybrid
 mode handling as that app.
 
-The valve controls reuse the existing `apps/live_adjustments` controller and its
-per-DME adapter. **Exhaust valve control** defaults to **Disarmed**. With it off,
+The valve controls adapt the upstream Engine Config controller and per-DME adapter.
+**Exhaust valve control** defaults to **Disarmed**. With it off,
 the buttons send no vehicle command and the page says so. When explicitly armed
 in the app settings, the app first makes read-only DME identity and flap-capability
 checks; it will not send the control request if a matching flap is not detected.
@@ -80,7 +80,7 @@ to resume its own strategy after its short-term override expires.
 ## Virtual Dyno card
 
 The card records the peak HP and Nm from a full-throttle road pull, using the
-same calculation as the local `apps/dyno` app: acceleration, speed, selected
+same road-load method as the upstream Virtual Dyno: acceleration, speed, selected
 vehicle weight, body drag, rolling resistance, and drivetrain-loss settings.
 Power is calculated from road load; dyno torque is derived from that power and
 RPM. These are road estimates, separate from the live BMW Sport Display and
@@ -101,12 +101,11 @@ this version will appear here.
 
 ## License and safety
 
-M Vitals source is present locally at
-`CUSTOM APPS/idrive7-apps-main/apps/car_vitals` and publicly in the upstream
-repository. PERFORMANCE adapts its signal scaling, power selection, unit
-conversion, and boost-candidate order; it does not copy the full app. The
-Virtual Dyno calculation is adapted from this repository's `apps/dyno`. The
-repository's MIT license and attribution are retained in `LICENSE`.
+PERFORMANCE adapts signal scaling, power selection, unit conversion, and
+boost-candidate order from the upstream M Vitals reference. Its road-dyno and
+exhaust-valve logic also adapt relevant upstream references. The upstream app
+packages are not included in this repository branch. Shared MIT licensing and
+attribution are retained in `LICENSE` and the relevant source comments.
 
 The engine monitor and boost candidates use SOME/IP subscriptions and read-only
 UDS/OBD requests. Exhaust flap control is the only write path, isolated behind
