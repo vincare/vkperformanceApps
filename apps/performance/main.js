@@ -17,7 +17,7 @@ const { DidReader } = require('./kit/dids');
 const FlapUi = require('./flap_ui');
 const CarImages = require('./car_images');
 const { Controller: FlapController } = require('./flap_controller');
-const { AutoFlap, modeName } = require('./flap_auto');
+const { AutoFlap, flapFor, modeName } = require('./flap_auto');
 const fs = require('fs');
 const path = require('path');
 
@@ -83,6 +83,7 @@ mgu.run({
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
         let page = 0, engineConfigView = 'sections', valveReady = false, drivingMode = null;
+        let driveModeLoading = false, driveModePollStarting = false, driveModePollSub = null, driveModePollTimer = null;
         let valveTick = null, valveRescanTimer = null, smokeTick = null;
         let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0;
         let carVisual = null, carVisualKey = '';
@@ -239,22 +240,23 @@ mgu.run({
             });
         }
 
-        function startWatch(iface, handlers) {
+        function startWatch(iface, handlers, watchOptions) {
             let pending;
             try {
                 pending = ctx.signals.watch(iface, '1', handlers, log, {
                     onAvailability: (available) => onProvider(iface, available),
                     onDiagnostic: onRuntimeDiagnostic,
+                    ...(watchOptions || {}),
                 });
             } catch (e) {
                 diagLog('watch_call_error', { interface: iface, error: shortError(e) });
                 log.warn('Performance signal ' + iface + ': ' + shortError(e));
-                return;
+                return Promise.resolve(null);
             }
-            Promise.resolve(pending).then((sub) => {
+            return Promise.resolve(pending).then((sub) => {
                 if (!sub) {
                     diagLog('watch_completed', { interface: iface, result: 'no result' });
-                    return;
+                    return null;
                 }
                 subscriptions.push(sub);
                 diagLog('watch_completed', { interface: iface, error: sub.error || null, available: sub.available === true });
@@ -263,9 +265,11 @@ mgu.run({
                     onProvider(iface, false);
                 } else if (typeof sub.available === 'boolean') onProvider(iface, sub.available);
                 if (state.stopped) shutdownSubscription(sub);
+                return sub;
             }).catch((e) => {
                 diagLog('watch_rejected', { interface: iface, error: shortError(e) });
                 log.warn('Performance signal ' + iface + ': ' + shortError(e));
+                return null;
             });
         }
 
@@ -373,22 +377,80 @@ mgu.run({
                 exhaustMode: valveAuto.effective(),
                 modeLabel,
                 drivingMode: modeName(drivingMode),
+                driveModeLoading,
                 page, selected: valveAuto.selected(),
                 requested: valveAuto.desired,
                 note: note && note.text,
             });
         }
 
+        function stopDriveModePoll() {
+            if (driveModePollTimer) { clearTimeout(driveModePollTimer); driveModePollTimer = null; }
+            const sub = driveModePollSub;
+            driveModePollSub = null;
+            if (sub) shutdownSubscription(sub);
+        }
+
+        function startDriveModePoll() {
+            if (state.stopped || drivingMode !== null || driveModePollStarting || driveModePollSub) return;
+            driveModeLoading = true;
+            driveModePollStarting = true;
+            queueRender();
+            // The regular FES subscription handles changes. This one-field
+            // read-only poll supplements it during startup if the first value
+            // is BMW's INITIALISIERUNG/invalid state, then closes on a valid mode.
+            startWatch(FES, { statusFESVehicleDynamicSwitchHMI: applyDrivingMode }, {
+                pollMs: 1500,
+                onDiagnostic: () => {},
+            }).then((sub) => {
+                driveModePollStarting = false;
+                if (!sub) {
+                    driveModeLoading = false;
+                    queueRender();
+                    return;
+                }
+                if (drivingMode !== null || state.stopped) {
+                    shutdownSubscription(sub);
+                    return;
+                }
+                driveModePollSub = sub;
+                if (sub.error) {
+                    stopDriveModePoll();
+                    driveModeLoading = false;
+                    queueRender();
+                    return;
+                }
+                // Bound the startup polling window; the main event subscription
+                // remains active and will still accept a later valid update.
+                driveModePollTimer = setTimeout(() => {
+                    stopDriveModePoll();
+                    driveModeLoading = false;
+                    queueRender();
+                }, 20000);
+            });
+        }
+
         function applyDrivingMode(payload) {
             const raw = payload && payload.actualValueModeDrivingExperience;
             if (raw === undefined || raw === null) return;
+            if (!flapFor(raw)) {
+                if (drivingMode === null) {
+                    driveModeLoading = true;
+                    queueRender();
+                }
+                return;
+            }
             drivingMode = raw;
+            driveModeLoading = false;
+            stopDriveModePoll();
             if (!valveCanActuate()) { valveAuto.drive = raw; return; }
             const pending = valveAuto.driveMode(raw);
             if (pending) pending.then(queueRender).catch((e) => log.warn('exhaust drive mode: ' + shortError(e)));
+            else queueRender();
         }
 
         const valvePress = (mode) => () => {
+            if (mode === 'DRIVE' && drivingMode === null) startDriveModePoll();
             if (!valveCanActuate()) return null;
             const pending = valveAuto.press(mode);
             queueRender();
@@ -423,6 +485,7 @@ mgu.run({
             statusSwitchDriveDynamicSport2: setFesBoost,
             statusFESVehicleDynamicSwitchHMI: applyDrivingMode,
         });
+        startDriveModePoll();
 
         // Boost candidates use read-only ISO-TP/UDS 0x22 and OBD 0x01 requests.
         const readOnlyLink = new ReadOnlyDiag(ctx.signals, log, { gapMs: 80, silentAfter: 3 });
@@ -722,6 +785,7 @@ mgu.run({
             if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             if (valveTick) { clearInterval(valveTick); valveTick = null; }
             if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
+            stopDriveModePoll();
             valveAuto._stop();
             if (readOnlyLink) readOnlyLink.cancel();
             dynoRecorder.reset();

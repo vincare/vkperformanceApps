@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.8 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.9 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -34,11 +34,14 @@ that do not fall on a regular tick interval.
 
 The second page opens on a compact section picker with a square exhaust icon
 and a single **EXHAUST SYSTEM** button. Selecting it opens the BMW exhaust
-controls; the picker has no car image. The controls page has matching tall
-left and right sidebars headed **SELECT MODE** and **EXHAUST MODE**, with
+controls; the picker has no car image and sits at the left for future sections.
+The controls page has matching tall sidebars that start level with Engine Data
+and extend to the content bottom, headed **SELECT MODE** and **EXHAUST MODE**, with
 **BMW EXHAUST SYSTEM** above the centered car. The right card shows **CURRENT
 MODE**; the driving mode appears only when **BY DRIVE MODE** is selected.
-Physical valve position remains unverified.
+The app ignores BMW's initialization mode value and makes a short read-only
+refresh while waiting for the first valid drive mode. Physical valve position
+remains unverified.
 The supplied Jersey 75 font is not embedded: its included license disallows
 redistribution and modification. The page uses the app's bundled bold display
 font until a redistribution license is available.

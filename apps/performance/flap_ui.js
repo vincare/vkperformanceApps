@@ -52,7 +52,7 @@ function drawCar(cv, G, t, valve, car, bounds, now, effects) {
 function drawSectionMenu(cv, G, t, car, onOpen) {
     // Keep the section picker deliberately compact: a single exhaust icon and
     // the named button make it clear that no car graphic is drawn on this page.
-    const x = 604, y = 112, w = 392, h = 310;
+    const x = 54, y = (G.TOP || 44) + 34, w = 320, h = 310;
     cv.roundRect(x, y, w, h, 8, G.withAlpha('#ffffff', 0.035));
     cv.strokeRoundRect(x, y, w, h, 8, 1.5, G.withAlpha('#ffffff', 0.18));
     cv.fillRect(x + 1, y + 26, 4, 62, t.accent);
@@ -61,22 +61,25 @@ function drawSectionMenu(cv, G, t, car, onOpen) {
     cv.roundRect(ix, iy, is, is, 6, G.withAlpha('#111317', 0.96));
     cv.strokeRoundRect(ix, iy, is, is, 6, 2, G.withAlpha(t.accent, 0.72));
     cv.fillRect(ix + 14, iy + 16, 28, 3, t.accent);
-    // Twin exhaust tips with a short connecting pipe, drawn from renderer
-    // primitives so this icon works in both the preview and on HU_MGU.
-    cv.roundRect(ix + 28, iy + 52, 46, 22, 5, G.withAlpha('#b8bec7', 0.82));
-    cv.roundRect(ix + 38, iy + 48, 43, 30, 5, G.withAlpha('#111317', 0.98));
-    cv.strokeRoundRect(ix + 38, iy + 48, 43, 30, 5, 3, G.withAlpha('#d9dde2', 0.9));
-    cv.circle(ix + 90, iy + 52, 13, G.withAlpha('#c2c7cf', 0.9));
-    cv.circle(ix + 90, iy + 52, 8, G.withAlpha('#17191d', 1));
-    cv.circle(ix + 90, iy + 74, 13, G.withAlpha('#c2c7cf', 0.9));
-    cv.circle(ix + 90, iy + 74, 8, G.withAlpha('#17191d', 1));
+    // Two parallel metal outlets with dark bores and subtle hot-gas strokes.
+    // This uses only the MGU canvas primitives and remains crisp at any scale.
+    [iy + 57, iy + 80].forEach((cy) => {
+        cv.roundRect(ix + 25, cy - 7, 68, 14, 7, G.withAlpha('#9ca4ae', 0.92));
+        cv.roundRect(ix + 27, cy - 4, 63, 8, 4, G.withAlpha('#16181c', 1));
+        cv.circle(ix + 91, cy, 11, G.withAlpha('#d4d9df', 0.98));
+        cv.circle(ix + 91, cy, 7, G.withAlpha('#17191d', 1));
+        cv.circle(ix + 91, cy, 2.5, G.withAlpha(t.accent, 0.9));
+    });
+    cv.line(ix + 47, iy + 38, ix + 43, iy + 30, 2, G.withAlpha('#c7cbd1', 0.62));
+    cv.line(ix + 65, iy + 36, ix + 65, iy + 27, 2, G.withAlpha(t.accent, 0.78));
+    cv.line(ix + 83, iy + 38, ix + 88, iy + 30, 2, G.withAlpha('#c7cbd1', 0.62));
 
     drawActionButton(cv, G, t, x + 42, y + 208, w - 84, 66,
         'EXHAUST SYSTEM', onOpen, { key: 'performance_exhaust_section', color: t.accent, primary: true });
 }
 
 function drawSidebar(cv, G, t, valve, car, actions, now) {
-    const x = 24, y = 70, w = 320, h = 432;
+    const x = 24, y = G.TOP || 44, w = 320, h = (G.BOTTOM || 512) - y;
     drawPanelShell(cv, G, t, x, y, w, h);
     cv.fillRect(x + 1, y + 27, 4, 54, t.accent);
     cv.text('SELECT MODE', x + 20, y + 57, 28, '#ffffff',
@@ -95,9 +98,9 @@ function drawSidebar(cv, G, t, valve, car, actions, now) {
         const disabled = !controlEnabled || valve.busy && key !== 'OEM';
         const opts = { key: 'performance_flap_' + key, busy: disabled };
         if (selected) Object.assign(opts, { color: t.crit || RED, primary: true });
-        drawActionButton(cv, G, t, x + 18, buttonY, w - 36, 70, label,
+        drawActionButton(cv, G, t, x + 18, buttonY, w - 36, 78, label,
             disabled ? null : run, opts);
-        buttonY += 83;
+        buttonY += 90;
     });
 
     // The centered page title occupies its own row above the car. Image bounds
@@ -140,7 +143,7 @@ function contain(rect, width, height) {
 }
 
 function drawStatus(cv, G, t, valve) {
-    const x = 1256, y = 70, w = 320, h = 432;
+    const x = 1256, y = G.TOP || 44, w = 320, h = (G.BOTTOM || 512) - y;
     drawPanelShell(cv, G, t, x, y, w, h);
     cv.fillRect(x + 1, y + 27, 4, 54, t.accent);
     cv.text('EXHAUST MODE', x + 20, y + 57, 28, t.text,
@@ -158,7 +161,7 @@ function drawStatus(cv, G, t, valve) {
     cv.fillRect(x + 24, y + 266, w - 48, 2, G.withAlpha(t.accent, 0.72));
     if (label === 'DRIVE') {
         cv.text('DRIVING MODE', x + 24, y + 316, 12, t.dim, { font: 'bold', spacing: 1.8 });
-        const driveMode = valve.drivingMode || 'UNAVAILABLE';
+        const driveMode = valve.drivingMode || (valve.driveModeLoading ? 'READING VEHICLE MODE' : 'UNAVAILABLE');
         cv.text(driveMode.toUpperCase(), x + 24, y + 360,
             driveMode.length > 15 ? 17 : 22, driveMode === 'UNAVAILABLE' ? t.dim : t.text,
             { font: 'bold', spacing: 1.8 });
