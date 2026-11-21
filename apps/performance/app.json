@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, road-estimate dyno, and guarded BMW exhaust-flap controls",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": ["ID7"],
@@ -222,6 +222,8 @@
         ["BTN_DRIVE", "By drive mode"],
         ["BTN_PAGE", "Next page"],
         ["BTN_PREV", "Previous page"],
+        ["BTN_SECTION", "Open exhaust section"],
+        ["BTN_SECTION_BACK", "Back to systems"],
         ["BTN_SETTINGS", "Settings"]
       ]
     }

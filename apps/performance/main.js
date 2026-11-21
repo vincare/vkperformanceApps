@@ -17,7 +17,7 @@ const { DidReader } = require('./kit/dids');
 const FlapUi = require('./flap_ui');
 const CarImages = require('./car_images');
 const { Controller: FlapController } = require('./flap_controller');
-const { AutoFlap } = require('./flap_auto');
+const { AutoFlap, modeName } = require('./flap_auto');
 const fs = require('fs');
 const path = require('path');
 
@@ -82,7 +82,8 @@ mgu.run({
         let renderTimer = null, renderQueued = false, freshnessTimer = null, dmeTimer = null, demoTimer = null;
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
-        let page = 0, valveReady = false, drivingMode = null, valveTick = null, valveRescanTimer = null, smokeTick = null;
+        let page = 0, engineConfigView = 'sections', valveReady = false, drivingMode = null;
+        let valveTick = null, valveRescanTimer = null, smokeTick = null;
         let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0;
         let carVisual = null, carVisualKey = '';
 
@@ -362,12 +363,17 @@ mgu.run({
             const note = valveAuto.note();
             if (note && lines.length < 3) lines.push(note.text);
             const visualState = control.simulated ? 'UNKNOWN' : (control.confirmed || 'UNKNOWN');
+            const selectedMode = valveAuto.selected();
+            const effectiveMode = valveAuto.effective();
+            const modeLabel = selectedMode === 'DRIVE' ? 'DRIVE' : effectiveMode;
             return Object.assign({}, control, {
                 ready: valveReady, armed, matched, status, lines, visualState,
                 // The exhaust art follows the requested mode as a visual cue only;
                 // the DME's reported position is separately labelled unverified.
                 exhaustMode: valveAuto.effective(),
-                page, selected: control.simulated || !matched || control.blocked ? null : valveAuto.selected(),
+                modeLabel,
+                drivingMode: modeName(drivingMode),
+                page, selected: valveAuto.selected(),
                 requested: valveAuto.desired,
                 note: note && note.text,
             });
@@ -392,6 +398,24 @@ mgu.run({
             open: valvePress('OPEN'), close: valvePress('CLOSED'),
             oem: valvePress('OEM'), drive: valvePress('DRIVE'),
         };
+        const sectionActions = {
+            open() {
+                engineConfigView = 'exhaust';
+                if (!smokeTick) smokeTick = setInterval(queueRender, 180);
+                queueRender();
+            },
+            back() {
+                engineConfigView = 'sections';
+                if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
+                queueRender();
+            },
+        };
+        ui.onClick('BTN_SECTION', sectionActions.open);
+        ui.onClick('BTN_SECTION_BACK', sectionActions.back);
+        if (ctx.hideButton) {
+            ctx.hideButton('BTN_SECTION');
+            ctx.hideButton('BTN_SECTION_BACK');
+        }
 
         const CDS = 'de.bmw.infotainment.vehicle.CDS';
         const CDS2 = 'de.bmw.infotainment.vehicle.CDS2';
@@ -681,7 +705,8 @@ mgu.run({
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
                     : [{ text: 'READ ONLY', color: 'dim' }]);
             } else {
-                FlapUi.draw(cv, G, t, currentValveView(), valveActions, selectedCarVisual(t), Date.now());
+                FlapUi.draw(cv, G, t, currentValveView(), valveActions,
+                    selectedCarVisual(t), Date.now(), engineConfigView, sectionActions);
             }
             return ui.image('MAIN_GFX', cv);
         }
@@ -761,8 +786,10 @@ mgu.run({
 
         function setPage(next) {
             page = next;
-            if (page === 1 && !smokeTick) smokeTick = setInterval(queueRender, 180);
-            else if (page !== 1 && smokeTick) { clearInterval(smokeTick); smokeTick = null; }
+            if (page === 1) {
+                engineConfigView = 'sections';
+                if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
+            } else if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             queueRender();
             return render();
         }

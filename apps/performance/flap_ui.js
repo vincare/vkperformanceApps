@@ -34,23 +34,84 @@ function drawSmoke(cv, G, t, car, imageRect, now, valveMode) {
     });
 }
 
-function drawRear(cv, G, t, valve, car, now) {
-    const x = 274, y = 70, w = 746, h = 406;
-    G.panel(cv, t, x, y, w, h, 'BMW EXHAUST SYSTEM');
-    cv.text('VALVE GRAPHIC + SMOKE · VISUAL ONLY', x + w - 16, y + 42, 11, t.dim,
-        { align: 'right', font: 'bold', spacing: 0.8 });
-    const bounds = { x: x + 12, y: y + 56, w: w - 24, h: h - 66 };
+function drawCar(cv, G, t, valve, car, bounds, now, effects) {
     if (!car || !car.imageId || !(car.width > 0) || !(car.height > 0)) {
-        cv.text('CAR IMAGE UNAVAILABLE', x + w / 2, y + h / 2 + 8, 20, t.dim,
-            { align: 'center', font: 'bold', spacing: 1 });
+        cv.text('CAR IMAGE UNAVAILABLE', bounds.x + bounds.w / 2, bounds.y + bounds.h / 2,
+            20, t.dim, { align: 'center', font: 'bold', spacing: 1 });
         return;
     }
     // object-fit: contain equivalent: preserve the supplied PNG's full 3:2 frame.
     const imageRect = contain(bounds, car.width, car.height);
     cv.image(car.imageId, imageRect.x, imageRect.y, imageRect.w, imageRect.h);
+    if (!effects) return;
     const valveMode = valve && valve.exhaustMode || 'OEM';
     drawSmoke(cv, G, t, car, imageRect, now, valveMode);
     drawValveFlaps(cv, G, t, car, imageRect, valveMode, now);
+}
+
+function drawSectionMenu(cv, G, t, car, onOpen) {
+    const x = 54, y = 92, w = 1492, h = 390;
+    cv.roundRect(x, y, 610, h, 12, G.withAlpha('#ffffff', 0.025));
+    cv.strokeRoundRect(x, y, w, h, 12, 1.5, G.withAlpha('#ffffff', 0.16));
+    cv.fillRect(x + 1, y + 26, 4, 74, t.accent);
+    cv.text('ENGINE CONFIG', x + 38, y + 56, 15, t.dim,
+        { font: 'bold', spacing: 2.4 });
+    cv.text('VEHICLE SYSTEMS', x + 38, y + 91, 13, t.accent,
+        { font: 'bold', spacing: 2 });
+    cv.text('EXHAUST SYSTEM', x + 38, y + 166, 43, t.text,
+        { font: 'bold', spacing: 2.5 });
+    cv.text('BMW EXHAUST FLAP CONTROL', x + 40, y + 198, 16, t.dim,
+        { font: 'bold', spacing: 1.7 });
+    cv.text('Select a system to view its controls and status.', x + 40, y + 239, 16, t.dim,
+        { font: 'label' });
+    cv.roundRect(x + 38, y + 285, 250, 54, 27, G.withAlpha(t.accent, 0.92));
+    cv.text('OPEN SECTION', x + 163, y + 319, 17, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.8 });
+    cv.fillRect(x + 38, y + h - 20, 264, 2, G.withAlpha(t.accent, 0.9));
+
+    // The image is composited against the page background, so its transparent
+    // pixels do not leave a grey rectangle behind the car.
+    drawCar(cv, G, t, null, car, { x: x + 650, y: y + 12, w: 810, h: h - 24 }, 0, false);
+    if (cv.own && onOpen) cv.target(x, y, w, h, onOpen, 'performance_exhaust_section');
+}
+
+function drawSidebar(cv, G, t, valve, car, actions, now) {
+    const x = 24, y = 72, w = 278, h = 414;
+    cv.roundRect(x, y, w, h, 8, G.withAlpha('#090a0c', 0.88));
+    cv.strokeRoundRect(x, y, w, h, 8, 1.5, G.withAlpha('#ffffff', 0.14));
+    cv.fillRect(x + 1, y + 24, 4, 62, t.accent);
+    cv.text('BMW', x + 24, y + 51, 12, t.dim, { font: 'bold', spacing: 2.5 });
+    cv.text('EXHAUST', x + 24, y + 81, 23, t.text, { font: 'bold', spacing: 1.8 });
+    cv.text('SYSTEM', x + 24, y + 108, 23, t.text, { font: 'bold', spacing: 1.8 });
+    cv.text('FLAP CONTROL', x + 24, y + 132, 11, t.accent, { font: 'bold', spacing: 1.6 });
+
+    const modes = [
+        ['OPEN', 'OPEN VALVES', actions.open],
+        ['CLOSED', 'CLOSE VALVES', actions.close],
+        ['OEM', 'OEM CONTROL', actions.oem],
+        ['DRIVE', 'BY DRIVE MODE', actions.drive],
+    ];
+    const controlEnabled = valve.ready && valve.armed && valve.matched && !valve.blocked;
+    let buttonY = y + 145;
+    modes.forEach(([key, label, run]) => {
+        const selected = !!valve.selected && key === valve.selected;
+        const disabled = !controlEnabled || valve.busy && key !== 'OEM';
+        const opts = { key: 'performance_flap_' + key, busy: disabled };
+        if (selected) Object.assign(opts, { color: t.crit || RED, primary: true });
+        drawActionButton(cv, G, t, x + 16, buttonY, w - 32, 44, label,
+            disabled ? null : run, opts);
+        buttonY += 49;
+    });
+
+    cv.fillRect(x + 18, y + h - 66, w - 36, 1, G.withAlpha('#ffffff', 0.14));
+    cv.roundRect(x + 16, y + h - 54, w - 32, 40, 20, G.withAlpha('#ffffff', 0.04));
+    cv.strokeRoundRect(x + 16, y + h - 54, w - 32, 40, 20, 1.2, G.withAlpha('#ffffff', 0.2));
+    cv.text('ALL SYSTEMS', x + w / 2, y + h - 28, 13, t.dim,
+        { align: 'center', font: 'bold', spacing: 1.4 });
+    if (cv.own && actions.back) cv.target(x + 16, y + h - 54, w - 32, 40,
+        actions.back, 'performance_config_back');
+
+    drawCar(cv, G, t, valve, car, { x: 310, y: 90, w: 856, h: 376 }, now, true);
 }
 
 function drawValveFlaps(cv, G, t, car, imageRect, valveMode, now) {
@@ -86,26 +147,26 @@ function contain(rect, width, height) {
 }
 
 function drawStatus(cv, G, t, valve) {
-    const x = 1038, y = 70, w = 538, h = 406;
-    G.panel(cv, t, x, y, w, h, 'EXHAUST VALVE CONTROL');
-    const realMatch = valve && valve.armed && valve.matched;
-    const accent = realMatch ? t.accent2 : t.warn || '#d29922';
-    cv.text(valve && valve.status ? valve.status : 'CHECKING CONTROL', x + 28, y + 96, 17, accent,
-        { font: 'bold', spacing: 1.2 });
-
-    const value = valve && valve.simulated ? 'DISARMED'
-        : valve && valve.visualState && valve.visualState !== 'UNKNOWN' ? valve.visualState : 'UNKNOWN';
-    const valueColor = value === 'OPEN' ? t.accent2 : value === 'CLOSED' ? t.crit : t.dim;
-    cv.text(value, x + 28, y + 170, 55, valueColor, { font: 'bold', spacing: 2 });
-    cv.text(valve && valve.simulated ? 'NO CAR COMMAND' : 'DME TARGET · POSITION UNVERIFIED',
-        x + 32, y + 195, 14, t.dim, { font: 'bold', spacing: 1.2 });
-
-    const lines = valve && valve.lines || [];
-    lines.slice(0, 3).forEach((line, i) => {
-        cv.text(line, x + 28, y + 229 + i * 24, 16, i === 0 ? t.text : t.dim, { font: i === 0 ? 'bold' : 'label' });
-    });
-    cv.text("DME command feedback does not verify the valve's physical position.", x + 28, y + 300, 13, t.dim,
-        { font: 'label' });
+    const x = 1184, y = 82, w = 392, h = 384;
+    G.panel(cv, t, x, y, w, h, 'VALVE MODE');
+    const label = valve.modeLabel || 'OEM';
+    const lines = label === 'OPEN' ? ['OPENED', 'VALVES']
+        : label === 'CLOSED' ? ['CLOSED', 'VALVES']
+            : label === 'DRIVE' ? ['BY DRIVE', 'MODE'] : ['OEM', 'VALVES'];
+    const color = label === 'OPEN' ? t.accent2 : label === 'CLOSED' ? t.crit : t.text;
+    cv.text('CURRENT REQUEST', x + 28, y + 108, 12, t.dim, { font: 'bold', spacing: 1.8 });
+    cv.text(lines[0], x + 28, y + 173, label === 'DRIVE' ? 31 : 38, color,
+        { font: 'bold', spacing: 2.4 });
+    cv.text(lines[1], x + 28, y + 214, 30, color,
+        { font: 'bold', spacing: 2.3 });
+    cv.fillRect(x + 28, y + 236, w - 56, 2, G.withAlpha(t.accent, 0.72));
+    cv.text('DRIVING MODE', x + 28, y + 276, 12, t.dim, { font: 'bold', spacing: 1.8 });
+    const driveMode = valve.drivingMode || 'UNAVAILABLE';
+    cv.text(driveMode.toUpperCase(), x + 28, y + 319,
+        driveMode.length > 15 ? 20 : 25, driveMode === 'UNAVAILABLE' ? t.dim : t.text,
+        { font: 'bold', spacing: 1.8 });
+    cv.text('PHYSICAL VALVE POSITION NOT SENSED', x + 28, y + 354, 12, t.dim,
+        { font: 'bold', spacing: 0.4 });
 }
 
 function drawActionButton(cv, G, t, x, y, w, h, label, run, opts) {
@@ -120,33 +181,19 @@ function drawActionButton(cv, G, t, x, y, w, h, label, run, opts) {
         t.text, { align: 'center', font: 'bold', spacing: 1.5 });
 }
 
-function draw(cv, G, t, v, act, car, now) {
+function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     cv.clear(t.bg);
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG'], v.page || 0, [
         v.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
     ]);
-    G.panel(cv, t, 24, G.TOP, W - 48, G.BOTTOM - G.TOP, null);
-    drawRear(cv, G, t, v, car, now);
-    drawStatus(cv, G, t, v);
-
-    const modes = [
-        ['OPEN', 'OPEN VALVES', act.open],
-        ['CLOSED', 'CLOSE VALVES', act.close],
-        ['OEM', 'OEM CONTROL', act.oem],
-        ['DRIVE', 'BY DRIVE MODE', act.drive],
-    ];
-    const bx = 24, bw = 226, bh = 62, gap = 20, by = 110;
-    let buttonY = by;
-    modes.forEach(([key, label, run]) => {
-        const selected = !!v.selected && key === v.selected;
-        const controlEnabled = v.ready && v.armed && v.matched && !v.blocked;
-        const disabled = !controlEnabled || v.busy && key !== 'OEM';
-        const opts = { key: 'performance_flap_' + key, busy: disabled };
-        if (selected) Object.assign(opts, { color: t.crit || RED, primary: true });
-        drawActionButton(cv, G, t, bx, buttonY, bw, bh, label, disabled ? null : run, opts);
-        buttonY += bh + gap;
-    });
+    if (view !== 'exhaust') drawSectionMenu(cv, G, t, car, sectionActions && sectionActions.open);
+    else {
+        drawSidebar(cv, G, t, v, car, Object.assign({}, act, {
+            back: sectionActions && sectionActions.back,
+        }), now);
+        drawStatus(cv, G, t, v);
+    }
     return cv;
 }
 
-module.exports = { W, H, draw, drawRear, drawSmoke, drawValveFlaps, contain };
+module.exports = { W, H, draw, drawCar, drawSectionMenu, drawSidebar, drawSmoke, drawValveFlaps, contain };

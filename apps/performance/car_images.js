@@ -73,7 +73,7 @@ function parseColor(hex) {
     return [parseInt(s.slice(0, 2), 16) || 0, parseInt(s.slice(2, 4), 16) || 0, parseInt(s.slice(4, 6), 16) || 0];
 }
 
-/** Decode the supplied 8-bit RGB/RGBA PNGs and composite their alpha onto the page's panel fill. */
+/** Decode the supplied 8-bit RGB/RGBA PNGs and composite transparency onto the page background. */
 function decodePng(bytes, background, silhouette) {
     if (bytes.length < 33 || bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a') throw new Error('Car artwork is not a PNG');
     let width = 0, height = 0, bitDepth = 0, colorType = -1, interlace = 0;
@@ -97,14 +97,7 @@ function decodePng(bytes, background, silhouette) {
     const channels = colorType === 6 ? 4 : 3, rowBytes = width * channels;
     const inflated = zlib.inflateSync(Buffer.concat(chunks));
     if (inflated.length !== (rowBytes + 1) * height) throw new Error('Invalid PNG pixel data length');
-    const base = parseColor(background), panelAlpha = 18 / 255;
-    // ENGINE CONFIG paints the image panel inside the page panel, each with the
-    // same translucent fill. Match both blends so the removed backdrop disappears
-    // into the exact black/red panel instead of leaving a dark rectangular patch.
-    const panel = base.slice();
-    for (let layer = 0; layer < 2; layer++) {
-        for (let i = 0; i < 3; i++) panel[i] = Math.floor(panel[i] * (1 - panelAlpha) + [180, 188, 204][i] * panelAlpha);
-    }
+    const base = parseColor(background);
     const rgba = new Uint8Array(width * height * 4);
     const alphaData = new Uint8Array(width * height);
     let previous = Buffer.alloc(rowBytes), row = Buffer.alloc(rowBytes), inPos = 0, outPos = 0;
@@ -126,9 +119,9 @@ function decodePng(bytes, background, silhouette) {
             const sourceAlpha = channels === 4 ? row[si + 3] / 255 : 1;
             const alpha = silhouette ? silhouette[pixel] / 255 : sourceAlpha;
             alphaData[pixel] = Math.round(alpha * 255);
-            rgba[outPos++] = Math.round(row[si] * alpha + panel[0] * (1 - alpha));
-            rgba[outPos++] = Math.round(row[si + 1] * alpha + panel[1] * (1 - alpha));
-            rgba[outPos++] = Math.round(row[si + 2] * alpha + panel[2] * (1 - alpha));
+            rgba[outPos++] = Math.round(row[si] * alpha + base[0] * (1 - alpha));
+            rgba[outPos++] = Math.round(row[si + 1] * alpha + base[1] * (1 - alpha));
+            rgba[outPos++] = Math.round(row[si + 2] * alpha + base[2] * (1 - alpha));
             rgba[outPos++] = 255;
         }
         const swap = previous; previous = row; row = swap;
