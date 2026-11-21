@@ -57,6 +57,25 @@ function powerValue(kw, unit) {
     return kw * ({ kw: 1, hp: 1.34102, ps: 1.35962 }[unit] || 1);
 }
 
+function scaleStep(max, divisions) {
+    if (!finite(max) || max <= 0) return null;
+    divisions = finite(divisions) && divisions > 0 ? divisions : 5;
+    const raw = max / divisions, exponent = Math.pow(10, Math.floor(Math.log10(raw)));
+    return [1, 2, 2.5, 5, 10].map((factor) => factor * exponent).find((step) => step >= raw * 0.999) || raw;
+}
+
+// Always include the configured maximum as the final printed tick, even when
+// the last regular interval would leave it less than half a step away.
+function scaleTicks(max, divisions) {
+    const step = scaleStep(max, divisions);
+    if (!step) return [];
+    const ticks = [0];
+    for (let value = step; value < max - 1e-7; value += step) ticks.push(value);
+    if (max - ticks[ticks.length - 1] > 1e-7) ticks.push(max);
+    else ticks[ticks.length - 1] = max;
+    return ticks;
+}
+
 function powerUnit(unit) { return ({ kw: 'kW', hp: 'hp', ps: 'PS' }[unit] || 'hp'); }
 
-module.exports = { scale, rpm, torque, percentage, fesBoostBar, dmeBoostBar, powerKw, powerValue, powerUnit };
+module.exports = { scale, rpm, torque, percentage, fesBoostBar, dmeBoostBar, powerKw, powerValue, scaleStep, scaleTicks, powerUnit };

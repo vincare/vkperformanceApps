@@ -543,20 +543,24 @@ mgu.run({
 
             const powerGaugeKw = settings.get('powerGaugeMax');
             const powerMax = Calc.powerValue(finite(powerGaugeKw) && powerGaugeKw > 0 ? powerGaugeKw : 223.7, s.powerUnit);
+            const powerStep = Calc.scaleStep(powerMax, 5);
+            const powerTicks = Calc.scaleTicks(powerMax, 5);
             const torqueGaugeMax = settings.get('torqueGaugeMax');
             const torqueMax = finite(torqueGaugeMax) && torqueGaugeMax > 0 ? torqueGaugeMax : 800;
+            const torqueStep = Calc.scaleStep(torqueMax, 5);
+            const torqueTicks = Calc.scaleTicks(torqueMax, 5);
             const powerText = !s.power ? '--' : (s.power.approximate ? '~' : '') + formatNumber(s.power.value, 0);
             G.bar(cv, t, 1110, G.TOP + 228, 466, 106, {
                 label: 'HORSE POWER',
                 value: s.power ? s.power.value : null, text: powerText,
                 unit: Calc.powerUnit(s.powerUnit), min: 0, max: powerMax,
-                step: Math.max(25, Math.ceil(powerMax / 4 / 50) * 50),
+                step: powerStep, ticks: powerTicks,
                 decimals: 0, peak: s.peaks.power, peakText: true, ramp: 'hot',
             });
             const torqueText = s.torque === null ? '--' : formatNumber(s.torque, 0);
             G.bar(cv, t, 1110, G.TOP + 358, 466, 106, {
                 label: 'TORQUE', value: s.torque, text: torqueText, unit: 'Nm', min: 0, max: torqueMax,
-                step: Math.max(50, Math.ceil(torqueMax / 4 / 50) * 50), decimals: 0,
+                step: torqueStep, ticks: torqueTicks, decimals: 0,
                 peak: s.peaks.torque, peakText: true, ramp: 'hot',
             });
         }

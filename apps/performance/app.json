@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Read-only live engine monitor with virtual dyno pull peaks",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": ["ID7"],
