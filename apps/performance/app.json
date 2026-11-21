@@ -1,8 +1,8 @@
 {
   "id": "performance",
   "title": "PERFORMANCE",
-  "description": "Live engine monitor, DYNO MODE road estimates, and guarded BMW exhaust-flap controls",
-  "version": "0.6.15",
+  "description": "Live engine monitor, DYNO MODE road estimates, DRAG RUN timers, and guarded BMW exhaust-flap controls",
+  "version": "0.6.16",
   "maxDiskUsage": 33554432,
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
@@ -197,6 +197,26 @@
       "steps": [0, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 9000]
     },
     {
+      "key": "dragSpeedUnit",
+      "label": "DRAG RUN speed unit",
+      "type": "choice",
+      "default": "kmh",
+      "options": [["kmh", "km/h"], ["mph", "mph"]]
+    },
+    {
+      "key": "dragDistance",
+      "label": "DRAG RUN distance split",
+      "type": "choice",
+      "default": "qm",
+      "options": [["qm", "1/4 mile"], ["em", "1/8 mile"], ["m1000", "1000 m"]]
+    },
+    {
+      "key": "dragRollout",
+      "label": "DRAG RUN one-foot rollout",
+      "type": "bool",
+      "default": false
+    },
+    {
       "key": "boostSource",
       "label": "Boost from",
       "type": "choice",
@@ -256,6 +276,8 @@
         ["BTN_PREV", "Previous page"],
         ["BTN_DYNO_ACTION", "Set baseline"],
         ["BTN_DYNO_VIEW", "Saved runs"],
+        ["BTN_DRAG_ACTION", "Reset timer"],
+        ["BTN_DRAG_VIEW", "Run history"],
         ["BTN_SECTION", "Open exhaust section"],
         ["BTN_SETTINGS", "Settings"]
       ]

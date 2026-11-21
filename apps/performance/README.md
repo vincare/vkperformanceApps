@@ -154,6 +154,24 @@ The supplied `M340i_SideView_Blue.png` depicts a red car despite its filename;
 PERFORMANCE maps it by filename and leaves it unchanged, so that selection will
 show the supplied red side view until a corrected blue PNG is provided.
 
+## DRAG RUN page
+
+The fourth page adds acceleration timing inside PERFORMANCE, with a separate
+black-and-red interface and the side view paired to the selected **Car Model**.
+It records 0–50, 0–100, 100–200 and 0–200 km/h splits (or 0–30, 0–60,
+60–130 and 0–100 mph), plus the selected 1/4-mile, 1/8-mile or 1000 m distance
+and trap speed. Split crossings are interpolated between BMW vehicle-speed
+samples. Optional one-foot rollout, best times, the last 30 runs, a speed trace,
+peak G, and a short-window wheelspin **estimate** are included. The wheelspin
+value is a visual estimate from the car speed and longitudinal-acceleration
+signals; it is not a wheel sensor measurement.
+
+The speed unit, distance and rollout options are in PERFORMANCE Settings. Runs
+and best times are stored only in PERFORMANCE's data folder. Timing pauses in
+Demo mode and the screen labels this clearly. The feature uses BMW's vehicle
+speed and acceleration signals; its results are road-timer estimates rather
+than independent GPS measurement equipment.
+
 ## License and safety
 
 PERFORMANCE adapts signal scaling, power selection, unit conversion, and

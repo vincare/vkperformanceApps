@@ -12,11 +12,14 @@ const mgu = require('./kit/mgu');
 const G = require('./kit/gauges');
 const Calc = require('./calculations');
 const Dyno = require('./dyno');
+const { RunTimer } = require('./kit/run_timer');
+const DragRun = require('./drag_run');
 const { ReadOnlyDiag } = require('./kit/readonly-diag');
 const { DidReader } = require('./kit/dids');
 const FlapUi = require('./flap_ui');
 const CarImages = require('./car_images');
 const DynoUi = require('./dyno_ui');
+const DragRunUi = require('./drag_run_ui');
 const { Controller: FlapController } = require('./flap_controller');
 const { AutoFlap, flapFor, modeName } = require('./flap_auto');
 const fs = require('fs');
@@ -77,6 +80,7 @@ mgu.run({
         const scaling = config.scaling || {};
         const dme = Object.assign({ ecu: 0x12, boost: [], baro: [] }, config.dme || {});
         const dynoFile = path.join(ctx.dataDir, 'performance_dyno_runs.json');
+        const dragRunFile = path.join(ctx.dataDir, 'performance_drag_runs.json');
         let dynoRuns = [], dynoBaselineAt = null, dynoSelectedAt = null;
         let dynoView = 'sheet', dynoDisplayCleared = false;
         try {
@@ -88,7 +92,21 @@ mgu.run({
                 .sort((a, b) => b.at - a.at).slice(0, 20);
             if (saved && finite(saved.baselineAt)) dynoBaselineAt = saved.baselineAt;
         } catch (e) { /* first start */ }
+        let dragRuns = [], dragBest = Object.create(null), dragSelectedAt = null;
+        let dragView = 'live', dragListOffset = 0, dragClearUntil = 0, dragPeakG = 0;
+        let dragPulse = null, lastDragState = 'wait';
+        try {
+            const saved = JSON.parse(fs.readFileSync(dragRunFile, 'utf8'));
+            if (saved && Array.isArray(saved.runs)) dragRuns = saved.runs.filter((run) =>
+                run && finite(run.at) && run.result && typeof run.result === 'object' &&
+                Array.isArray(run.trace) && run.trace.every((point) => Array.isArray(point) && finite(point[0]) && finite(point[1])))
+                .sort((a, b) => b.at - a.at).slice(0, 30);
+            if (saved && saved.best && typeof saved.best === 'object') dragBest = saved.best;
+            if (saved && finite(saved.selectedAt)) dragSelectedAt = saved.selectedAt;
+        } catch (e) { /* first start */ }
         const dynoRecorder = new Dyno.Recorder();
+        const dragWheelspin = new DragRun.WheelspinEstimate();
+        let dragTimer;
         const state = {
             providers: Object.create(null),
             rpm: metric(), torqueFes: metric(), speed: metric(), gLong: metric(),
@@ -207,6 +225,112 @@ mgu.run({
             if (ui.text) ui.text('BTN_DYNO_ACTION', label);
             if (ui.text) ui.text('BTN_DYNO_VIEW', page !== 2 ? 'Saved runs' : dynoView === 'runs' ? 'DYNO sheet' : 'Saved runs');
         }
+
+        function saveDragRuns() {
+            try { fs.writeFileSync(dragRunFile, JSON.stringify({ runs: dragRuns, best: dragBest, selectedAt: dragSelectedAt })); }
+            catch (e) { log.warn('drag run save: ' + shortError(e)); }
+        }
+
+        function dragUnit() { return settings.get('dragSpeedUnit') === 'mph' ? 'mph' : 'kmh'; }
+        function dragDistance() { return DragRun.DISTANCES[settings.get('dragDistance')] || DragRun.DISTANCES.qm; }
+        function dragSelectedRun() {
+            const visible = dragRuns.filter((run) => (run.unit || 'kmh') === dragUnit());
+            return visible.find((run) => run.at === dragSelectedAt) || visible[0] || null;
+        }
+
+        function makeDragTimer() {
+            const unit = dragUnit(), distance = dragDistance(), rollout = settings.get('dragRollout') === true;
+            dragTimer = new RunTimer(DragRun.splits(unit, distance.key), {
+                rollout,
+                onLaunch: () => { dragPeakG = 0; dragWheelspin.launch(Date.now()); },
+                onDone: (event) => {
+                    const run = Object.assign({}, event, {
+                        unit, distanceKey: distance.key, distanceLabel: distance.label,
+                        peakG: dragPeakG, elapsed: dragTimer && dragTimer.endAt,
+                        trace: dragTimer && Array.isArray(dragTimer.trace) ? dragTimer.trace.slice(0, 1800) : [],
+                        wheelspin: dragWheelspin.result(),
+                    });
+                    dragRuns.unshift(run);
+                    dragRuns = dragRuns.slice(0, 30);
+                    Object.keys(run.result).forEach((key) => {
+                        const bestId = DragRun.bestKey(key, unit, rollout), old = dragBest[bestId];
+                        if (!old || run.result[key] < old.s) {
+                            dragBest[bestId] = { s: run.result[key], at: run.at, trap: run.trap[key] };
+                        }
+                    });
+                    dragSelectedAt = run.at;
+                    dragView = 'live';
+                    dragListOffset = 0;
+                    dragClearUntil = 0;
+                    saveDragRuns();
+                    log.info('drag run saved ' + JSON.stringify(run.result));
+                    queueRender();
+                },
+            });
+            lastDragState = dragTimer.state;
+        }
+
+        function feedDragSpeed(speed, at) {
+            if (!dragTimer || settings.get('demo') === 'on' || !finite(speed)) return;
+            dragWheelspin.speed(at, speed);
+            const previous = dragTimer.state;
+            dragTimer.feed(at, speed);
+            if (previous !== dragTimer.state) {
+                lastDragState = dragTimer.state;
+                queueRender();
+            }
+        }
+
+        function toggleDragView() {
+            dragView = dragView === 'live' ? 'history' : 'live';
+            dragListOffset = 0;
+            dragClearUntil = 0;
+            queueRender();
+            return render();
+        }
+
+        function selectDragRun(at) {
+            if (!dragRuns.some((run) => run.at === at)) return null;
+            dragSelectedAt = at;
+            saveDragRuns();
+            queueRender();
+            return render();
+        }
+
+        function shiftDragRunList(direction) {
+            const count = dragRuns.filter((run) => (run.unit || 'kmh') === dragUnit()).length;
+            dragListOffset = Math.max(0, Math.min(Math.max(0, count - 6), dragListOffset + direction * 6));
+            queueRender();
+            return render();
+        }
+
+        function resetDragTimer() {
+            if (settings.get('demo') === 'on' || !dragTimer) return null;
+            dragTimer.reset();
+            dragPeakG = 0;
+            dragWheelspin.resetRun();
+            queueRender();
+            return render();
+        }
+
+        function clearDragHistory() {
+            const now = Date.now();
+            if (now > dragClearUntil) {
+                dragClearUntil = now + 5000;
+                queueRender();
+                return render();
+            }
+            dragClearUntil = 0;
+            dragRuns = [];
+            dragBest = Object.create(null);
+            dragSelectedAt = null;
+            dragListOffset = 0;
+            saveDragRuns();
+            queueRender();
+            return render();
+        }
+
+        makeDragTimer();
 
         // Reuse Engine Config's per-DME controller and Drive Mode logic. The
         // installed app starts disarmed; only the explicit setting can arm it.
@@ -403,8 +527,10 @@ mgu.run({
         function setVehicleSpeed(payload, source) {
             const raw = payload && payload.speedVehicleCentreOfGravity;
             const value = Calc.scale(raw, scaling.speed);
-            updateMetric('speed', raw, finite(value) && value >= 0 && value <= 400 ? value : null,
-                'km/h', source, finite(value) && value >= 0 && value <= 400 ? 'live' : 'invalid');
+            const valid = finite(value) && value >= 0 && value <= 400;
+            const at = Date.now();
+            updateMetric('speed', raw, valid ? value : null, 'km/h', source, valid ? 'live' : 'invalid');
+            if (valid) feedDragSpeed(value, at);
             feedDyno();
         }
 
@@ -434,6 +560,10 @@ mgu.run({
             const value = finite(mps2) ? mps2 / 9.80665 : null;
             const valid = finite(value) && Math.abs(value) <= 8;
             updateMetric('gLong', raw, valid ? value : null, 'g', source, valid ? 'live' : 'invalid');
+            if (settings.get('demo') !== 'on') {
+                dragWheelspin.accel(Date.now(), valid ? mps2 : null);
+                if (dragTimer && dragTimer.state === 'run' && valid) dragPeakG = Math.max(dragPeakG, value);
+            }
             feedDyno();
         }
 
@@ -982,13 +1112,13 @@ mgu.run({
             const cv = ctx.canvas(W, H).clear(t.bg);
             if (page === 0) {
                 drawEngine(cv, t, s);
-                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE'], page, demo
+                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE', 'DRAG RUN'], page, demo
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
                     : [{ text: 'READ ONLY', color: 'dim' }]);
             } else if (page === 1) {
                 FlapUi.draw(cv, G, t, currentValveView(), valveActions,
                     selectedCarVisual(t), Date.now(), engineConfigView, sectionActions);
-            } else {
+            } else if (page === 2) {
                 const now = Date.now();
                 const recording = dynoRecorder.snapshot(now);
                 DynoUi.draw(cv, G, t, {
@@ -1005,6 +1135,30 @@ mgu.run({
                 }, selectedCarSideVisual(t), {
                     toggleView: toggleDynoView, toggleBaseline: toggleDynoBaseline,
                     clear: clearDynoDisplay, nextRun: nextDynoRun, select: selectDynoRun,
+                });
+            } else {
+                const now = Date.now(), demoMode = settings.get('demo') === 'on';
+                const selected = dragSelectedRun();
+                const isRunning = !!(dragTimer && dragTimer.state === 'run' && !demoMode);
+                const run = isRunning ? {
+                    result: dragTimer.result, trap: dragTimer.trapSpeed, vmax: dragTimer.vmax,
+                    trace: dragTimer.trace, elapsed: dragTimer.elapsed(now), peakG: dragPeakG,
+                    wheelspin: dragWheelspin.result(),
+                } : selected;
+                const unit = dragUnit(), distance = dragDistance();
+                DragRunUi.draw(cv, G, t, {
+                    view: dragView, runs: dragRuns, selectedAt: dragSelectedAt, selectedRun: selected,
+                    currentRun: run, listOffset: dragListOffset, best: dragBest,
+                    splits: DragRun.splits(unit, distance.key), speedUnit: unit, distanceLabel: distance.label,
+                    rollout: settings.get('dragRollout') === true, timerState: demoMode ? 'wait' : dragTimer.state,
+                    elapsed: isRunning ? dragTimer.elapsed(now) : null,
+                    speed: !demoMode && fresh(state.speed, now) ? state.speed.value : null,
+                    vmax: dragTimer && dragTimer.vmax, trace: dragTimer && dragTimer.trace,
+                    peakG: dragPeakG, demo: demoMode, clearArmed: now <= dragClearUntil,
+                }, selectedCarSideVisual(t), {
+                    toggleView: toggleDragView, reset: resetDragTimer, clear: clearDragHistory,
+                    select: selectDragRun, prevList: () => shiftDragRunList(-1), nextList: () => shiftDragRunList(1),
+                    live: () => { dragView = 'live'; dragClearUntil = 0; queueRender(); return render(); },
                 });
             }
             return ui.image('MAIN_GFX', cv);
@@ -1025,6 +1179,7 @@ mgu.run({
             state.stopped = true;
             if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
             if (freshnessTimer) { clearInterval(freshnessTimer); freshnessTimer = null; }
+            if (dragPulse) { clearInterval(dragPulse); dragPulse = null; }
             if (dmeTimer) { clearInterval(dmeTimer); dmeTimer = null; }
             if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
             if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
@@ -1041,6 +1196,13 @@ mgu.run({
         if (ctx.app && typeof ctx.app.on === 'function') ctx.app.on('shutdown', cleanup);
         settings.onChange((key) => {
             if (key === 'carModel' || key === 'theme') { carVisualKey = ''; carSideVisualKey = ''; }
+            if (key === 'dragSpeedUnit' || key === 'dragDistance' || key === 'dragRollout' || key === 'demo') {
+                makeDragTimer();
+                dragPeakG = 0;
+                dragWheelspin.resetRun();
+                dragListOffset = 0;
+                dragClearUntil = 0;
+            }
             if (key === 'maxPower' || key === 'powerSource' || key === 'powerUnit') {
                 delete peaks.live.power;
                 delete peaks.demo.power;
@@ -1073,6 +1235,15 @@ mgu.run({
             queueRender();
         });
         if (settings.get('demo') === 'on') demoTimer = setInterval(queueRender, 250);
+        dragPulse = setInterval(() => {
+            if (settings.get('demo') === 'on' || !dragTimer) return;
+            const previous = dragTimer.state;
+            dragTimer.idle(Date.now());
+            if (previous !== dragTimer.state || lastDragState !== dragTimer.state) {
+                lastDragState = dragTimer.state;
+                queueRender();
+            }
+        }, 50);
         freshnessTimer = setInterval(() => {
             if (settings.get('demo') === 'on') dynoRecorder.reset();
             else {
@@ -1085,7 +1256,7 @@ mgu.run({
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, 350);
 
         function setPage(next) {
-            page = ((next % 3) + 3) % 3;
+            page = ((next % 4) + 4) % 4;
             if (page === 1) {
                 engineConfigView = 'sections';
             }
@@ -1116,11 +1287,19 @@ mgu.run({
             updateDynoActionLabel();
             return setPage(2);
         });
-        ['BTN_DYNO_ACTION', 'BTN_DYNO_VIEW'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
+        ui.onClick('BTN_DRAG_ACTION', () => {
+            if (page !== 3) return setPage(3);
+            return dragView === 'history' ? clearDragHistory() : resetDragTimer();
+        });
+        ui.onClick('BTN_DRAG_VIEW', () => {
+            if (page !== 3) { dragView = 'history'; return setPage(3); }
+            return toggleDragView();
+        });
+        ['BTN_DYNO_ACTION', 'BTN_DYNO_VIEW', 'BTN_DRAG_ACTION', 'BTN_DRAG_VIEW'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
         ['BTN_OPEN', 'BTN_CLOSE', 'BTN_OEM', 'BTN_DRIVE'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
         updateDynoActionLabel();
         if (ctx.onTab) ctx.onTab((index) => {
-            if (index === 0 || index === 1 || index === 2) return setPage(index);
+            if (index >= 0 && index <= 3) return setPage(index);
             return null;
         });
 

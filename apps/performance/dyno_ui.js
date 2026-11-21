@@ -217,7 +217,7 @@ function drawRuns(cv, G, t, s, car, current, baseline, actions) {
 }
 
 function draw(cv, G, t, s, car, actions) {
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE'], 2, [
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE', 'DRAG RUN'], 2, [
         s.demo && { text: 'DEMO · NO ROAD DATA', color: 'crit' },
     ]);
     drawButton(cv, G, t, 24, 52, 156, 30, s.view === 'runs' ? 'DYNO SHEET' : 'SAVED RUNS', actions.toggleView, false);
