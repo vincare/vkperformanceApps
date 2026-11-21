@@ -91,15 +91,13 @@ function drawSidebar(cv, G, t, valve, car, actions, now) {
         ['OEM', 'OEM CONTROL', actions.oem],
         ['DRIVE', 'BY DRIVE MODE', actions.drive],
     ];
-    const controlEnabled = valve.ready && valve.armed && valve.matched && !valve.blocked;
     let buttonY = y + 82;
     modes.forEach(([key, label, run]) => {
         const selected = !!valve.selected && key === valve.selected;
-        const disabled = !controlEnabled || valve.busy && key !== 'OEM';
-        const opts = { key: 'performance_flap_' + key, busy: disabled };
+        const busy = valve.busy && key !== 'OEM';
+        const opts = { key: 'performance_flap_' + key, busy };
         if (selected) Object.assign(opts, { color: t.crit || RED, primary: true });
-        drawActionButton(cv, G, t, x + 18, buttonY, w - 36, 78, label,
-            disabled ? null : run, opts);
+        drawActionButton(cv, G, t, x + 18, buttonY, w - 36, 78, label, run, opts);
         buttonY += 90;
     });
 

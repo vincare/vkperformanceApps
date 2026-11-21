@@ -79,10 +79,14 @@ Adaptive return control to BMW, and Eco Pro closes, with the same plug-in hybrid
 mode handling as that app.
 
 The valve controls adapt the upstream Engine Config controller and per-DME adapter.
-**Exhaust valve control** defaults to **Disarmed**. With it off,
-the buttons send no vehicle command and the page says so. When explicitly armed
-in the app settings, the app first makes read-only DME identity and flap-capability
-checks; it will not send the control request if a matching flap is not detected.
+**Exhaust valve control** defaults to **Armed** so the buttons work without a setup
+step. Arming by itself performs only read-only DME identity and flap-capability
+checks; the app does not request a flap mode on first launch. A command is sent
+only after an explicit tap on a control, and only if a matching flap is detected.
+The setting can still be switched to Disarmed, which prevents vehicle commands.
+On upgrade, Drive Mode following is reset to Off once so enabling the new default
+cannot cause a previously saved follow mode to issue a command at startup. Tap
+**BY DRIVE MODE** to turn following on again; that selection is then remembered.
 The close-RPM guard defaults to 4,000 rpm and fails back to BMW control if fresh
 RPM is unavailable. Repeating the request every 15 seconds is optional and off
 by default. Drive Mode following is only enabled by pressing its page button.
@@ -105,8 +109,10 @@ override expires.
 On Engine Data, **M SOUND MODE** requests OPEN from the same guarded controller;
 pressing it again returns control to BMW. The button shows only its name. It is
 red while the app's open request is active and grey when it is off or
-unavailable. It requires the same explicit Car control arming and matched-DME
-checks as the Engine Config buttons. It controls the exhaust flap only; it does
+unavailable. It uses the default Armed setting and the same matched-DME checks as
+the Engine Config buttons. If diagnostics are starting or no supported DME is
+matched, taps still respond and the status panel explains why no command was sent.
+It controls the exhaust flap only; it does
 not select Sport Plus or command pops and bangs. DME acceptance and the
 commanded target do not prove the flap is physically at 100%, because the
 `0x64FD` output-position payload has not been decoded or validated on this car.

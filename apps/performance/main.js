@@ -128,6 +128,7 @@ mgu.run({
         let page = 0, engineConfigView = 'sections', valveReady = false, drivingMode = null;
         let driveModeLoading = false, driveModePollStarting = false, driveModePollSub = null, driveModePollTimer = null;
         let valveTick = null, valveRescanTimer = null, smokeTick = null;
+        let valveNoticeTimer = null, valveActionNotice = '', valveActionNoticeUntil = 0;
         let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0;
         let carVisual = null, carVisualKey = '', carSideVisual = null, carSideVisualKey = '';
         let mSoundEnabled = false;
@@ -351,6 +352,29 @@ mgu.run({
             const control = valveController.view();
             return valveReady && valveController.armedSetting && !control.blocked &&
                 !!(valveController.ident && valveController.ident.elAgk && valveController.ident.elAgk.supported);
+        }
+
+        function valveBlockReason() {
+            const control = valveController.view();
+            if (!valveReady) return 'DIAGNOSTICS STARTING';
+            if (!valveController.armedSetting) return 'CONTROL DISARMED';
+            if (control.comm !== 'OK') return 'DIAGNOSTIC LINK OFFLINE';
+            if (control.blocked) return 'DME CONTROL BLOCKED';
+            if (!(valveController.ident && valveController.ident.elAgk && valveController.ident.elAgk.supported)) return 'NO MATCHED DME';
+            return '';
+        }
+
+        function showValveNotice(text) {
+            valveActionNotice = text;
+            valveActionNoticeUntil = Date.now() + 5000;
+            if (valveNoticeTimer) clearTimeout(valveNoticeTimer);
+            valveNoticeTimer = setTimeout(() => {
+                valveActionNotice = '';
+                valveActionNoticeUntil = 0;
+                valveNoticeTimer = null;
+                queueRender();
+            }, 5000);
+            queueRender();
         }
 
         function resetMSound() {
@@ -649,6 +673,7 @@ mgu.run({
             else if (control.accepted === false) commandStatus = 'LAST COMMAND NOT ACCEPTED';
             else if (control.accepted === true) commandStatus = 'DME ACCEPTED · POSITION UNKNOWN';
             else commandStatus = 'READY FOR COMMAND';
+            if (valveActionNotice && Date.now() < valveActionNoticeUntil) commandStatus = valveActionNotice;
             return Object.assign({}, control, {
                 ready: valveReady, armed, matched, status, lines, visualState, commandStatus,
                 // The exhaust art follows the requested mode as a visual cue only;
@@ -731,9 +756,15 @@ mgu.run({
         const valvePress = (mode) => () => {
             if (mode === 'DRIVE' && drivingMode === null) startDriveModePoll();
             if (!valveCanActuate()) {
+                const reason = valveBlockReason();
+                showValveNotice(mode + ' NOT SENT · ' + (reason || 'CONTROL UNAVAILABLE'));
                 diagLog('valve_command_blocked', { mode, ready: valveReady,
                     armed: valveController.armedSetting,
                     matched: !!(valveController.ident && valveController.ident.elAgk && valveController.ident.elAgk.supported) });
+                return null;
+            }
+            if (valveController.state.busy && mode !== 'OEM') {
+                showValveNotice(mode + ' NOT SENT · COMMAND IN PROGRESS');
                 return null;
             }
             const startedAt = Date.now();
@@ -766,7 +797,13 @@ mgu.run({
             drive() { resetMSound(); return valvePress('DRIVE')(); },
         };
         function toggleMSoundMode() {
-            if (!valveCanActuate() || valveController.state.busy || mSoundBusy) return null;
+            if (mSoundBusy) {
+                showValveNotice('M SOUND MODE · COMMAND IN PROGRESS');
+                return null;
+            }
+            const mode = mSoundEnabled ? 'OEM' : 'OPEN';
+            if (!valveCanActuate()) return valvePress(mode)();
+            if (valveController.state.busy && mode !== 'OEM') return valvePress(mode)();
             mSoundBusy = true;
             if (mSoundEnabled) {
                 mSoundEnabled = false;
@@ -1051,7 +1088,7 @@ mgu.run({
             cv.text('M SOUND MODE', x + 24, y + 44, 23, active ? '#ffffff' : (enabled ? t.text : t.dim),
                 { font: 'bold', spacing: 1.2, literal: true });
             cv.circle(x + w - 28, y + h / 2, 7, active ? '#ffffff' : G.withAlpha('#c7cbd1', 0.34));
-            if (cv.own && enabled && run) cv.target(x, y, w, h, run, 'performance_m_sound_mode');
+            if (cv.own && run) cv.target(x, y, w, h, run, 'performance_m_sound_mode');
         }
 
         function drawEngine(cv, t, s) {
@@ -1117,7 +1154,7 @@ mgu.run({
                 drawEngine(cv, t, s);
                 G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE', 'DRAG RUN'], page, demo
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
-                    : [{ text: 'READ ONLY', color: 'dim' }]);
+                    : [{ text: 'LIVE DATA', color: 'dim' }]);
             } else if (page === 1) {
                 FlapUi.draw(cv, G, t, currentValveView(), valveActions,
                     selectedCarVisual(t), Date.now(), engineConfigView, sectionActions);
@@ -1188,6 +1225,7 @@ mgu.run({
             if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             if (valveTick) { clearInterval(valveTick); valveTick = null; }
             if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
+            if (valveNoticeTimer) { clearTimeout(valveNoticeTimer); valveNoticeTimer = null; }
             stopDriveModePoll();
             valveAuto._stop();
             if (readOnlyLink) readOnlyLink.cancel();

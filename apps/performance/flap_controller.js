@@ -44,8 +44,8 @@ class Controller {
         this._flight = null;        // the flap command in flight (with the OEM queued behind it)
     }
 
-    /** The "Car control" setting is the arm switch: Armed = talk to the car DME;
-     * Disarmed (default) = simulated only, nothing is sent to the car. */
+    /** The "Car control" setting is the arm switch: Armed = talk to a matched car DME;
+     * Disarmed = simulated only, nothing is sent to the car. */
     get armedSetting() { return this.ctx.settings.get('arm') === 'on'; }
     get source() { return this.armedSetting ? 'car' : 'sim'; }
     get simulated() { return !this.real; }

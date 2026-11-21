@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, DYNO MODE road estimates, DRAG RUN timers, and guarded BMW exhaust-flap controls",
-  "version": "0.6.18",
+  "version": "0.6.19",
   "maxDiskUsage": 33554432,
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
@@ -43,10 +43,23 @@
       "key": "valveControl",
       "label": "Exhaust valve control",
       "type": "choice",
-      "default": "off",
+      "default": "on",
+      "reset": 1,
       "options": [
         ["off", "Disarmed · no car commands"],
         ["on", "Armed · sends commands to a matched DME"]
+      ]
+    },
+    {
+      "key": "driveLink",
+      "label": "Drive Mode exhaust follow",
+      "type": "choice",
+      "default": "off",
+      "hidden": true,
+      "reset": 1,
+      "options": [
+        ["off", "Off"],
+        ["on", "On"]
       ]
     },
     {
