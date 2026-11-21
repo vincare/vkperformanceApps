@@ -150,9 +150,9 @@ fit on the right side without cropping. The image loader uses the
 matching chassis silhouette for the red and black variants so their transparent
 background stays clean. Settings also let you choose Nm, lb-ft or kgm, toggle
 the read-only ECU torque curve, and set the graph's RPM ceiling or Auto.
-The supplied `M340i_SideView_Blue.png` depicts a red car despite its filename;
-PERFORMANCE maps it by filename and leaves it unchanged, so that selection will
-show the supplied red side view until a corrected blue PNG is provided.
+The side-view files are paired by chassis and paint color with the rear-view
+images. The corrected blue M340i side view from the latest supplied archive is
+used for `M340i G20 BLUE`.
 
 ## DRAG RUN page
 
