@@ -16,6 +16,7 @@ const { ReadOnlyDiag } = require('./kit/readonly-diag');
 const { DidReader } = require('./kit/dids');
 const FlapUi = require('./flap_ui');
 const CarImages = require('./car_images');
+const DynoUi = require('./dyno_ui');
 const { Controller: FlapController } = require('./flap_controller');
 const { AutoFlap, flapFor, modeName } = require('./flap_auto');
 const fs = require('fs');
@@ -76,7 +77,8 @@ mgu.run({
         const scaling = config.scaling || {};
         const dme = Object.assign({ ecu: 0x12, boost: [], baro: [] }, config.dme || {});
         const dynoFile = path.join(ctx.dataDir, 'performance_dyno_runs.json');
-        let dynoRuns = [];
+        let dynoRuns = [], dynoBaselineAt = null, dynoSelectedAt = null;
+        let dynoView = 'sheet', dynoDisplayCleared = false;
         try {
             const saved = JSON.parse(fs.readFileSync(dynoFile, 'utf8'));
             if (saved && Array.isArray(saved.runs)) dynoRuns = saved.runs.filter((run) =>
@@ -84,6 +86,7 @@ mgu.run({
                 Array.isArray(run.curve) && run.curve.length > 1 && run.curve.every((point) =>
                     point && finite(point.rpm) && finite(point.powerW) && finite(point.torqueNm)))
                 .sort((a, b) => b.at - a.at).slice(0, 20);
+            if (saved && finite(saved.baselineAt)) dynoBaselineAt = saved.baselineAt;
         } catch (e) { /* first start */ }
         const dynoRecorder = new Dyno.Recorder();
         const state = {
@@ -107,7 +110,7 @@ mgu.run({
         let driveModeLoading = false, driveModePollStarting = false, driveModePollSub = null, driveModePollTimer = null;
         let valveTick = null, valveRescanTimer = null, smokeTick = null;
         let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0;
-        let carVisual = null, carVisualKey = '';
+        let carVisual = null, carVisualKey = '', carSideVisual = null, carSideVisualKey = '';
         let mSoundEnabled = false;
         let mSoundBusy = false;
         let valveCommandActive = false, valvePriorityUntil = 0;
@@ -125,6 +128,84 @@ mgu.run({
                 log.warn('Car Model image: ' + shortError(e));
             }
             return carVisual;
+        }
+
+        function selectedCarSideVisual(theme) {
+            const selected = CarImages.model(settings.get('carModel'));
+            const key = selected.key + '|' + theme.bg;
+            if (carSideVisualKey === key) return carSideVisual;
+            carSideVisualKey = key;
+            carSideVisual = null;
+            try {
+                carSideVisual = CarImages.loadSide(selected.key, theme.bg);
+                log.info('Car side view loaded: ' + carSideVisual.sourceFile + ' (' + carSideVisual.width + 'x' + carSideVisual.height + ')');
+            } catch (e) {
+                log.warn('Car side view image: ' + shortError(e));
+            }
+            return carSideVisual;
+        }
+
+        function saveDynoRuns() {
+            try { fs.writeFileSync(dynoFile, JSON.stringify({ runs: dynoRuns, baselineAt: dynoBaselineAt })); }
+            catch (e) { log.warn('virtual dyno save: ' + shortError(e)); }
+        }
+
+        function displayedDynoRun() {
+            if (dynoDisplayCleared) return null;
+            return dynoRuns.find((run) => run.at === dynoSelectedAt) || dynoRuns[0] || null;
+        }
+
+        function toggleDynoBaseline() {
+            const run = displayedDynoRun();
+            if (!run) return null;
+            dynoBaselineAt = dynoBaselineAt === run.at ? null : run.at;
+            saveDynoRuns();
+            updateDynoActionLabel();
+            queueRender();
+            return render();
+        }
+
+        function nextDynoRun() {
+            if (!dynoRuns.length) return null;
+            const current = displayedDynoRun();
+            const index = current ? dynoRuns.findIndex((run) => run.at === current.at) : -1;
+            dynoSelectedAt = dynoRuns[(index + 1) % dynoRuns.length].at;
+            dynoDisplayCleared = false;
+            updateDynoActionLabel();
+            queueRender();
+            return render();
+        }
+
+        function selectDynoRun(at) {
+            if (!dynoRuns.some((run) => run.at === at)) return null;
+            dynoSelectedAt = at;
+            dynoDisplayCleared = false;
+            updateDynoActionLabel();
+            queueRender();
+            return render();
+        }
+
+        function clearDynoDisplay() {
+            dynoDisplayCleared = true;
+            dynoSelectedAt = null;
+            updateDynoActionLabel();
+            queueRender();
+            return render();
+        }
+
+        function toggleDynoView() {
+            dynoView = dynoView === 'sheet' ? 'runs' : 'sheet';
+            updateDynoActionLabel();
+            queueRender();
+            return render();
+        }
+
+        function updateDynoActionLabel() {
+            const run = displayedDynoRun();
+            const label = page !== 2 ? 'Open DYNO MODE' : dynoView === 'runs' ? 'Next saved run'
+                : run && dynoBaselineAt === run.at ? 'Clear baseline' : 'Set baseline';
+            if (ui.text) ui.text('BTN_DYNO_ACTION', label);
+            if (ui.text) ui.text('BTN_DYNO_VIEW', page !== 2 ? 'Saved runs' : dynoView === 'runs' ? 'DYNO sheet' : 'Saved runs');
         }
 
         // Reuse Engine Config's per-DME controller and Drive Mode logic. The
@@ -171,8 +252,11 @@ mgu.run({
             if (event.type !== 'run') return;
             dynoRuns.unshift(event.run);
             dynoRuns = dynoRuns.slice(0, 20);
-            try { fs.writeFileSync(dynoFile, JSON.stringify({ runs: dynoRuns })); }
-            catch (e) { log.warn('virtual dyno save: ' + shortError(e)); }
+            if (dynoBaselineAt !== null && !dynoRuns.some((run) => run.at === dynoBaselineAt)) dynoBaselineAt = null;
+            dynoSelectedAt = event.run.at;
+            dynoDisplayCleared = false;
+            saveDynoRuns();
+            updateDynoActionLabel();
             log.info('virtual dyno pull ' + Math.round(Calc.powerValue(event.run.peakP / 1000, 'hp')) +
                 ' hp, ' + Math.round(event.run.peakT) + ' Nm');
             diagLog('dyno_run_saved', {
@@ -223,7 +307,10 @@ mgu.run({
             logDynoGate(now);
             const input = freshWithin(state.rpm, now, DYNO_FRESH_MS) &&
                 freshWithin(state.speed, now, DYNO_FRESH_MS) && freshWithin(state.gLong, now, DYNO_FRESH_MS)
-                ? { rpm: state.rpm.value, speedKmh: state.speed.value, longitudinalG: state.gLong.value }
+                ? {
+                    rpm: state.rpm.value, speedKmh: state.speed.value, longitudinalG: state.gLong.value,
+                    ecuTorqueNm: freshWithin(state.torqueFes, now, DYNO_FRESH_MS) ? state.torqueFes.value : null,
+                }
                 : null;
             handleDynoEvent(dynoRecorder.sample(input, now, dynoSetup()));
         }
@@ -354,6 +441,7 @@ mgu.run({
             const raw = payload && payload.actualValueTorqueCrankshaft;
             const value = Calc.torque(raw, scaling.torque);
             updateMetric('torqueFes', raw, value, 'Nm', source, value === null ? 'invalid' : 'live');
+            feedDyno();
         }
 
         function setFesPercentages(payload, source) {
@@ -894,12 +982,30 @@ mgu.run({
             const cv = ctx.canvas(W, H).clear(t.bg);
             if (page === 0) {
                 drawEngine(cv, t, s);
-                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG'], page, demo
+                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE'], page, demo
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
                     : [{ text: 'READ ONLY', color: 'dim' }]);
-            } else {
+            } else if (page === 1) {
                 FlapUi.draw(cv, G, t, currentValveView(), valveActions,
                     selectedCarVisual(t), Date.now(), engineConfigView, sectionActions);
+            } else {
+                const now = Date.now();
+                const recording = dynoRecorder.snapshot(now);
+                DynoUi.draw(cv, G, t, {
+                    view: dynoView, runs: dynoRuns, selectedAt: dynoSelectedAt,
+                    baselineAt: dynoBaselineAt, cleared: dynoDisplayCleared,
+                    pullStatus: recording.status, livePowerW: recording.livePowerW,
+                    rpm: fresh(state.rpm, now) ? state.rpm.value : null,
+                    speed: fresh(state.speed, now) ? state.speed.value : null,
+                    gateText: dynoGate(now).text,
+                    demo, powerUnit: settings.get('powerUnit') || 'hp',
+                    torqueUnit: settings.get('dynoTorqueUnit') || 'nm',
+                    ecuTorque: settings.get('dynoEcuTorque') !== false,
+                    graphMaxRpm: settings.get('dynoGraphMaxRpm') || 0,
+                }, selectedCarSideVisual(t), {
+                    toggleView: toggleDynoView, toggleBaseline: toggleDynoBaseline,
+                    clear: clearDynoDisplay, nextRun: nextDynoRun, select: selectDynoRun,
+                });
             }
             return ui.image('MAIN_GFX', cv);
         }
@@ -934,7 +1040,7 @@ mgu.run({
 
         if (ctx.app && typeof ctx.app.on === 'function') ctx.app.on('shutdown', cleanup);
         settings.onChange((key) => {
-            if (key === 'carModel' || key === 'theme') carVisualKey = '';
+            if (key === 'carModel' || key === 'theme') { carVisualKey = ''; carSideVisualKey = ''; }
             if (key === 'maxPower' || key === 'powerSource' || key === 'powerUnit') {
                 delete peaks.live.power;
                 delete peaks.demo.power;
@@ -979,24 +1085,42 @@ mgu.run({
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, 350);
 
         function setPage(next) {
-            page = next;
+            page = ((next % 3) + 3) % 3;
             if (page === 1) {
                 engineConfigView = 'sections';
-                if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
-            } else if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
+            }
+            updateDynoActionLabel();
+            if (page !== 1 && smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             queueRender();
             return render();
         }
-        const flipPage = () => setPage(1 - page);
-        ui.onClick('BTN_PAGE', flipPage);
-        ui.onClick('BTN_PREV', flipPage);
+        ui.onClick('BTN_PAGE', () => setPage(page + 1));
+        ui.onClick('BTN_PREV', () => setPage(page - 1));
         ui.onClick('BTN_OPEN', valveActions.open);
         ui.onClick('BTN_CLOSE', valveActions.close);
         ui.onClick('BTN_OEM', valveActions.oem);
         ui.onClick('BTN_DRIVE', valveActions.drive);
+        ui.onClick('BTN_DYNO_ACTION', () => {
+            if (page !== 2) {
+                dynoView = 'sheet';
+                dynoDisplayCleared = false;
+                updateDynoActionLabel();
+                return setPage(2);
+            }
+            return dynoView === 'runs' ? nextDynoRun() : toggleDynoBaseline();
+        });
+        ui.onClick('BTN_DYNO_VIEW', () => {
+            if (page === 2) return toggleDynoView();
+            dynoView = 'runs';
+            dynoDisplayCleared = false;
+            updateDynoActionLabel();
+            return setPage(2);
+        });
+        ['BTN_DYNO_ACTION', 'BTN_DYNO_VIEW'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
         ['BTN_OPEN', 'BTN_CLOSE', 'BTN_OEM', 'BTN_DRIVE'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
+        updateDynoActionLabel();
         if (ctx.onTab) ctx.onTab((index) => {
-            if (index === 0 || index === 1) return setPage(index);
+            if (index === 0 || index === 1 || index === 2) return setPage(index);
             return null;
         });
 

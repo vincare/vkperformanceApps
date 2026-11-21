@@ -45,12 +45,19 @@ function analyse(points, startedAt, setup) {
     const raw = keys.map((rpm) => ({
         rpm,
         powerW: bins[rpm].reduce((sum, point) => sum + point.powerW, 0) / bins[rpm].length,
+        ecuTorqueNm: bins[rpm].reduce((values, point) => {
+            if (finite(point.ecuTorqueNm) && point.ecuTorqueNm >= 0) values.push(point.ecuTorqueNm);
+            return values;
+        }, []),
     }));
     const curve = raw.map((point, index) => {
         const window = raw.slice(Math.max(0, index - 2), index + 3);
         const powerW = Math.max(0, window.reduce((sum, item) => sum + item.powerW, 0) / window.length);
         const torqueNm = point.rpm > 0 ? powerW / (point.rpm * Math.PI / 30) : 0;
-        return { rpm: point.rpm, powerW, torqueNm };
+        const ecuValues = point.ecuTorqueNm;
+        const ecuTorqueNm = ecuValues.length
+            ? ecuValues.reduce((sum, value) => sum + value, 0) / ecuValues.length : null;
+        return { rpm: point.rpm, powerW, torqueNm, ecuTorqueNm };
     });
     if (!curve.length) return null;
     const peakPower = curve.reduce((best, point) => point.powerW > best.powerW ? point : best, curve[0]);
@@ -100,7 +107,10 @@ class Recorder {
                 this.pull.segments.push(segment);
             }
             segment.ratio += (ratio - segment.ratio) * 0.1;
-            segment.points.push({ rpm: data.rpm, powerW: this.livePowerW, speedKmh: data.speedKmh });
+            segment.points.push({
+                rpm: data.rpm, powerW: this.livePowerW, speedKmh: data.speedKmh,
+                ecuTorqueNm: finite(data.ecuTorqueNm) && data.ecuTorqueNm >= 0 ? data.ecuTorqueNm : null,
+            });
             this.pull.lastHardAt = at;
             return null;
         }

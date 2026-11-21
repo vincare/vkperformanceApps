@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.13 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.14 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -132,6 +132,27 @@ rpm. The latest completed PERFORMANCE pull is kept in the app's own data
 folder. MGU gives each app its own data folder, so existing saved runs inside
 the separate DYNO app are not imported. A new pull recorded after installing
 this version will appear here.
+
+## DYNO MODE page
+
+The third page adds a dedicated road-dyno view in PERFORMANCE. It uses the
+same full-throttle, one-gear pull recorder and road-load calculation described
+above. The DYNO sheet shows a dual-scale power and torque graph, live estimated
+power during a pull, peak values, crank-versus-wheel power, and an optional ECU
+torque overlay. **Saved Runs** keeps up to 20 PERFORMANCE pulls, lets you pick
+one to inspect, pin or clear a baseline, and reset the current display without
+deleting saved runs. The history remains in PERFORMANCE's own app data; it does
+not import or copy the separate DYNO application or its data.
+
+The page displays a side-view image paired to the selected **Car Model** in
+Settings. All six supplied side-view PNG files are included unchanged and are
+fit on the right side without cropping. The image loader uses the
+matching chassis silhouette for the red and black variants so their transparent
+background stays clean. Settings also let you choose Nm, lb-ft or kgm, toggle
+the read-only ECU torque curve, and set the graph's RPM ceiling or Auto.
+The supplied `M340i_SideView_Blue.png` depicts a red car despite its filename;
+PERFORMANCE maps it by filename and leaves it unchanged, so that selection will
+show the supplied red side view until a corrected blue PNG is provided.
 
 ## License and safety
 

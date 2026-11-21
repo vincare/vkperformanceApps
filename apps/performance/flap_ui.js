@@ -196,7 +196,7 @@ function drawActionButton(cv, G, t, x, y, w, h, label, run, opts) {
 
 function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     cv.clear(t.bg);
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG'], v.page || 0, [
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE'], v.page || 0, [
         v.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
     ]);
     if (view !== 'exhaust') drawSectionMenu(cv, G, t, car, sectionActions && sectionActions.open);

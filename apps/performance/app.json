@@ -1,8 +1,8 @@
 {
   "id": "performance",
   "title": "PERFORMANCE",
-  "description": "Live engine monitor, road-estimate dyno, and guarded BMW exhaust-flap controls",
-  "version": "0.6.13",
+  "description": "Live engine monitor, DYNO MODE road estimates, and guarded BMW exhaust-flap controls",
+  "version": "0.6.14",
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": ["ID7"],
@@ -169,6 +169,33 @@
       "steps": [0, 10, 12, 15, 18, 20, 25]
     },
     {
+      "key": "dynoTorqueUnit",
+      "label": "Dyno torque unit",
+      "type": "choice",
+      "default": "nm",
+      "options": [
+        ["nm", "Nm"],
+        ["lbft", "lb-ft"],
+        ["kgm", "kgm"]
+      ]
+    },
+    {
+      "key": "dynoEcuTorque",
+      "label": "Overlay ECU torque on DYNO graph",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "dynoGraphMaxRpm",
+      "label": "DYNO graph up to",
+      "type": "number",
+      "unit": "rpm",
+      "default": 0,
+      "labels": {"0": "Auto"},
+      "reset": 1,
+      "steps": [0, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 9000]
+    },
+    {
       "key": "boostSource",
       "label": "Boost from",
       "type": "choice",
@@ -226,6 +253,8 @@
         ["BTN_DRIVE", "By drive mode"],
         ["BTN_PAGE", "Next page"],
         ["BTN_PREV", "Previous page"],
+        ["BTN_DYNO_ACTION", "Set baseline"],
+        ["BTN_DYNO_VIEW", "Saved runs"],
         ["BTN_SECTION", "Open exhaust section"],
         ["BTN_SETTINGS", "Settings"]
       ]

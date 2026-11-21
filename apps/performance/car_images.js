@@ -9,20 +9,23 @@ try { setImage = require('./kit/record').setImage; }
 catch (e) { setImage = require('../../kit/runtime/record').setImage; }
 
 const MODELS = [
-    { key: 'M340i_Blue', file: 'M340i_Blue.png', label: 'M340i G20 BLUE', chassis: 'G20', tips: [[276, 882], [377, 883], [1165, 883], [1265, 882]] },
-    { key: 'M340i_Red', file: 'M340i_Red.png', label: 'M340i G20 RED', chassis: 'G20', tips: [[273, 882], [375, 882], [1167, 885], [1267, 882]] },
-    { key: 'M340i_Black', file: 'M340i_Black.png', label: 'M340i G20 BLACK', chassis: 'G20', tips: [[271, 883], [374, 882], [1166, 882], [1267, 881]] },
-    { key: 'M440i_Blue', file: 'M440i_Blue.png', label: 'M440i G22 BLUE', chassis: 'G22', tips: [[285, 879], [384, 880], [1156, 881], [1254, 879]] },
-    { key: 'M440i_Red', file: 'M440i_Red.png', label: 'M440i G22 RED', chassis: 'G22', tips: [[283, 880], [382, 881], [1158, 882], [1256, 880]] },
-    { key: 'M440i_Black', file: 'M440i_Black.png', label: 'M440i G22 BLACK', chassis: 'G22', tips: [[279, 880], [381, 881], [1158, 881], [1260, 879]] },
+    { key: 'M340i_Blue', file: 'M340i_Blue.png', sideFile: 'M340i_SideView_Blue.png', label: 'M340i G20 BLUE', chassis: 'G20', tips: [[276, 882], [377, 883], [1165, 883], [1265, 882]] },
+    { key: 'M340i_Red', file: 'M340i_Red.png', sideFile: 'M340i_SideView_Red.png', label: 'M340i G20 RED', chassis: 'G20', tips: [[273, 882], [375, 882], [1167, 885], [1267, 882]] },
+    { key: 'M340i_Black', file: 'M340i_Black.png', sideFile: 'M340i_SideView_Black.png', label: 'M340i G20 BLACK', chassis: 'G20', tips: [[271, 883], [374, 882], [1166, 882], [1267, 881]] },
+    { key: 'M440i_Blue', file: 'M440i_Blue.png', sideFile: 'M440i_SideView_Blue.png', label: 'M440i G22 BLUE', chassis: 'G22', tips: [[285, 879], [384, 880], [1156, 881], [1254, 879]] },
+    { key: 'M440i_Red', file: 'M440i_Red.png', sideFile: 'M440i_SideView_Red.png', label: 'M440i G22 RED', chassis: 'G22', tips: [[283, 880], [382, 881], [1158, 882], [1256, 880]] },
+    { key: 'M440i_Black', file: 'M440i_Black.png', sideFile: 'M440i_SideView_Black.png', label: 'M440i G22 BLACK', chassis: 'G22', tips: [[279, 880], [381, 881], [1158, 881], [1260, 879]] },
 ];
 const SOURCE_W = 1536, SOURCE_H = 1024;
+const SIDE_SOURCE_W = 2172, SIDE_SOURCE_H = 724;
 // 1023x682 keeps the source 3:2 aspect ratio exactly while staying within the
 // renderer's maximum 1024 x 1024 image dimensions.
 const MAX_IMAGE_SIDE = 1023;
 const IMAGE_ID = 0x564b;
+const SIDE_IMAGE_ID = 0x564c;
 let packIndex = null;
 const silhouetteByChassis = Object.create(null);
+const sideSilhouetteByChassis = Object.create(null);
 
 function model(value) {
     return MODELS.find((entry) => entry.key === value || entry.file === value) || MODELS[0];
@@ -74,7 +77,7 @@ function parseColor(hex) {
 }
 
 /** Decode the supplied 8-bit RGB/RGBA PNGs and composite transparency onto the page background. */
-function decodePng(bytes, background, silhouette) {
+function decodePng(bytes, background, silhouette, expectedWidth, expectedHeight) {
     if (bytes.length < 33 || bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a') throw new Error('Car artwork is not a PNG');
     let width = 0, height = 0, bitDepth = 0, colorType = -1, interlace = 0;
     const chunks = [];
@@ -90,7 +93,8 @@ function decodePng(bytes, background, silhouette) {
         pos = end + 4;
         if (type === 'IEND') break;
     }
-    if (width !== SOURCE_W || height !== SOURCE_H) throw new Error('Unexpected car artwork size ' + width + 'x' + height);
+    const wantWidth = expectedWidth || SOURCE_W, wantHeight = expectedHeight || SOURCE_H;
+    if (width !== wantWidth || height !== wantHeight) throw new Error('Unexpected car artwork size ' + width + 'x' + height);
     if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6) || interlace !== 0) {
         throw new Error('Unsupported car artwork PNG format');
     }
@@ -178,4 +182,25 @@ function load(value, background) {
     };
 }
 
-module.exports = { MODELS, IMAGE_ID, SOURCE_W, SOURCE_H, model, load, decodePng, downscale };
+/** Load the paired side-view PNG for DYNO MODE without modifying its source artwork. */
+function loadSide(value, background) {
+    const selected = model(value);
+    let silhouette = null;
+    if (selected.key.slice(-5) !== '_Blue') {
+        silhouette = sideSilhouetteByChassis[selected.chassis];
+        if (!silhouette) {
+            const companion = MODELS.find((entry) => entry.chassis === selected.chassis && entry.key.slice(-5) === '_Blue');
+            if (!companion) throw new Error('Missing transparent side-view silhouette for ' + selected.chassis);
+            silhouette = decodePng(readPacked(companion.sideFile), background, null, SIDE_SOURCE_W, SIDE_SOURCE_H).alpha;
+            sideSilhouetteByChassis[selected.chassis] = silhouette;
+        }
+    }
+    const resized = downscale(decodePng(readPacked(selected.sideFile), background, silhouette, SIDE_SOURCE_W, SIDE_SOURCE_H));
+    setImage(SIDE_IMAGE_ID, resized.width, resized.height, resized.rgba);
+    return {
+        id: SIDE_IMAGE_ID, imageId: SIDE_IMAGE_ID, width: resized.width, height: resized.height,
+        model: selected, sourceFile: selected.sideFile,
+    };
+}
+
+module.exports = { MODELS, IMAGE_ID, SIDE_IMAGE_ID, SOURCE_W, SOURCE_H, SIDE_SOURCE_W, SIDE_SOURCE_H, model, load, loadSide, decodePng, downscale };
