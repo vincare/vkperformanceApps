@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Performance - read-only engine monitor for MGU / iDrive 7.
+ * Performance - live engine monitor and guarded exhaust-flap page for MGU / iDrive 7.
  *
  * Performance values use the same BMW signals, scaling, and source selection
  * as M Vitals. The Sport Display reports power as a percentage, so its HP/kW
@@ -14,6 +14,9 @@ const Calc = require('./calculations');
 const Dyno = require('./dyno');
 const { ReadOnlyDiag } = require('./kit/readonly-diag');
 const { DidReader } = require('./kit/dids');
+const FlapUi = require('./flap_ui');
+const { Controller: FlapController } = require('./flap_controller');
+const { AutoFlap } = require('./flap_auto');
 const fs = require('fs');
 const path = require('path');
 
@@ -78,6 +81,28 @@ mgu.run({
         let renderTimer = null, renderQueued = false, freshnessTimer = null, dmeTimer = null, demoTimer = null;
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
+        let page = 0, valveReady = false, drivingMode = null, valveTick = null, valveRescanTimer = null;
+        let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0;
+
+        // Reuse Engine Config's per-DME controller and Drive Mode logic. The
+        // installed app starts disarmed; only the explicit setting can arm it.
+        const valveKeys = { arm: 'valveControl', hold: 'valveHold', closeLimit: 'valveCloseLimit' };
+        const valveSettings = {
+            get(key) { return settings.get(valveKeys[key] || key); },
+            set(key, value) { return settings.set(valveKeys[key] || key, value); },
+        };
+        const valveController = new FlapController(Object.assign({}, ctx, { settings: valveSettings }));
+        const valveAuto = new AutoFlap({
+            controller: valveController,
+            get: (key) => valveSettings.get(key), set: (key, value) => valveSettings.set(key, value),
+            rpm: () => fresh(state.rpm, Date.now()) ? state.rpm.value : null,
+            log, onChange: () => queueRender(),
+        });
+        function valveCanActuate() {
+            const control = valveController.view();
+            return valveReady && valveController.armedSetting && !control.blocked &&
+                !!(valveController.ident && valveController.ident.elAgk && valveController.ident.elAgk.supported);
+        }
 
         function dynoSetup() {
             const weight = settings.get('dynoWeight');
@@ -290,6 +315,64 @@ mgu.run({
             queueRender();
         }
 
+        function currentValveView() {
+            const control = valveController.view();
+            const matched = !!(valveController.ident && valveController.ident.elAgk &&
+                valveController.ident.elAgk.supported);
+            const armed = valveController.armedSetting;
+            let status;
+            if (!valveReady) status = 'STARTING DIAGNOSTIC LINK';
+            else if (!armed) status = 'SAFE MODE · DISARMED';
+            else if (control.comm !== 'OK') status = 'TASU DIAGNOSTIC LINK UNAVAILABLE';
+            else if (!matched) status = 'NO MATCHED ELECTRIC FLAP';
+            else if (control.blocked) status = 'DME FOUND · CONTROL BLOCKED';
+            else status = 'BMW DME · FLAP CAPABILITY MATCHED';
+
+            const lines = [];
+            if (!armed) {
+                lines.push('Car control is off in app settings.');
+                lines.push('No valve commands are sent in this mode.');
+            } else if (!matched) {
+                lines.push('No supported electric-flap readback found.');
+                lines.push(control.dme ? 'DME: ' + control.dme : 'DME identity not available.');
+            } else {
+                lines.push(control.dme ? 'DME: ' + control.dme + ' · read-only match' : 'DME capability matched.');
+                if (control.confirmed !== 'UNKNOWN') lines.push('DME target: ' + control.confirmed + ' · physical position unverified.');
+                else if (control.accepted === true) lines.push('DME accepted the request; target readback unavailable.');
+                else if (control.accepted === false) lines.push('Last request was not confirmed by the DME.');
+                else lines.push('Select a valve command or Drive Mode.');
+            }
+            const note = valveAuto.note();
+            if (note && lines.length < 3) lines.push(note.text);
+            const visualState = control.simulated ? 'UNKNOWN' : (control.confirmed || 'UNKNOWN');
+            return Object.assign({}, control, {
+                ready: valveReady, armed, matched, status, lines, visualState,
+                page, selected: control.simulated || !matched || control.blocked ? null : valveAuto.selected(),
+                requested: valveAuto.desired,
+                note: note && note.text,
+            });
+        }
+
+        function applyDrivingMode(payload) {
+            const raw = payload && payload.actualValueModeDrivingExperience;
+            if (raw === undefined || raw === null) return;
+            drivingMode = raw;
+            if (!valveCanActuate()) { valveAuto.drive = raw; return; }
+            const pending = valveAuto.driveMode(raw);
+            if (pending) pending.then(queueRender).catch((e) => log.warn('exhaust drive mode: ' + shortError(e)));
+        }
+
+        const valvePress = (mode) => () => {
+            if (!valveCanActuate()) return null;
+            const pending = valveAuto.press(mode);
+            queueRender();
+            return pending.then(queueRender).catch((e) => log.warn('exhaust valve: ' + shortError(e)));
+        };
+        const valveActions = {
+            open: valvePress('OPEN'), close: valvePress('CLOSED'),
+            oem: valvePress('OEM'), drive: valvePress('DRIVE'),
+        };
+
         const CDS = 'de.bmw.infotainment.vehicle.CDS';
         const CDS2 = 'de.bmw.infotainment.vehicle.CDS2';
         const VEHICLE = 'de.bmw.infotainment.vehicle.Vehicle';
@@ -303,10 +386,10 @@ mgu.run({
             statusActualValueTorque2: setFesTorque,
             statusVehicleDynamicEngine: setFesPercentages,
             statusSwitchDriveDynamicSport2: setFesBoost,
+            statusFESVehicleDynamicSwitchHMI: applyDrivingMode,
         });
 
-        // Read-only DME candidates: only ISO-TP/UDS 0x22 ReadDataByIdentifier.
-        // There are no setter, reset, session, or actuation calls in this app.
+        // Boost candidates use read-only ISO-TP/UDS 0x22 and OBD 0x01 requests.
         const readOnlyLink = new ReadOnlyDiag(ctx.signals, log, { gapMs: 80, silentAfter: 3 });
         reader = new DidReader(readOnlyLink, { ecu: dme.ecu });
         async function initDme() {
@@ -556,8 +639,7 @@ mgu.run({
                 min: 0, max: RPM_MAX, step: Calc.scaleStep(RPM_MAX, 4), ticks: rpmTicks,
                 decimals: 0, peak: s.peaks.rpm, peakText: true, ramp: 'hot',
             });
-            const boostLabel = !s.boost ? 'Boost' : s.boost.source === 'BMW SPORT DISPLAY'
-                ? 'Boost · Approx.' : s.boost.approximate ? 'Boost · DME estimate' : 'Boost · DME';
+            const boostLabel = 'Turbo Boost';
             const boostTicks = Calc.scaleTicks(BOOST_MAX_BAR, 5);
             G.bar(cv, t, 1110, G.TOP + 358, 466, 106, {
                 label: boostLabel, value: s.boost ? s.boost.value : null,
@@ -573,10 +655,14 @@ mgu.run({
             const s = current(demo);
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
-            drawEngine(cv, t, s);
-            G.frame(cv, t, ['Engine Data'], 0, demo
-                ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
-                : [{ text: 'READ ONLY', color: 'dim' }]);
+            if (page === 0) {
+                drawEngine(cv, t, s);
+                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG'], page, demo
+                    ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
+                    : [{ text: 'READ ONLY', color: 'dim' }]);
+            } else {
+                FlapUi.draw(cv, G, t, currentValveView(), valveActions);
+            }
             return ui.image('MAIN_GFX', cv);
         }
 
@@ -597,6 +683,9 @@ mgu.run({
             if (freshnessTimer) { clearInterval(freshnessTimer); freshnessTimer = null; }
             if (dmeTimer) { clearInterval(dmeTimer); dmeTimer = null; }
             if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+            if (valveTick) { clearInterval(valveTick); valveTick = null; }
+            if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
+            valveAuto._stop();
             if (readOnlyLink) readOnlyLink.cancel();
             dynoRecorder.reset();
             subscriptions.splice(0).forEach(shutdownSubscription);
@@ -615,6 +704,25 @@ mgu.run({
             }
             if (key === 'demo' && settings.get('demo') === 'on' && !demoTimer) demoTimer = setInterval(queueRender, 250);
             if (key === 'demo' && settings.get('demo') !== 'on' && demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+            const valveSetting = { valveControl: 'arm', valveHold: 'hold', valveCloseLimit: 'closeLimit' }[key];
+            if (valveSetting === 'arm') {
+                valveReady = false;
+                queueRender();
+                const disarmFirst = settings.get('valveControl') !== 'on'
+                    ? valveAuto.settingsChanged('arm') : Promise.resolve();
+                Promise.resolve(disarmFirst).then(() => valveController.refresh()).then(() => {
+                    valveReady = true;
+                    if (!valveController.armedSetting) return null;
+                    if (valveCanActuate() && drivingMode !== null && valveAuto.linkOn) {
+                        valveAuto.drive = drivingMode;
+                        return valveAuto.linkUp();
+                    }
+                    return valveAuto.settingsChanged('arm');
+                }).then(queueRender).catch((e) => log.warn('exhaust setting: ' + shortError(e)));
+            } else if (valveSetting) {
+                Promise.resolve(valveAuto.settingsChanged(valveSetting)).then(queueRender)
+                    .catch((e) => log.warn('exhaust setting: ' + shortError(e)));
+            }
             queueRender();
         });
         if (settings.get('demo') === 'on') demoTimer = setInterval(queueRender, 250);
@@ -629,13 +737,72 @@ mgu.run({
         }, 1000);
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, 350);
 
+        const flipPage = () => { page = 1 - page; queueRender(); return render(); };
+        ui.onClick('BTN_PAGE', flipPage);
+        ui.onClick('BTN_PREV', flipPage);
+        ui.onClick('BTN_OPEN', valveActions.open);
+        ui.onClick('BTN_CLOSE', valveActions.close);
+        ui.onClick('BTN_OEM', valveActions.oem);
+        ui.onClick('BTN_DRIVE', valveActions.drive);
+        ['BTN_OPEN', 'BTN_CLOSE', 'BTN_OEM', 'BTN_DRIVE'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
+        if (ctx.onTab) ctx.onTab((index) => {
+            if (index === 0 || index === 1) { page = index; return render(); }
+            return null;
+        });
+
+        valveController.start().then(() => {
+            if (state.stopped) return;
+            valveReady = true;
+            if (valveController.link) valveController.link.onAvailable((available) => {
+                valveController.refresh().then(() => available ? valveAuto.linkUp() : null)
+                    .then(queueRender).catch((e) => log.warn('exhaust link: ' + shortError(e)));
+            });
+            if (drivingMode !== null) {
+                if (valveCanActuate() && valveAuto.linkOn) {
+                    valveAuto.drive = drivingMode;
+                    valveAuto.linkUp().then(queueRender).catch((e) => log.warn('exhaust drive mode: ' + shortError(e)));
+                } else valveAuto.drive = drivingMode;
+            }
+            valveTick = setInterval(() => {
+                if (!valveCanActuate()) return;
+                valveAuto.tick().catch((e) => log.warn('exhaust rpm guard: ' + shortError(e)));
+            }, 250);
+            // Like Engine Config, retry read-only DME detection while the engine is
+            // running. The retry never sends a valve command.
+            valveRescanTimer = setInterval(() => {
+                const ident = valveController.ident || {};
+                const matched = !!(ident.elAgk && ident.elAgk.supported);
+                if (matched) { valveScanTries = 0; return; }
+                const now = Date.now();
+                const engineRunning = fresh(state.rpm, now) && state.rpm.value > 400;
+                if (!valveReady || !valveController.armedSetting || !engineRunning ||
+                    !valveController.link || !valveController.link.available || valveScanBusy) return;
+                if (valveScanTries >= 4 && now - valveScanAt < 60000) return;
+                valveScanBusy = true; valveScanTries++; valveScanAt = now;
+                valveController.refresh().then(() => {
+                    if (valveCanActuate() && valveAuto.linkOn && drivingMode !== null) {
+                        valveAuto.drive = drivingMode;
+                        return valveAuto.linkUp();
+                    }
+                    return null;
+                }).then(queueRender).catch((e) => log.warn('exhaust detection retry: ' + shortError(e)))
+                    .then(() => { valveScanBusy = false; });
+            }, 15000);
+            queueRender();
+        }).catch((e) => {
+            valveReady = false;
+            log.warn('exhaust controller start: ' + shortError(e));
+            queueRender();
+        });
+
         ctx.onTap((x, y) => {
             if (x < 1370 || x > 1558 || y < 24 || y > 102) return;
             const button = ui.rhmi && ui.rhmi.getByName && ui.rhmi.getByName('BTN_SETTINGS');
             if (button && typeof button.emit === 'function') button.emit('action', {});
         });
         ctx.onLayout(queueRender);
-        diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', readOnly: true,
+        diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', engineMonitorReadOnly: true,
+            exhaustControlDisarmed: !valveController.armedSetting,
             rawDiagnostics: diagnostics(), dmeCandidates: settings.get('readDmeCandidates') === true });
         render().catch((e) => log.warn('first render: ' + shortError(e)));
     },

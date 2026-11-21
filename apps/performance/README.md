@@ -1,8 +1,8 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.0 is a read-only BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.1 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
-area. The right area shows **DYNO RUN**, Engine Speed, and Boost. The dyno card
+area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
 separately in Settings; the defaults are 300 hp and 800 Nm.
 Each scale now labels its configured endpoint explicitly, including values
@@ -29,6 +29,33 @@ that do not fall on a regular tick interval.
   kPa; it subtracts barometric pressure from `F433`, then OBD PID `33`, to
   calculate gauge pressure in bar. When barometric pressure cannot be read,
   101.3 kPa is used and the display labels the result an estimate.
+
+## ENGINE CONFIG page
+
+The second page is **ENGINE CONFIG**. Its rear-view M340i-inspired illustration is
+drawn in the app; it is not a camera feed or a vehicle-identification image. The
+page offers **OPEN VALVES**, **CLOSE VALVES**, **OEM CONTROL**, and **BY DRIVE MODE**.
+Drive Mode follows the existing Engine Config mapping: Sport opens, Comfort and
+Adaptive return control to BMW, and Eco Pro closes, with the same plug-in hybrid
+mode handling as that app.
+
+The valve controls reuse the existing `apps/live_adjustments` controller and its
+per-DME adapter. **Exhaust valve control** defaults to **Disarmed**. With it off,
+the buttons send no vehicle command and the page says so. When explicitly armed
+in the app settings, the app first makes read-only DME identity and flap-capability
+checks; it will not send the control request if a matching flap is not detected.
+The close-RPM guard defaults to 4,000 rpm and fails back to BMW control if fresh
+RPM is unavailable. Repeating the request every 15 seconds is optional and off
+by default. Drive Mode following is only enabled by pressing its page button.
+
+The reused MG1 adapter sends BMW's existing UDS `0x2F` control for DID `0x60FD`
+only after the setting is armed and a read-only flap match succeeds. It requests
+10% for open, 90% for close, and `returnControlToECU` for OEM. The local source
+reports testing on an MG1 and a G20 320i, but this has not been verified on this
+M340i. The DME reply and `0x62FD` commanded target are shown as command feedback;
+`0x64FD` output bytes are not decoded here, so the graphic does not claim that
+the physical flap moved. Closing the app stops hold repeats; the DME is expected
+to resume its own strategy after its short-term override expires.
 
 ## Virtual Dyno card
 
@@ -61,10 +88,11 @@ conversion, and boost-candidate order; it does not copy the full app. The
 Virtual Dyno calculation is adapted from this repository's `apps/dyno`. The
 repository's MIT license and attribution are retained in `LICENSE`.
 
-The app only subscribes to SOME/IP signals and sends read-only UDS `0x22` or
-OBD `0x01` requests for boost candidates. It has no coding, reset, actuation,
-or write operations. Demo is off by default; dyno recording pauses in Demo and
-the screen clearly marks simulated live readings.
+The engine monitor and boost candidates use SOME/IP subscriptions and read-only
+UDS/OBD requests. Exhaust flap control is the only write path, isolated behind
+its disarmed-by-default setting, a matching DME capability check, and a manual
+page action. Demo is off by default; dyno recording pauses in Demo and the screen
+clearly marks simulated live readings.
 
 ## Local checks and preview
 

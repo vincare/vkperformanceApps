@@ -1,11 +1,12 @@
 {
   "id": "performance",
   "title": "PERFORMANCE",
-  "description": "Read-only live engine monitor with virtual dyno pull peaks",
-  "version": "0.6.0",
+  "description": "Live engine monitor, road-estimate dyno, and guarded BMW exhaust-flap controls",
+  "version": "0.6.1",
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": ["ID7"],
+  "requires": { "idrive7-renderd": "2.1.18", "mgu-inputgate": "1.1.0" },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
       "statusEngineSpeed2": "rs"
@@ -23,7 +24,8 @@
     "de.bmw.infotainment.drivingexcitement.FES": {
       "statusActualValueTorque2": "rs",
       "statusVehicleDynamicEngine": "rs",
-      "statusSwitchDriveDynamicSport2": "rs"
+      "statusSwitchDriveDynamicSport2": "rs",
+      "statusFESVehicleDynamicSwitchHMI": "rs"
     },
     "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
       "_instances": "SystemFunctionsInternalTasuInst1",
@@ -32,6 +34,42 @@
     }
   },
   "settings": [
+    {
+      "key": "valveControl",
+      "label": "Exhaust valve control",
+      "type": "choice",
+      "default": "off",
+      "options": [
+        ["off", "Disarmed · no car commands"],
+        ["on", "Armed · sends commands to a matched DME"]
+      ]
+    },
+    {
+      "key": "valveHold",
+      "label": "Hold exhaust valve request",
+      "type": "choice",
+      "default": "off",
+      "options": [
+        ["off", "Off · do not repeat commands"],
+        ["on", "On · resend every 15 seconds"]
+      ]
+    },
+    {
+      "key": "valveCloseLimit",
+      "label": "Close: return to BMW above",
+      "type": "choice",
+      "default": "4000",
+      "options": [
+        ["2500", "2,500 rpm"],
+        ["3000", "3,000 rpm"],
+        ["3500", "3,500 rpm"],
+        ["4000", "4,000 rpm"],
+        ["4500", "4,500 rpm"],
+        ["5000", "5,000 rpm"],
+        ["5500", "5,500 rpm"],
+        ["off", "No RPM limit · not recommended"]
+      ]
+    },
     {
       "key": "performanceDiagnostics",
       "label": "Performance diagnostics (raw)",
@@ -163,7 +201,15 @@
       "name": "MAIN",
       "kind": "canvas",
       "title": "Engine Data",
-      "buttons": [["BTN_SETTINGS", "Settings"]]
+      "buttons": [
+        ["BTN_OPEN", "Open valves"],
+        ["BTN_CLOSE", "Close valves"],
+        ["BTN_OEM", "OEM control"],
+        ["BTN_DRIVE", "By drive mode"],
+        ["BTN_PAGE", "Next page"],
+        ["BTN_PREV", "Previous page"],
+        ["BTN_SETTINGS", "Settings"]
+      ]
     }
   ],
   "config": {
