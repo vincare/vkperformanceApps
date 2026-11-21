@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Read-only engine performance monitor for BMW iDrive 7",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": ["ID7"],
@@ -11,15 +11,13 @@
       "statusEngineSpeed2": "rs"
     },
     "de.bmw.infotainment.vehicle.Vehicle": {
+      "_optional": "display pressure units used by the Sport Display boost signal",
       "statusNewCurrentUnitsStatusExt": "rs"
     },
     "de.bmw.infotainment.drivingexcitement.FES": {
       "statusActualValueTorque2": "rs",
       "statusVehicleDynamicEngine": "rs",
-      "statusVehicleDynamicEngineMaxValue": "rs",
-      "statusVehicleDynamicEngineScaling": "rs",
-      "statusSwitchDriveDynamicSport2": "rs",
-      "displaySportPowertrain": "s"
+      "statusSwitchDriveDynamicSport2": "rs"
     },
     "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
       "_instances": "SystemFunctionsInternalTasuInst1",
@@ -39,6 +37,51 @@
       "label": "Read DME candidates (read-only)",
       "type": "bool",
       "default": true
+    },
+    {
+      "key": "powerSource",
+      "label": "Power from",
+      "type": "choice",
+      "default": "sport",
+      "options": [
+        ["sport", "Sport Display"],
+        ["calc", "Torque x RPM"]
+      ]
+    },
+    {
+      "key": "powerUnit",
+      "label": "Power unit",
+      "type": "choice",
+      "default": "hp",
+      "options": [
+        ["kw", "kW"],
+        ["hp", "hp"],
+        ["ps", "PS"]
+      ]
+    },
+    {
+      "key": "maxPower",
+      "label": "Max power (100% on Sport Display)",
+      "type": "number",
+      "unit": "kW",
+      "unitBy": "powerUnit",
+      "units": {
+        "hp": {"unit": "hp", "mul": 1.34102},
+        "ps": {"unit": "PS", "mul": 1.35962}
+      },
+      "default": 215,
+      "steps": [100, 120, 135, 140, 150, 160, 170, 185, 190, 200, 215, 230, 240, 250, 260, 275, 285, 300, 320, 340, 360, 375, 390, 405, 420, 450, 460, 480, 500, 530, 550, 600]
+    },
+    {
+      "key": "boostSource",
+      "label": "Boost from",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        ["auto", "Auto (Sport Display, then DME)"],
+        ["fes", "Sport Display"],
+        ["dme", "Engine unit (OBD)"]
+      ]
     },
     {
       "key": "demo",
@@ -68,5 +111,27 @@
       "title": "Engine Data",
       "buttons": [["BTN_SETTINGS", "Settings"]]
     }
-  ]
+  ],
+  "config": {
+    "comment": "The RPM, torque, Sport Display percentage, FES boost and DME boost candidates use the same conversions and candidate order as M Vitals (MIT).",
+    "scaling": {
+      "rpm": {"factor": 0.25, "offset": 0, "invalid": 65535},
+      "torque": {"factor": 0.5, "offset": -1023.5, "invalid": 65535, "invalidFrom": 4095},
+      "sportPct": {"factor": 1, "offset": 0, "invalid": 255},
+      "boost": {"factor": 0.01, "offset": 0, "invalid": 255}
+    },
+    "dme": {
+      "ecu": 18,
+      "boost": [
+        {"did": "F470", "bytes": 2, "at": 3, "factor": 0.03125, "min": 20, "max": 600, "note": "M Vitals OBD PID 0x70 actual absolute pressure, 1/32 kPa"},
+        {"did": "F487", "bytes": 2, "at": 1, "factor": 0.03125, "min": 20, "max": 600, "note": "M Vitals OBD PID 0x87 manifold absolute pressure, 1/32 kPa"},
+        {"did": "F40B", "bytes": 1, "at": 0, "factor": 1, "min": 20, "max": 255, "note": "M Vitals OBD PID 0x0B manifold absolute pressure, kPa"},
+        {"obd": "0B", "bytes": 1, "at": 0, "factor": 1, "min": 20, "max": 255, "note": "M Vitals OBD service 01 PID 0x0B"}
+      ],
+      "baro": [
+        {"did": "F433", "bytes": 1, "at": 0, "factor": 1, "min": 50, "max": 115, "note": "M Vitals OBD PID 0x33 barometric pressure, kPa"},
+        {"obd": "33", "bytes": 1, "at": 0, "factor": 1, "min": 50, "max": 115, "note": "M Vitals OBD service 01 PID 0x33 barometric pressure"}
+      ]
+    }
+  }
 }

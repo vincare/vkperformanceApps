@@ -1,95 +1,74 @@
 # PERFORMANCE
 
-A read-only engine performance display for BMW HU_MGU / iDrive 7. The first
-page is **Engine Data**, drawn with the same segmented gauges, M-style panels,
-and peak markers used by M Vitals. The default palette is black and red; M
-Tricolour is also available in Settings.
+PERFORMANCE is a read-only BMW HU_MGU / iDrive 7 engine monitor. Version 0.3.0
+keeps its existing black-and-red sports display and uses the same signal
+mappings and calculation approach as the locally installed source project
+`idrive7-apps-main/apps/car_vitals` (M Vitals 2.27.9).
 
-The display keeps the BMW Sport Display power and torque percentages separate
-from the calculated horsepower and the direct torque reading. Demo mode is
-labelled `DEMO · NOT VEHICLE DATA`; it never claims its generated values came
-from the car.
+## What the readings mean
 
-## What each number means
+- **RPM** comes from BMW SOME/IP `CDS.statusEngineSpeed2`, field
+  `actualValueRPMEngineCrankshaft`, scaled by 0.25 rpm per raw count.
+- **Torque** comes from BMW SOME/IP `FES.statusActualValueTorque2`, field
+  `actualValueTorqueCrankshaft`, scaled as `raw × 0.5 − 1023.5 Nm`. Negative
+  engine-braking values are shown as zero, as in M Vitals.
+- **Power** prefers BMW's `FES.statusVehicleDynamicEngine` field
+  `displaySportEnginePower`. That field is a 0–100% Sport Display reading,
+  **not a horsepower value**. PERFORMANCE multiplies it by the configured
+  maximum power in kW, then converts to kW, hp, or PS. The app setting defaults
+  to 215 kW, matching M Vitals' default; set both apps to the same maximum and
+  power unit to compare their numbers exactly. If the percentage is missing or
+  `Torque × RPM` is selected, power is estimated as `Nm × RPM / 9549` kW.
+- **Torque scale** is BMW's separate Sport Display percentage from
+  `displaySportEngineTorque`. The Nm value remains the direct FES torque signal.
+- **Boost** in Auto mode prefers the FES Sport Display signal once it has moved
+  by at least 0.03 bar. Its raw scale follows the M Vitals mapping: 0.01 bar
+  per count in bar/kPa mode, or 0.1 psi per count converted to bar in psi mode.
+  M Vitals marks this FES scale as unverified, so PERFORMANCE labels it
+  approximate. If it is not trusted, the app tries the same ordered read-only
+  engine-unit candidates as M Vitals: DIDs `F470`, `F487`, `F40B`, then OBD PID
+  `0B`. These are decoded as absolute kPa. It subtracts barometric pressure
+  (`F433`, then OBD PID `33`) to show gauge pressure in bar. If barometric
+  pressure cannot be read, 101.3 kPa is used and the result is labelled as an
+  estimate. An explicit source setting can select Sport Display or DME/OBD.
 
-- **HP** is calculated from the current torque and RPM using `HP = Nm × RPM /
-  7127.2`. It is always marked approximate. The BMW FES percentage and maximum
-  fields are captured in the diagnostic log for comparison, but their raw
-  maximum field has no unit in the catalog, so this app does not convert it to
-  horsepower.
-- **Torque** prefers the BMW FES `statusActualValueTorque2` crankshaft signal.
-  It uses the same 0.5 Nm/bit, zero-at-2047 decoding used by M Vitals and Live
-  Data. If that signal is missing, the app can show the DME8FF_R `0x5717`
-  read-only candidate, whose SGBD entry is signed 0.1 Nm/bit and describes
-  engine torque at the clutch. The source is labelled on the screen/log.
-- **Boost** prefers DME8FF_R `0x4A2D` manifold absolute pressure minus `0x4201`
-  ambient pressure, converted from hPa to bar. These DME values are only used
-  when both replies are fresh. If they are unavailable, the app falls back to
-  the FES Sport Display boost signal and uses the car's selected pressure unit;
-  this fallback is marked approximate because the upstream app code marks the
-  Sport Display scale as unverified.
-- **BMW Sport Display scale bars** show the raw 0–100 power and torque
-  percentages from `statusVehicleDynamicEngine`, not converted HP or Nm.
+The power percentage, Nm, and RPM are raw BMW signals with the above documented
+scaling. HP/hp is a converted reading, not an original BMW HP signal. Boost is
+either converted from the Sport Display's undocumented scale or calculated
+from engine-unit absolute pressure minus barometric pressure. DME replies and
+the pressure interpretation still need confirmation on this specific car.
 
-When a provider, value, unit, or fresh payload is missing, the display shows
-`SIGNAL UNAVAILABLE` / `--`. Demo data is off by default and is visibly labelled
-`DEMO · NOT VEHICLE DATA` when enabled.
+## M Vitals source and license
 
-## Signal evidence
+M Vitals source is present locally at
+`CUSTOM APPS/idrive7-apps-main/apps/car_vitals`; its source is also public in
+the upstream repository. PERFORMANCE ports the small signal scaling,
+power-selection, unit-conversion, and ordered boost-candidate rules; it does
+not copy M Vitals' interface or its full application source. The upstream
+repository is MIT licensed. Its copyright and license notice are retained in
+the repository's root `LICENSE` file.
 
-The Some/IP identifiers below were parsed from the supplied HU_MGU
-`someip-interfaces.json`. Its instance IDs are `1` for the listed services.
-Getter and notifier IDs are catalog values, not guessed names.
+## Read-only and demo behavior
 
-| Value | Service / field | Service ID | Getter / notifier | Catalog data | Unit / status |
-|---|---|---:|---|---|---|
-| RPM | `vehicle.CDS.statusEngineSpeed2` | `46355 / 0xB513` | getter `25`; notifier `32793 / 0x8019` | `UInt16 actualValueRPMEngineCrankshaft`, default `65535` | `raw × 0.25 rpm` from the existing app code; live car not yet checked |
-| Torque | `drivingexcitement.FES.statusActualValueTorque2` | `46349 / 0xB50D` | getter `1`; notifier `32769 / 0x8001` | `UInt16 actualValueTorqueCrankshaft`, default `4095` | existing M Vitals / Live Data mapping: `raw × 0.5 − 1023.5 Nm`; live car not yet checked |
-| Sport power / torque scale | `FES.statusVehicleDynamicEngine` | `46349 / 0xB50D` | getter `3`; notifier `32771 / 0x8003` | `UInt8 displaySportEnginePower`, `displaySportEngineTorque`, default `255` | interpreted as percent by existing code; kept separate from physical HP/Nm |
-| Sport scale max | `FES.statusVehicleDynamicEngineMaxValue` | `46349 / 0xB50D` | getter `40`; notifier `32808 / 0x8028` | two `UInt16` values | logged raw; no physical unit established |
-| Sport scale base | `FES.statusVehicleDynamicEngineScaling` | `46349 / 0xB50D` | getter `2`; notifier `32770 / 0x8002` | two scaling enums | logged raw; not used to invent a physical unit |
-| Sport Display boost | `FES.statusSwitchDriveDynamicSport2` | `46349 / 0xB50D` | getter `39`; notifier `32807 / 0x8007` | `UInt8 displayBoostPressure`, default `255` | conversion follows the upstream M Vitals / Live Data implementation; remains marked approximate until compared in the car |
-| Pressure unit | `vehicle.Vehicle.statusNewCurrentUnitsStatusExt` | `46352 / 0xB510` | getter `46`; notifier `32814 / 0x802E` | `unitOfMeasurementAirPressure` | catalog enum interpreted by existing code as bar/kPa/psi |
-| Sport powertrain payload | `FES.displaySportPowertrain` | `46349 / 0xB50D` | notifier `32772 / 0x8004`; no getter | two `UInt16` values | captured raw only; physical units not established |
+The DME path uses the repository's `ReadOnlyDiag` helper and sends only UDS
+`0x22` reads or OBD service `0x01` reads. It does not request diagnostic
+sessions, security access, coding, resets, actuations, or writes. DME reads
+only run while RPM is live, and can be disabled in Settings. Demo data is off
+by default and the screen marks it `DEMO · NOT VEHICLE DATA` when enabled.
 
-Read-only DME candidates come from the bundled `DME8FF_R` SGBD reference in
-this project. The app makes UDS service `0x22` reads to ECU `0x12` only while
-RPM is live and the diagnostic setting is enabled:
-
-| DID | SGBD description | Decode in catalog | Use |
-|---|---|---|---|
-| `0x4520` | Effective engine power | `UInt16 × 0.015258789062`; catalog has no physical unit | raw/scaled diagnostic only; never shown as HP |
-| `0x5717` | Engine torque without anti-jerk intervention / clutch torque | signed `Int16 × 0.1 Nm` | fallback torque reading if the FES signal is unavailable |
-| `0x4A2D` | Measured intake manifold absolute pressure | `UInt16 × 0.078125 hPa` | first half of boost gauge pressure |
-| `0x4201` | Ambient pressure | `UInt16 × 0.0390625 hPa` | subtracted from `0x4A2D` |
-
-The local ECU response is not yet known. A catalog entry is not proof that this
-specific DME software will answer, so unavailable/refused replies are logged
-and never replaced with invented values. No write, reset, actuator, session,
-security-access, or coding request is present. The DME transport uses the
-project's `ReadOnlyDiag` helper, which permits UDS `0x22` reads only.
-
-## Diagnostics and lifecycle
-
-`Settings` opens the app's normal settings / QR-log route. With raw diagnostics
-enabled, the rotating app log records provider availability, subscription and
-getter outcomes, raw payloads, decoded values, units, timestamps, invalid or
-stale data, and DME reply errors. The `Read DME candidates` option can disable
-the read-only DME probes while leaving SOME/IP live display data active.
-
-On app shutdown, display timers stop, queued DME reads are cancelled, and every
-Some/IP subscription's `shutdown()` method is called. The app never changes
-BMW files or services.
-
-## Build and offline preview
+## Local checks and preview
 
 From the repository root on Windows:
 
 ```powershell
+node kit/tools/test_performance.js
 python kit/tools/build.py performance --preview-only
-node kit/tools/preview.js dist/performance preview/performance --set demo=on render
+node kit/tools/preview.js dist/performance preview/performance-demo --set demo=on render
+node kit/tools/preview.js dist/performance preview/performance-live --set demo=off render
 ```
 
-The local preview-only build does not contain BMW's SDK and is not an
-installable package. MGU Store builds need its SDK donor from a BMW app on the
-unit; `oap-sdk` and install packages must not be committed to GitHub.
+The preview-only build does not include BMW's OAP SDK and is not installable.
+No local test can verify the car's actual signal availability, DME candidate
+replies, the FES boost scale, or equality with the settings in the installed M
+Vitals app. Those points require comparing both apps during a real drive or
+controlled stationary engine test.

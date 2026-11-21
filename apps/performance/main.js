@@ -3,14 +3,14 @@
 /**
  * Performance - read-only engine monitor for MGU / iDrive 7.
  *
- * HP is calculated from engine torque and RPM (so it is deliberately marked
- * approximate). Torque and Sport Display values come from FES SOME/IP.
- * DME boost uses absolute manifold pressure minus ambient pressure when both
- * read-only SGBD values answer; otherwise the OEM Sport Display boost is used
- * with its still-unverified scale clearly identified.
+ * Performance values use the same BMW signals, scaling, and source selection
+ * as M Vitals. The Sport Display reports power as a percentage, so its HP/kW
+ * readout is that percentage times the configured vehicle maximum. Torque ×
+ * RPM is the fallback when the Sport Display percentage is unavailable.
  */
 const mgu = require('./kit/mgu');
 const G = require('./kit/gauges');
+const Calc = require('./calculations');
 const { ReadOnlyDiag } = require('./kit/readonly-diag');
 const { DidReader } = require('./kit/dids');
 
@@ -18,21 +18,10 @@ const W = 1600, H = 520;
 const FRESH_MS = 4500;
 const RENDER_MS = 90;
 const DME_POLL_MS = 1200;
-const DME_ECU = 0x12;
 const PEAK_HOLD_MS = 15000;
 const RPM_MAX = 8000;
 const BOOST_MAX_BAR = 2.5;
 const PRESSURE_UNITS = { 1: 'BAR', 2: 'KPA', 3: 'PSI', BAR: 'BAR', KPA: 'KPA', PSI: 'PSI' };
-
-// Read-only UDS values from the repository's DME8FF_R catalog. The power
-// DID's factor is present there, but its physical unit is not; it is logged
-// for calibration and never shown as HP.
-const DME = {
-    power: { did: '4520', bytes: 2, factor: 0.015258789062, min: 0, max: 1000, timeoutMs: 700 },
-    torque: { did: '5717', bytes: 2, signed: true, factor: 0.1, min: -1500, max: 1500, timeoutMs: 700 },
-    manifold: { did: '4A2D', bytes: 2, factor: 0.078125, min: 0, max: 5120, timeoutMs: 700 },
-    ambient: { did: '4201', bytes: 2, factor: 0.0390625, min: 0, max: 2560, timeoutMs: 700 },
-};
 
 function finite(value) { return typeof value === 'number' && isFinite(value); }
 function json(value) {
@@ -55,14 +44,19 @@ mgu.run({
     async start(ctx) {
         const { ui, settings, log } = ctx;
         const diagnostics = () => settings.get('performanceDiagnostics') === true;
+        const config = ctx.spec && ctx.spec.config || {};
+        const scaling = config.scaling || {};
+        const dme = Object.assign({ ecu: 0x12, boost: [], baro: [] }, config.dme || {});
         const state = {
             providers: Object.create(null),
-            rpm: metric(), torqueFes: metric(), torqueDme: metric(),
+            rpm: metric(), torqueFes: metric(),
             powerPct: metric(), torquePct: metric(),
-            boostFes: metric(), manifold: metric(), ambient: metric(),
-            pressureUnit: null, dmePower: metric(),
+            boostFes: metric(), boostDme: metric(), pressureUnit: null,
+            baroKpa: 101.3, baroMeasured: false, baroAt: 0,
             stopped: false, dmeBusy: false, dmeReady: false,
         };
+        let firstFesBoost = null, fesBoostTrusted = false;
+        let firstDmeBoost = null, dmeBoostTrusted = false;
         const peaks = { live: Object.create(null), demo: Object.create(null) };
         const subscriptions = [];
         const diagnosticDedup = Object.create(null);
@@ -146,41 +140,34 @@ mgu.run({
 
         function setRpm(payload, source) {
             const raw = payload && payload.actualValueRPMEngineCrankshaft;
-            const value = finite(raw) && raw >= 0 && raw < 65535 ? raw * 0.25 : null;
+            const value = Calc.rpm(raw, scaling.rpm);
             updateMetric('rpm', raw, value, 'rpm', source, value === null ? 'invalid' : 'live');
         }
 
         function setFesTorque(payload, source) {
             const raw = payload && payload.actualValueTorqueCrankshaft;
-            // Same empirically used M Vitals mapping: signed torque around raw 2047,
-            // half a Nm per step; 4095 is the BMW invalid value.
-            let value = finite(raw) && raw >= 0 && raw < 4095 ? raw * 0.5 - 1023.5 : null;
-            if (finite(value)) value = Math.max(0, value);
+            const value = Calc.torque(raw, scaling.torque);
             updateMetric('torqueFes', raw, value, 'Nm', source, value === null ? 'invalid' : 'live');
         }
 
         function setFesPercentages(payload, source) {
             const power = payload && payload.displaySportEnginePower;
             const torque = payload && payload.displaySportEngineTorque;
-            const p = finite(power) && power >= 0 && power <= 100 ? power : null;
-            const t = finite(torque) && torque >= 0 && torque <= 100 ? torque : null;
+            const p = Calc.percentage(power, scaling.sportPct);
+            const t = Calc.percentage(torque, scaling.sportPct);
             updateMetric('powerPct', power, p, '%', source, p === null ? 'invalid' : 'live');
             updateMetric('torquePct', torque, t, '%', source, t === null ? 'invalid' : 'live');
         }
 
         function setFesBoost(payload, source) {
             const raw = payload && payload.displayBoostPressure;
-            const value = finite(raw) && raw >= 0 && raw < 255 ? convertFesBoost(raw) : null;
-            const unit = state.pressureUnit ? 'bar' : 'unknown';
-            updateMetric('boostFes', raw, value, unit, source, value === null ? (raw === 255 ? 'invalid' : 'unit-unknown') : 'live');
-        }
-
-        function convertFesBoost(raw) {
-            if (!finite(raw) || !state.pressureUnit) return null;
-            let bar;
-            if (state.pressureUnit === 'PSI') bar = raw * 0.1 / 14.5038;
-            else bar = raw * 0.01; // BAR: .01 bar/bit; KPA: 1 kPa/bit = .01 bar/bit.
-            return finite(bar) && bar >= 0 && bar <= 4.5 ? bar : null;
+            const value = Calc.fesBoostBar(raw, state.pressureUnit, scaling.boost);
+            if (finite(value)) {
+                if (firstFesBoost === null) firstFesBoost = value;
+                else if (source !== 'reconvert' && Math.abs(value - firstFesBoost) >= 0.03) fesBoostTrusted = true;
+            }
+            updateMetric('boostFes', raw, value, 'bar', source,
+                value === null ? (raw === 255 ? 'invalid' : 'unit-unknown') : 'live');
         }
 
         function setPressureUnits(payload, source) {
@@ -192,15 +179,6 @@ mgu.run({
             queueRender();
         }
 
-        function logRawOnly(name, payload, source) {
-            const rec = { raw: payload, source: source || 'event', unit: 'unverified' };
-            const key = 'raw:' + name, signature = json(rec), now = Date.now(), old = diagnosticDedup[key];
-            if (diagnostics() && (!old || old.signature !== signature || now - old.at >= 30000)) {
-                diagnosticDedup[key] = { signature, at: now };
-                diagLog('payload', { signal: name, raw: payload, unit: 'unverified', source: source || 'event' });
-            }
-        }
-
         const CDS = 'de.bmw.infotainment.vehicle.CDS';
         const VEHICLE = 'de.bmw.infotainment.vehicle.Vehicle';
         const FES = 'de.bmw.infotainment.drivingexcitement.FES';
@@ -209,21 +187,18 @@ mgu.run({
         startWatch(FES, {
             statusActualValueTorque2: setFesTorque,
             statusVehicleDynamicEngine: setFesPercentages,
-            statusVehicleDynamicEngineMaxValue: (v, source) => logRawOnly('FES.statusVehicleDynamicEngineMaxValue', v, source),
-            statusVehicleDynamicEngineScaling: (v, source) => logRawOnly('FES.statusVehicleDynamicEngineScaling', v, source),
             statusSwitchDriveDynamicSport2: setFesBoost,
-            displaySportPowertrain: (v, source) => logRawOnly('FES.displaySportPowertrain', v, source),
         });
 
         // Read-only DME candidates: only ISO-TP/UDS 0x22 ReadDataByIdentifier.
         // There are no setter, reset, session, or actuation calls in this app.
         const readOnlyLink = new ReadOnlyDiag(ctx.signals, log, { gapMs: 80, silentAfter: 3 });
-        reader = new DidReader(readOnlyLink, { ecu: DME_ECU });
+        reader = new DidReader(readOnlyLink, { ecu: dme.ecu });
         async function initDme() {
             if (dmeInit) return dmeInit;
             dmeInit = Promise.resolve().then(() => readOnlyLink.init()).then(() => {
                 state.dmeReady = readOnlyLink.ready;
-                diagLog('dme_link_ready', { ready: state.dmeReady, error: readOnlyLink.error || null, ecu: DME_ECU });
+                diagLog('dme_link_ready', { ready: state.dmeReady, error: readOnlyLink.error || null, ecu: dme.ecu });
                 return state.dmeReady;
             }).catch((e) => {
                 state.dmeReady = false;
@@ -238,32 +213,52 @@ mgu.run({
         async function pollDme() {
             const now = Date.now();
             if (state.stopped || state.dmeBusy || settings.get('demo') === 'on' ||
-                settings.get('readDmeCandidates') !== true || !diagnostics()) return;
+                settings.get('readDmeCandidates') !== true) return;
             if (!fresh(state.rpm, now) || state.rpm.value < 500 || now - lastDmeCycle < DME_POLL_MS) return;
+            const boostSource = settings.get('boostSource') || 'auto';
+            const needsDmeBoost = boostSource === 'dme' ||
+                (boostSource === 'auto' && !(fresh(state.boostFes, now) && fesBoostTrusted));
+            if (!needsDmeBoost || boostSource === 'fes') return;
             lastDmeCycle = now;
             state.dmeBusy = true;
             try {
                 if (!await initDme()) return;
-                const jobs = [
-                    ['power', DME.power], ['torque', DME.torque],
-                    ['manifold', DME.manifold], ['ambient', DME.ambient],
-                ];
-                for (const [name, candidate] of jobs) {
-                    if (state.stopped) break;
-                    const value = await reader.read(candidate);
-                    const result = reader.raws[reader.key(candidate)] || {};
-                    const rawBytes = result.bytes || result.why || (value === null ? 'no reply' : null);
-                    if (name === 'power') {
-                        updateMetric('dmePower', rawBytes, value, 'unit unverified', 'DME DID 4520', value === null ? 'unavailable' : 'live');
-                    } else if (name === 'torque') {
-                        updateMetric('torqueDme', rawBytes, value === null ? null : Math.max(0, value), 'Nm', 'DME DID 5717', value === null ? 'unavailable' : 'live');
-                    } else if (name === 'manifold') {
-                        updateMetric('manifold', rawBytes, value, 'hPa abs', 'DME DID 4A2D', value === null ? 'unavailable' : 'live');
-                    } else {
-                        updateMetric('ambient', rawBytes, value, 'hPa abs', 'DME DID 4201', value === null ? 'unavailable' : 'live');
-                    }
-                    if (value === null) diagLog('dme_candidate_unavailable', { did: candidate.did, why: result.why || 'no reply', response: result.bytes || '' });
+                if (state.stopped) return;
+                // M Vitals refreshes barometric pressure before reading absolute boost.
+                if (Date.now() - state.baroAt >= 60000) {
+                    state.baroAt = Date.now();
+                    const baroKpa = await reader.value('baro', dme.baro);
+                    if (baroKpa !== null) { state.baroKpa = baroKpa; state.baroMeasured = true; }
+                    const baroAttempts = dme.baro.map((c) => {
+                        const r = reader.raws[reader.key(c)] || {};
+                        return { candidate: DidReader.label(c), ok: !!r.ok, reason: r.why || '', raw: r.bytes || '' };
+                    });
+                    diagLog('dme_baro', { kpa: state.baroKpa, measured: state.baroMeasured, attempts: baroAttempts });
                 }
+                const absoluteKpa = await reader.value('boost', dme.boost);
+                const candidate = dme.boost[reader.pick.boost || 0];
+                const result = candidate && reader.raws[reader.key(candidate)] || {};
+                const attempts = dme.boost.map((c) => {
+                    const r = reader.raws[reader.key(c)] || {};
+                    return { candidate: DidReader.label(c), ok: !!r.ok, reason: r.why || '', raw: r.bytes || '' };
+                });
+                if (absoluteKpa === null) {
+                    updateMetric('boostDme', attempts, null, 'bar', 'DME/OBD boost candidates', 'unavailable');
+                    diagLog('dme_boost_unavailable', { ecu: dme.ecu, attempts });
+                    return;
+                }
+                const value = Calc.dmeBoostBar(absoluteKpa, state.baroKpa);
+                if (finite(value)) {
+                    if (firstDmeBoost === null) firstDmeBoost = value;
+                    else if (Math.abs(value - firstDmeBoost) >= 0.03) dmeBoostTrusted = true;
+                }
+                const source = candidate ? 'DME ' + DidReader.label(candidate) : 'DME/OBD';
+                updateMetric('boostDme', result.bytes || attempts, value, 'bar', source, value === null ? 'invalid' : 'live');
+                diagLog('dme_boost_payload', {
+                    ecu: dme.ecu, candidate: candidate ? DidReader.label(candidate) : null,
+                    raw: result.bytes || '', absoluteKpa, baroKpa: state.baroKpa,
+                    baroMeasured: state.baroMeasured, boostBar: value, moving: dmeBoostTrusted,
+                });
             } catch (e) {
                 diagLog('dme_poll_error', { error: shortError(e) });
                 log.warn('DME poll: ' + shortError(e));
@@ -274,31 +269,42 @@ mgu.run({
 
         function selectTorque(now) {
             if (fresh(state.torqueFes, now)) return { value: state.torqueFes.value, source: 'BMW SPORT SIGNAL' };
-            if (fresh(state.torqueDme, now)) return { value: state.torqueDme.value, source: 'DME READ-ONLY' };
             return null;
         }
 
         function boostValue(now) {
-            if (fresh(state.manifold, now) && fresh(state.ambient, now)) {
-                const hpa = state.manifold.value - state.ambient.value;
-                const bar = Math.max(0, hpa / 1000);
-                if (finite(bar) && bar <= 4.5) return { value: bar, approximate: false, source: 'DME GAUGE · MANIFOLD − AMBIENT' };
+            const source = settings.get('boostSource') || 'auto';
+            if (source !== 'dme' && fresh(state.boostFes, now) && (source === 'fes' || fesBoostTrusted)) {
+                return { value: state.boostFes.value, approximate: true, source: 'BMW SPORT DISPLAY' };
             }
-            if (fresh(state.boostFes, now)) return { value: state.boostFes.value, approximate: true, source: 'BMW SPORT DISPLAY · SCALE CHECK PENDING' };
+            if (source !== 'fes' && fresh(state.boostDme, now) && (source === 'dme' || dmeBoostTrusted)) {
+                return { value: state.boostDme.value, approximate: !state.baroMeasured, source: state.boostDme.source };
+            }
             return null;
         }
 
         function current(demo) {
             const now = Date.now();
+            const maxPowerKw = settings.get('maxPower') || 215;
+            const powerUnit = settings.get('powerUnit') || 'hp';
+            const powerFor = (percent, torque, rpm) => {
+                const powerKw = Calc.powerKw(percent, torque, rpm, settings.get('powerSource') || 'sport', maxPowerKw);
+                return powerKw ? {
+                    kw: powerKw.kw, value: Calc.powerValue(powerKw.kw, powerUnit),
+                    unit: Calc.powerUnit(powerUnit), source: powerKw.source,
+                    approximate: powerKw.approximate,
+                } : null;
+            };
             if (demo) {
                 const sec = now / 1000;
                 const rpm = 1800 + 5200 * (0.5 + 0.5 * Math.sin(sec * 0.34));
-                const torque = 450 + 180 * Math.max(0, Math.sin(sec * 0.34 - 0.7));
-                const hp = torque * rpm / 7127.2;
+                const torque = 200 + 80 * Math.max(0, Math.sin(sec * 0.34 - 0.7));
+                const demoPowerKw = Math.max(0, torque * rpm / 9549);
+                const powerPct = Math.min(100, demoPowerKw / maxPowerKw * 100);
                 const boost = { value: 0.3 + 1.2 * Math.max(0, Math.sin(sec * 0.34)), approximate: true, source: 'DEMO' };
                 const result = {
-                    demo: true, rpm, torque, torqueSource: 'DEMO', hp,
-                    powerPct: Math.min(100, hp / 5.5), torquePct: Math.min(100, torque / 7),
+                    demo: true, rpm, torque, torqueSource: 'DEMO', power: powerFor(powerPct, torque, rpm), powerUnit,
+                    powerPct, torquePct: Math.min(100, torque / 7),
                     boost,
                 };
                 result.peaks = peakValues('demo', result, now);
@@ -306,10 +312,12 @@ mgu.run({
             }
             const rpm = fresh(state.rpm, now) ? state.rpm.value : null;
             const tq = selectTorque(now);
-            const hp = rpm !== null && tq ? Math.max(0, tq.value) * rpm / 7127.2 : null;
+            const powerPct = fresh(state.powerPct, now) ? state.powerPct.value : null;
+            const torque = tq ? tq.value : null;
             const result = {
-                demo: false, rpm, torque: tq ? tq.value : null, torqueSource: tq ? tq.source : null, hp,
-                powerPct: fresh(state.powerPct, now) ? state.powerPct.value : null,
+                demo: false, rpm, torque, torqueSource: tq ? tq.source : null,
+                power: powerFor(powerPct, torque, rpm), powerUnit,
+                powerPct,
                 torquePct: fresh(state.torquePct, now) ? state.torquePct.value : null,
                 boost: boostValue(now),
             };
@@ -329,7 +337,7 @@ mgu.run({
                 return source[key].value;
             }
             return {
-                rpm: peak('rpm', values.rpm), hp: peak('hp', values.hp),
+                rpm: peak('rpm', values.rpm), power: peak('power', values.power && values.power.value),
                 torque: peak('torque', values.torque), powerPct: peak('powerPct', values.powerPct),
                 torquePct: peak('torquePct', values.torquePct), boost: peak('boost', values.boost && values.boost.value),
             };
@@ -344,13 +352,15 @@ mgu.run({
                 ramp: 'hot', peak: s.peaks.rpm,
             });
             G.segBar(cv, t, 24, G.TOP + 242 + half, 1062, 226 - half, {
-                label: !s.boost ? 'Boost' : s.boost.approximate ? 'Boost · Sport Display · Approx.' : 'Boost · DME Read-Only',
+                label: s.demo ? 'Boost · DEMO' : !s.boost ? 'Boost' : s.boost.source === 'BMW SPORT DISPLAY'
+                    ? 'Boost · Sport Display · Approx.'
+                    : 'Boost · DME Read-Only' + (s.boost.approximate ? ' · Baro estimate' : ''),
                 value: s.boost ? s.boost.value : null, unit: 'bar', decimals: 2,
                 min: 0, max: BOOST_MAX_BAR, step: 0.125, scale: { every: 0.5, decimals: 1 },
                 ramp: 'hot', peak: s.peaks.boost,
             });
 
-            G.panel(cv, t, 1110, G.TOP, 466, 190, 'BMW Sport Display');
+            G.panel(cv, t, 1110, G.TOP, 466, 190, s.demo ? 'DEMO DATA' : 'BMW Sport Display');
             G.bar(cv, t, 1132, G.TOP + 48, 422, 58, {
                 label: 'Power scale', value: s.powerPct, unit: '%', min: 0, max: 100,
                 step: 20, decimals: 0, peak: s.peaks.powerPct, ramp: 'hot',
@@ -360,10 +370,14 @@ mgu.run({
                 step: 20, decimals: 0, peak: s.peaks.torquePct, ramp: 'hot',
             });
 
-            const hpText = s.hp === null ? '--' : '~' + formatNumber(s.hp, 0);
+            const powerMax = Calc.powerValue(settings.get('maxPower') || 215, s.powerUnit);
+            const powerText = !s.power ? '--' : (s.power.approximate ? '~' : '') + formatNumber(s.power.value, 0);
             G.bar(cv, t, 1110, G.TOP + 228, 466, 106, {
-                label: 'Power · estimated', value: s.hp, text: hpText, unit: 'hp', min: 0, max: 600,
-                step: 100, decimals: 0, peak: s.peaks.hp, peakText: true, ramp: 'hot',
+                label: s.demo ? 'Power · DEMO' : !s.power ? 'Power' : s.power.source === 'BMW SPORT DISPLAY'
+                    ? 'Power · Sport Display % × max' : 'Power · torque × RPM · approx.',
+                value: s.power ? s.power.value : null, text: powerText,
+                unit: Calc.powerUnit(s.powerUnit), min: 0, max: powerMax, niceMax: true,
+                decimals: 0, peak: s.peaks.power, peakText: true, ramp: 'hot',
             });
             const torqueText = s.torque === null ? '--' : formatNumber(s.torque, 0);
             G.bar(cv, t, 1110, G.TOP + 358, 466, 106, {
@@ -409,6 +423,11 @@ mgu.run({
 
         if (ctx.app && typeof ctx.app.on === 'function') ctx.app.on('shutdown', cleanup);
         settings.onChange((key) => {
+            if (key === 'maxPower' || key === 'powerSource' || key === 'powerUnit') {
+                delete peaks.live.power;
+                delete peaks.demo.power;
+            }
+            if (key === 'boostSource') delete peaks.live.boost;
             if (key === 'demo' && settings.get('demo') === 'on' && !demoTimer) demoTimer = setInterval(queueRender, 250);
             if (key === 'demo' && settings.get('demo') !== 'on' && demoTimer) { clearInterval(demoTimer); demoTimer = null; }
             queueRender();
