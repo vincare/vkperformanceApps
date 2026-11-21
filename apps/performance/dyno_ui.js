@@ -50,22 +50,33 @@ function chart(cv, G, t, s, current, baseline) {
     const powerMax = nice(Math.max(150, ...curves.reduce((all, run) => all.concat(run.curve.map((p) => powerValue(p.powerW, unit))), [])) * 1.12, 50);
     const minTorqueMax = torqueUnit === 'kgm' ? 15 : torqueUnit === 'lbft' ? 110 : 150;
     const torqueStep = torqueUnit === 'kgm' ? 5 : 50;
-    const torqueMax = nice(Math.max(minTorqueMax, ...curves.reduce((all, run) => all.concat(run.curve.map((p) => p.torqueNm * torqueFactor(torqueUnit))), [])) * 1.12, torqueStep);
+    const torqueMax = nice(Math.max(minTorqueMax, ...curves.reduce((all, run) => all.concat(run.curve.map((p) => {
+        const roadTorque = p.torqueNm * torqueFactor(torqueUnit);
+        const ecuTorque = s.ecuTorque && typeof p.ecuTorqueNm === 'number' ? p.ecuTorqueNm * torqueFactor(torqueUnit) : 0;
+        return Math.max(roadTorque, ecuTorque);
+    })), [])) * 1.12, torqueStep);
     const x = 112, y = 188, w = 820, h = 202;
     const X = (rpm) => x + (clamp(rpm, xMin, xMax) - xMin) / (xMax - xMin) * w;
     const YP = (value) => y + h - clamp(powerValue(value, unit) / powerMax, 0, 1) * h;
     const YT = (value) => y + h - clamp(value * torqueFactor(torqueUnit) / torqueMax, 0, 1) * h;
 
-    for (let i = 0; i <= 4; i++) {
-        const yy = y + h * i / 4;
-        cv.fillRect(x, yy, w, 1, G.withAlpha(t.tick, i === 4 ? 0.55 : 0.25));
-        cv.text(String(Math.round(powerMax * (1 - i / 4))), x - 12, yy + 6, 13, G.withAlpha(RED, 0.88), { align: 'right', font: 'bold' });
-        cv.text(String(Math.round(torqueMax * (1 - i / 4))), x + w + 12, yy + 6, 13, G.withAlpha(TORQUE, 0.94), { font: 'bold' });
+    // Match DYNO's six clear scale marks (five equal intervals). Four intervals
+    // produced awkward torque labels such as 188 / 375 / 563.
+    for (let i = 0; i <= 5; i++) {
+        const fraction = i / 5;
+        const yy = y + h * fraction;
+        cv.fillRect(x, yy, w, 1, G.withAlpha(t.tick, i === 5 ? 0.5 : 0.24));
+        cv.fillRect(x - 5, yy, 5, 1.5, G.withAlpha(RED, 0.72));
+        cv.fillRect(x + w, yy, 5, 1.5, G.withAlpha(TORQUE, 0.72));
+        cv.text(String(Math.round(powerMax * (1 - fraction))), x - 12, yy + 5, 14, G.withAlpha(RED, 0.92), { align: 'right', font: 'bold' });
+        cv.text(number(torqueMax * (1 - fraction), torqueDigits(torqueUnit)), x + w + 12, yy + 5, 14, G.withAlpha(TORQUE, 0.96), { font: 'bold' });
     }
-    const rpmStep = xMax <= 6000 ? 1000 : 2000;
-    for (let rpm = 2000; rpm < xMax; rpm += rpmStep) {
-        cv.fillRect(X(rpm), y, 1, h, G.withAlpha(t.tick, 0.2));
-        cv.text(String(rpm / 1000), X(rpm), y + h + 20, 13, t.dim, { align: 'center' });
+    // Every 1,000 rpm, with both ends of the displayed range labelled.
+    for (let rpm = xMin; rpm <= xMax; rpm += 1000) {
+        const xx = X(rpm);
+        cv.fillRect(xx, y, 1, h, G.withAlpha(t.tick, rpm === xMin || rpm === xMax ? 0.3 : 0.18));
+        cv.fillRect(xx, y + h, 1.5, 5, G.withAlpha(t.dim, 0.75));
+        cv.text(String(rpm / 1000), xx, y + h + 20, 14, t.dim, { align: 'center', font: 'bold' });
     }
     cv.text(powerName(unit).toUpperCase(), x - 12, y - 12, 12, RED, { align: 'right', font: 'bold' });
     cv.text(torqueName(torqueUnit).toUpperCase(), x + w + 12, y - 12, 12, TORQUE, { font: 'bold' });
@@ -78,9 +89,24 @@ function chart(cv, G, t, s, current, baseline) {
             x + w / 2, y + 130, 14, t.dim, { align: 'center' });
         return;
     }
+    function linePoints(run, key, mapY) {
+        const samples = run.curve.filter((p) => typeof p.rpm === 'number' && isFinite(p.rpm) &&
+            typeof p[key] === 'number' && isFinite(p[key])).slice().sort((a, b) => a.rpm - b.rpm);
+        const points = [];
+        for (let i = 1; i < samples.length; i++) {
+            const a = samples[i - 1], b = samples[i];
+            if (b.rpm <= a.rpm || b.rpm < xMin || a.rpm > xMax) continue;
+            const atRpm = (rpm) => a[key] + (b[key] - a[key]) * (rpm - a.rpm) / (b.rpm - a.rpm);
+            const from = Math.max(a.rpm, xMin), to = Math.min(b.rpm, xMax);
+            const first = [X(from), mapY(atRpm(from))], last = [X(to), mapY(atRpm(to))];
+            const previous = points[points.length - 1];
+            if (!previous || Math.abs(previous[0] - first[0]) > 0.01 || Math.abs(previous[1] - first[1]) > 0.01) points.push(first);
+            points.push(last);
+        }
+        return points;
+    }
     function drawLine(run, key, mapY, color, width) {
-        const points = run.curve.filter((p) => typeof p[key] === 'number' && isFinite(p[key]))
-            .map((p) => [X(p.rpm), mapY(p[key])]);
+        const points = linePoints(run, key, mapY);
         if (points.length > 1) cv.polyline(points, width, color);
         return points;
     }
@@ -89,13 +115,20 @@ function chart(cv, G, t, s, current, baseline) {
         drawLine(baseline, 'torqueNm', YT, G.withAlpha(t.dim, 0.55), 2);
     }
     if (current) {
-        const pPoints = drawLine(current, 'powerW', YP, RED, 4);
-        drawLine(current, 'torqueNm', YT, TORQUE, 3);
+        const pPoints = linePoints(current, 'powerW', YP);
+        if (pPoints.length > 1) cv.fillUnder(pPoints, y + h, G.withAlpha(RED, 0.1));
+        if (pPoints.length > 1) cv.polyline(pPoints, 4, RED);
+        const tPoints = drawLine(current, 'torqueNm', YT, TORQUE, 3);
         if (s.ecuTorque) drawLine(current, 'ecuTorqueNm', YT, G.withAlpha(t.text, 0.58), 2);
-        if (pPoints.length) {
+        if (current.peakPrpm >= xMin && current.peakPrpm <= xMax) {
             const peak = [X(current.peakPrpm), YP(current.peakP)];
-            cv.circle(peak[0], peak[1], 7, '#ffffff');
+            cv.circle(peak[0], peak[1], 7, G.withAlpha('#ffffff', 0.88));
             cv.circle(peak[0], peak[1], 4, RED);
+        }
+        if (tPoints.length && current.peakTrpm >= xMin && current.peakTrpm <= xMax) {
+            const peak = [X(current.peakTrpm), YT(current.peakT)];
+            cv.circle(peak[0], peak[1], 7, G.withAlpha('#ffffff', 0.88));
+            cv.circle(peak[0], peak[1], 4, TORQUE);
         }
     }
 }
