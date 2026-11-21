@@ -15,6 +15,7 @@ const Dyno = require('./dyno');
 const { ReadOnlyDiag } = require('./kit/readonly-diag');
 const { DidReader } = require('./kit/dids');
 const FlapUi = require('./flap_ui');
+const CarImages = require('./car_images');
 const { Controller: FlapController } = require('./flap_controller');
 const { AutoFlap } = require('./flap_auto');
 const fs = require('fs');
@@ -81,8 +82,24 @@ mgu.run({
         let renderTimer = null, renderQueued = false, freshnessTimer = null, dmeTimer = null, demoTimer = null;
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
-        let page = 0, valveReady = false, drivingMode = null, valveTick = null, valveRescanTimer = null;
+        let page = 0, valveReady = false, drivingMode = null, valveTick = null, valveRescanTimer = null, smokeTick = null;
         let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0;
+        let carVisual = null, carVisualKey = '';
+
+        function selectedCarVisual(theme) {
+            const selected = CarImages.model(settings.get('carModel'));
+            const key = selected.key + '|' + theme.bg;
+            if (carVisualKey === key) return carVisual;
+            carVisualKey = key;
+            carVisual = null;
+            try {
+                carVisual = CarImages.load(selected.key, theme.bg);
+                log.info('Car Model loaded: ' + selected.file + ' (' + carVisual.width + 'x' + carVisual.height + ')');
+            } catch (e) {
+                log.warn('Car Model image: ' + shortError(e));
+            }
+            return carVisual;
+        }
 
         // Reuse Engine Config's per-DME controller and Drive Mode logic. The
         // installed app starts disarmed; only the explicit setting can arm it.
@@ -661,7 +678,7 @@ mgu.run({
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
                     : [{ text: 'READ ONLY', color: 'dim' }]);
             } else {
-                FlapUi.draw(cv, G, t, currentValveView(), valveActions);
+                FlapUi.draw(cv, G, t, currentValveView(), valveActions, selectedCarVisual(t), Date.now());
             }
             return ui.image('MAIN_GFX', cv);
         }
@@ -683,6 +700,7 @@ mgu.run({
             if (freshnessTimer) { clearInterval(freshnessTimer); freshnessTimer = null; }
             if (dmeTimer) { clearInterval(dmeTimer); dmeTimer = null; }
             if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+            if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             if (valveTick) { clearInterval(valveTick); valveTick = null; }
             if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
             valveAuto._stop();
@@ -694,6 +712,7 @@ mgu.run({
 
         if (ctx.app && typeof ctx.app.on === 'function') ctx.app.on('shutdown', cleanup);
         settings.onChange((key) => {
+            if (key === 'carModel' || key === 'theme') carVisualKey = '';
             if (key === 'maxPower' || key === 'powerSource' || key === 'powerUnit') {
                 delete peaks.live.power;
                 delete peaks.demo.power;
@@ -737,7 +756,14 @@ mgu.run({
         }, 1000);
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, 350);
 
-        const flipPage = () => { page = 1 - page; queueRender(); return render(); };
+        function setPage(next) {
+            page = next;
+            if (page === 1 && !smokeTick) smokeTick = setInterval(queueRender, 180);
+            else if (page !== 1 && smokeTick) { clearInterval(smokeTick); smokeTick = null; }
+            queueRender();
+            return render();
+        }
+        const flipPage = () => setPage(1 - page);
         ui.onClick('BTN_PAGE', flipPage);
         ui.onClick('BTN_PREV', flipPage);
         ui.onClick('BTN_OPEN', valveActions.open);
@@ -746,7 +772,7 @@ mgu.run({
         ui.onClick('BTN_DRIVE', valveActions.drive);
         ['BTN_OPEN', 'BTN_CLOSE', 'BTN_OEM', 'BTN_DRIVE'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
         if (ctx.onTab) ctx.onTab((index) => {
-            if (index === 0 || index === 1) { page = index; return render(); }
+            if (index === 0 || index === 1) return setPage(index);
             return null;
         });
 

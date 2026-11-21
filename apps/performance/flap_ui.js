@@ -3,65 +3,54 @@
 const W = 1600, H = 520;
 const RED = '#f32635';
 
-function drawRear(cv, G, t, valve) {
-    const x = 54, y = 78, w = 914, h = 314;
-    G.panel(cv, t, x, y, w, h, 'G20 REAR · EXHAUST SYSTEM');
-    const cx = x + w / 2, top = y + 78;
-
-    // Stylised rear view for the climate-sized MGU canvas: a G20 saloon silhouette,
-    // drawn locally with primitives so it has no network or image dependency.
-    cv.fillRect(x + 75, top + 216, w - 150, 2, G.withAlpha(RED, 0.32));
-    cv.roundRect(cx - 325, top + 35, 650, 202, 62, '#101216');
-    cv.strokeRoundRect(cx - 325, top + 35, 650, 202, 62, 2, G.withAlpha('#d5dbe5', 0.26));
-    cv.quad([[cx - 248, top + 70], [cx - 194, top + 18], [cx + 194, top + 18], [cx + 248, top + 70]], '#171b22');
-    cv.quad([[cx - 221, top + 66], [cx - 177, top + 28], [cx + 177, top + 28], [cx + 221, top + 66]], '#080b10');
-    cv.line(cx - 232, top + 76, cx + 232, top + 76, 2, G.withAlpha('#d4d9e2', 0.28));
-    cv.roundRect(cx - 300, top + 87, 600, 85, 22, '#1c2027');
-    cv.line(cx - 284, top + 174, cx + 284, top + 174, 2, G.withAlpha('#ffffff', 0.16));
-
-    // Slim red rear lamps and a restrained central roundel / model plaque.
-    cv.roundRect(cx - 281, top + 93, 170, 18, 8, G.withAlpha(RED, 0.28));
-    cv.roundRect(cx - 272, top + 97, 151, 7, 4, RED);
-    cv.roundRect(cx + 111, top + 93, 170, 18, 8, G.withAlpha(RED, 0.28));
-    cv.roundRect(cx + 121, top + 97, 151, 7, 4, RED);
-    cv.circle(cx, top + 100, 18, '#11151a');
-    cv.arc(cx, top + 100, 15, 17, 0, 360, G.withAlpha('#e1e5ed', 0.7));
-    cv.line(cx - 10, top + 100, cx + 10, top + 100, 1.5, G.withAlpha('#e1e5ed', 0.6));
-    cv.line(cx, top + 90, cx, top + 110, 1.5, G.withAlpha('#e1e5ed', 0.6));
-
-    cv.roundRect(cx - 72, top + 123, 144, 36, 5, '#080a0d');
-    cv.strokeRoundRect(cx - 72, top + 123, 144, 36, 5, 1.5, G.withAlpha('#e0e3e8', 0.36));
-    cv.text('M340i', cx, top + 148, 21, t.text, { align: 'center', font: 'bold', spacing: 2 });
-    cv.text('G20', cx + 94, top + 151, 13, t.dim, { align: 'center', font: 'bold', spacing: 1.5 });
-
-    // Diffuser and four decorative exhaust tips. The displayed valve angle is a
-    // command/readback visual only; the current signal does not prove physical motion.
-    cv.quad([[cx - 270, top + 176], [cx + 270, top + 176], [cx + 232, top + 227], [cx - 232, top + 227]], '#090b0e');
-    for (let i = -2; i <= 2; i++) {
-        if (i === 0) continue;
-        cv.line(cx + i * 66, top + 185, cx + i * 66, top + 219, 2, G.withAlpha('#9ba2ad', 0.24));
-    }
-    const isKnown = valve && valve.visualState !== 'UNKNOWN';
-    const open = isKnown && valve.visualState === 'OPEN';
-    const closed = isKnown && valve.visualState === 'CLOSED';
-    const tipXs = [cx - 248, cx - 193, cx + 193, cx + 248];
-    tipXs.forEach((tx, i) => {
-        const r = 20;
-        cv.circle(tx, top + 211, r + 4, '#0b0d10');
-        cv.arc(tx, top + 211, r, r + 3, 0, 360, G.withAlpha('#aab1bc', 0.64));
-        cv.circle(tx, top + 211, r - 4, '#050608');
-        // A single symbolic valve blade avoids asserting a count or location for the car's actuators.
-        if (i === 3) {
-            const angle = open ? 78 : closed ? 0 : 0;
-            const rad = angle * Math.PI / 180;
-            const dx = Math.cos(rad) * 13, dy = Math.sin(rad) * 13;
-            const blade = open ? RED : closed ? '#bd2631' : '#69717c';
-            cv.line(tx - dx, top + 211 - dy, tx + dx, top + 211 + dy, 3, blade);
-            if (open) cv.circle(tx, top + 211, 3, RED);
+function drawSmoke(cv, G, t, car, imageRect, now) {
+    if (!car || !car.exhaustTips || car.exhaustTips.length !== 4) return;
+    const seconds = (now || Date.now()) / 1000;
+    const grey = '#aeb5bf';
+    car.exhaustTips.forEach((tip, tipIndex) => {
+        const originX = imageRect.x + tip[0] * imageRect.w;
+        const originY = imageRect.y + tip[1] * imageRect.h;
+        const outward = tipIndex < 2 ? -1 : 1;
+        // Three small, staggered wisps per tip. All anchors are measured in each
+        // source PNG's own coordinate space, then mapped through the contain rect.
+        for (let puff = 0; puff < 3; puff++) {
+            const phase = (seconds * 0.42 + puff / 3 + tipIndex * 0.067) % 1;
+            const driftX = outward * (2 + phase * Math.min(14, imageRect.w * 0.035));
+            const driftY = 4 + phase * Math.min(24, imageRect.h * 0.1);
+            const sway = Math.sin(seconds * 2.2 + puff * 2.1 + tipIndex) * 1.5;
+            const x = originX + driftX + sway;
+            const y = originY + driftY;
+            const radius = 3 + phase * Math.min(12, imageRect.h * 0.05);
+            const fade = 1 - phase;
+            cv.circle(x, y, radius, G.withAlpha(grey, 0.14 * fade));
+            cv.circle(x, y, radius * 0.66, G.withAlpha(grey, 0.18 * fade));
+            cv.circle(x, y, radius * 0.32, G.withAlpha(grey, 0.2 * fade));
         }
     });
-    cv.text('VISUAL COMMAND INDICATOR · NOT A PHYSICAL POSITION SENSOR', cx, top + 258, 14,
-        t.dim, { align: 'center', font: 'bold', spacing: 1 });
+}
+
+function drawRear(cv, G, t, valve, car, now) {
+    const x = 54, y = 78, w = 914, h = 314;
+    const chassis = car && car.model ? car.model.chassis : 'BMW';
+    G.panel(cv, t, x, y, w, h, chassis + ' REAR · EXHAUST SYSTEM');
+    cv.text('SMOKE EFFECT · NOT MEASURED', x + w - 16, y + 42, 12, t.dim,
+        { align: 'right', font: 'bold', spacing: 0.8 });
+    const bounds = { x: x + 16, y: y + 56, w: w - 32, h: h - 56 };
+    if (!car || !car.imageId || !(car.width > 0) || !(car.height > 0)) {
+        cv.text('CAR IMAGE UNAVAILABLE', x + w / 2, y + h / 2 + 8, 20, t.dim,
+            { align: 'center', font: 'bold', spacing: 1 });
+        return;
+    }
+    // object-fit: contain equivalent: preserve the supplied PNG's full 3:2 frame.
+    const imageRect = contain(bounds, car.width, car.height);
+    cv.image(car.imageId, imageRect.x, imageRect.y, imageRect.w, imageRect.h);
+    drawSmoke(cv, G, t, car, imageRect, now);
+}
+
+function contain(rect, width, height) {
+    const scale = Math.min(rect.w / width, rect.h / height);
+    const w = width * scale, h = height * scale;
+    return { x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h };
 }
 
 function drawStatus(cv, G, t, valve) {
@@ -99,14 +88,14 @@ function drawActionButton(cv, G, t, x, y, w, h, label, run, opts) {
         t.text, { align: 'center', font: 'bold', spacing: 1.5 });
 }
 
-function draw(cv, G, t, v, act) {
+function draw(cv, G, t, v, act, car, now) {
     cv.clear(t.bg);
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG'], v.page || 0, [
         v.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
     ]);
     G.panel(cv, t, 24, G.TOP, W - 48, G.BOTTOM - G.TOP, null);
     const bottom = G.pageBottom(cv) - (cv.own ? G.MARGIN : 0);
-    drawRear(cv, G, t, v);
+    drawRear(cv, G, t, v, car, now);
     drawStatus(cv, G, t, v);
 
     const modes = [
@@ -129,4 +118,4 @@ function draw(cv, G, t, v, act) {
     return cv;
 }
 
-module.exports = { W, H, draw };
+module.exports = { W, H, draw, drawRear, drawSmoke, contain };

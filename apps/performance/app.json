@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, road-estimate dyno, and guarded BMW exhaust-flap controls",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": ["ID7"],
@@ -183,6 +183,20 @@
       "options": [
         ["off", "Never"],
         ["on", "Always"]
+      ]
+    },
+    {
+      "key": "carModel",
+      "label": "Car Model",
+      "type": "choice",
+      "default": "M340i_Blue",
+      "options": [
+        ["M340i_Blue", "M340i G20 BLUE"],
+        ["M340i_Red", "M340i G20 RED"],
+        ["M340i_Black", "M340i G20 BLACK"],
+        ["M440i_Blue", "M440i G22 BLUE"],
+        ["M440i_Red", "M440i G22 RED"],
+        ["M440i_Black", "M440i G22 BLACK"]
       ]
     },
     {

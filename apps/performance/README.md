@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.1 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.2 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -32,9 +32,26 @@ that do not fall on a regular tick interval.
 
 ## ENGINE CONFIG page
 
-The second page is **ENGINE CONFIG**. Its rear-view M340i-inspired illustration is
-drawn in the app; it is not a camera feed or a vehicle-identification image. The
-page offers **OPEN VALVES**, **CLOSE VALVES**, **OEM CONTROL**, and **BY DRIVE MODE**.
+The second page is **ENGINE CONFIG**. **Car Model** in Settings selects one of
+the six original PNGs supplied in `assets/car-models/`; the default is
+`M340i_Blue.png`. The selection is saved by the app's normal settings storage
+and is used again when PERFORMANCE starts. The page title follows the selected
+body: **G20 REAR · EXHAUST SYSTEM** or **G22 REAR · EXHAUST SYSTEM**. The image
+is shown with a contain fit, preserving its complete original aspect ratio.
+
+The PNGs are kept byte-for-byte as supplied. The two Blue files have transparent
+pixels; those pixels are composited over the existing panel fill at display time.
+The Red and Black PNGs contain their studio/checkerboard backgrounds as image
+pixels, so those backgrounds are left as they are. The app decodes only the
+currently selected image and downsizes it in memory to fit the renderer's
+1024-pixel texture limit; it does not rewrite the source artwork.
+
+Subtle animated grey wisps are anchored to separately measured coordinates for
+each of the six files. They are only a visual effect and are not a reading of
+exhaust, smoke, or valve position. The positions are normalized against each
+source image, so they follow the four tips through contain scaling.
+
+The page offers **OPEN VALVES**, **CLOSE VALVES**, **OEM CONTROL**, and **BY DRIVE MODE**.
 Drive Mode follows the existing Engine Config mapping: Sport opens, Comfort and
 Adaptive return control to BMW, and Eco Pro closes, with the same plug-in hybrid
 mode handling as that app.
@@ -101,6 +118,7 @@ From the repository root on Windows:
 ```powershell
 node kit/tools/test_performance.js
 node kit/tools/test_performance_dyno.js
+node kit/tools/test_performance_car_images.js
 python kit/tools/build.py performance --preview-only
 node kit/tools/preview.js dist/performance preview/performance-demo --set demo=on render
 node kit/tools/preview.js dist/performance preview/performance-live --set demo=off render
