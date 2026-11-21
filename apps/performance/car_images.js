@@ -22,6 +22,7 @@ const SOURCE_W = 1536, SOURCE_H = 1024;
 const MAX_IMAGE_SIDE = 1023;
 const IMAGE_ID = 0x564b;
 let packIndex = null;
+const silhouetteByChassis = Object.create(null);
 
 function model(value) {
     return MODELS.find((entry) => entry.key === value || entry.file === value) || MODELS[0];
@@ -73,7 +74,7 @@ function parseColor(hex) {
 }
 
 /** Decode the supplied 8-bit RGB/RGBA PNGs and composite their alpha onto the page's panel fill. */
-function decodePng(bytes, background) {
+function decodePng(bytes, background, silhouette) {
     if (bytes.length < 33 || bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a') throw new Error('Car artwork is not a PNG');
     let width = 0, height = 0, bitDepth = 0, colorType = -1, interlace = 0;
     const chunks = [];
@@ -97,8 +98,15 @@ function decodePng(bytes, background) {
     const inflated = zlib.inflateSync(Buffer.concat(chunks));
     if (inflated.length !== (rowBytes + 1) * height) throw new Error('Invalid PNG pixel data length');
     const base = parseColor(background), panelAlpha = 18 / 255;
-    const panel = [0, 1, 2].map((i) => Math.round(base[i] * (1 - panelAlpha) + [180, 188, 204][i] * panelAlpha));
+    // ENGINE CONFIG paints the image panel inside the page panel, each with the
+    // same translucent fill. Match both blends so the removed backdrop disappears
+    // into the exact black/red panel instead of leaving a dark rectangular patch.
+    const panel = base.slice();
+    for (let layer = 0; layer < 2; layer++) {
+        for (let i = 0; i < 3; i++) panel[i] = Math.floor(panel[i] * (1 - panelAlpha) + [180, 188, 204][i] * panelAlpha);
+    }
     const rgba = new Uint8Array(width * height * 4);
+    const alphaData = new Uint8Array(width * height);
     let previous = Buffer.alloc(rowBytes), row = Buffer.alloc(rowBytes), inPos = 0, outPos = 0;
     for (let y = 0; y < height; y++) {
         const filter = inflated[inPos++];
@@ -114,7 +122,10 @@ function decodePng(bytes, background) {
             row[x] = (raw + predictor) & 255;
         }
         for (let x = 0; x < width; x++) {
-            const si = x * channels, alpha = channels === 4 ? row[si + 3] / 255 : 1;
+            const si = x * channels, pixel = y * width + x;
+            const sourceAlpha = channels === 4 ? row[si + 3] / 255 : 1;
+            const alpha = silhouette ? silhouette[pixel] / 255 : sourceAlpha;
+            alphaData[pixel] = Math.round(alpha * 255);
             rgba[outPos++] = Math.round(row[si] * alpha + panel[0] * (1 - alpha));
             rgba[outPos++] = Math.round(row[si + 1] * alpha + panel[1] * (1 - alpha));
             rgba[outPos++] = Math.round(row[si + 2] * alpha + panel[2] * (1 - alpha));
@@ -122,7 +133,7 @@ function decodePng(bytes, background) {
         }
         const swap = previous; previous = row; row = swap;
     }
-    return { width, height, rgba };
+    return { width, height, rgba, alpha: alphaData };
 }
 
 /** Bilinear downscale once to the renderer's 1024-pixel image limit. Source files remain unchanged. */
@@ -154,7 +165,19 @@ function downscale(source) {
 
 function load(value, background) {
     const selected = model(value);
-    const resized = downscale(decodePng(readPacked(selected.file), background));
+    let silhouette = null;
+    if (selected.key.slice(-5) !== '_Blue') {
+        silhouette = silhouetteByChassis[selected.chassis];
+        if (!silhouette) {
+            const companion = MODELS.find((entry) => entry.chassis === selected.chassis && entry.key.slice(-5) === '_Blue');
+            if (!companion) throw new Error('Missing transparent silhouette for ' + selected.chassis);
+            silhouette = decodePng(readPacked(companion.file), background).alpha;
+            silhouetteByChassis[selected.chassis] = silhouette;
+        }
+    }
+    // Red/Black source files include a baked studio backdrop. Reuse the already
+    // transparent same-body Blue cutout as a mask so the car pixels are preserved.
+    const resized = downscale(decodePng(readPacked(selected.file), background, silhouette));
     setImage(IMAGE_ID, resized.width, resized.height, resized.rgba);
     return {
         id: IMAGE_ID, imageId: IMAGE_ID, width: resized.width, height: resized.height,

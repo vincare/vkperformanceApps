@@ -32,7 +32,7 @@ const E = { READY: 101, TICK: 102, ERROR: 103, STATS: 104, CCU: 105 };
 // touch (mgu-render, IterioDev's mgu-renderd): message 9 is CLAIM there; 105 and 106 come back as TOUCH and CLOSED
 const CLAIM = 9, TOUCH = 105, CLOSED = 106;
 // mgu-render/1 (mgu-store native/mgu-render/PROTOCOL.md)
-const X = { MODE: 0x4d520001, GRAB: 0x4d520002, READY: 0x4d520101, STATE: 0x4d520102, CCU: 0x4d520103 };
+const X = { MODE: 0x4d520001, GRAB: 0x4d520002, PIXMAP: 0x4d520003, PIXELS: 0x4d520004, READY: 0x4d520101, STATE: 0x4d520102, CCU: 0x4d520103 };
 const X_MODE_LAYER = 1;
 
 function msg(type, payload) {
@@ -210,7 +210,10 @@ class RenderClient extends EventEmitter {
             if (type === X.READY && p.length >= 12) {
                 const caps = p.readUInt32LE(8);
                 this.native = true;
-                this.info = { touch: !!(caps & 1), controller: !!(caps & 2), frontGate: !!(caps & 4) };
+                this.info = {
+                    touch: !!(caps & 1), controller: !!(caps & 2), frontGate: !!(caps & 4),
+                    pixmaps: !!(caps & 8), maxPixmapSide: p.length >= 48 ? p.readUInt32LE(44) : 0,
+                };
                 // the app area (where the HMI leaves room for apps, in screen px): after the embed box
                 this.area = p.length >= 44 ? { x: p.readInt32LE(28), y: p.readInt32LE(32), w: p.readInt32LE(36), h: p.readInt32LE(40) } : null;
             } else if (type === E.READY) {
@@ -315,9 +318,34 @@ class RenderClient extends EventEmitter {
     }
     /** upload a pixel image when this connection hasn't got its current version */
     _ensureImage(id) {
-        if (this.native) { if (!this.imgWarned) { this.imgWarned = true; this.log.warn('renderd: pixel images need the upstream dialect'); } return; }
         const im = rec.imageById.get(id);
         if (!im || !im.data) return;
+        if (this.native) {
+            if (!this.info || !this.info.pixmaps || !this.info.maxPixmapSide || im.w > this.info.maxPixmapSide || im.h > this.info.maxPixmapSide) {
+                if (!this.imgWarned) {
+                    this.imgWarned = true;
+                    this.log.warn('renderd: this native renderer does not offer a large enough pixel-map capability');
+                }
+                return;
+            }
+            const sent = this.sent.image.get(id);
+            if (sent && sent.ver === im.ver) return;
+            if (!sent || sent.w !== im.w || sent.h !== im.h) {
+                // Native mgu-render/1 uses a pixel-map descriptor, then one or more pixel regions.
+                // Format 2 is opaque RGBA; these recorded images are already composited by the app.
+                this._write(this._u32msg(X.PIXMAP, [id, im.w, im.h, 2, 1]));
+            }
+            const n = im.w * im.h * 4;
+            const b = this._imageBuf(8 + 24 + n);
+            b.writeUInt32LE(X.PIXELS, 0); b.writeUInt32LE(24 + n, 4);
+            b.writeUInt32LE(id, 8); b.writeUInt32LE(1, 12);
+            b.writeUInt32LE(0, 16); b.writeUInt32LE(0, 20);
+            b.writeUInt32LE(im.w, 24); b.writeUInt32LE(im.h, 28);
+            Buffer.from(im.data.buffer, im.data.byteOffset, n).copy(b, 32);
+            this._write(b);
+            this.sent.image.set(id, { ver: im.ver, w: im.w, h: im.h });
+            return;
+        }
         if (this.sent.image.get(id) === im.ver) return;
         const n = im.w * im.h * 4, b = this._imageBuf(8 + 12 + n);
         b.writeUInt32LE(M.IMAGE, 0); b.writeUInt32LE(12 + n, 4);

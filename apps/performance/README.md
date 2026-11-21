@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.2 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.3 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -39,12 +39,15 @@ and is used again when PERFORMANCE starts. The page title follows the selected
 body: **G20 REAR · EXHAUST SYSTEM** or **G22 REAR · EXHAUST SYSTEM**. The image
 is shown with a contain fit, preserving its complete original aspect ratio.
 
-The PNGs are kept byte-for-byte as supplied. The two Blue files have transparent
-pixels; those pixels are composited over the existing panel fill at display time.
-The Red and Black PNGs contain their studio/checkerboard backgrounds as image
-pixels, so those backgrounds are left as they are. The app decodes only the
-currently selected image and downsizes it in memory to fit the renderer's
-1024-pixel texture limit; it does not rewrite the source artwork.
+The PNG source files are kept byte-for-byte as supplied. The two Blue files
+provide transparent body cutouts. The Red and Black files have baked studio
+backgrounds; the app uses the transparent Blue cutout for the matching chassis
+to remove those backgrounds while keeping the selected car's own image pixels.
+Transparent areas are composited onto the existing panel fill. The app decodes
+only the selected image (and its matching cutout) and downsizes it in memory to
+fit the renderer's 1024-pixel texture limit; it does not rewrite the source
+artwork. The native MGU renderer receives the image through its documented
+pixmap protocol, which supports images alongside touch and controller input.
 
 Subtle animated grey wisps are anchored to separately measured coordinates for
 each of the six files. They are only a visual effect and are not a reading of

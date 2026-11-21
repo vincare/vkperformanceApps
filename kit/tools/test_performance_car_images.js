@@ -72,5 +72,5 @@ for (const model of Cars.MODELS) {
     assert(recorder.words().length > 0, model.key + ' smoke overlay draws from configured tips');
 }
 assert.strictEqual(new Set(outputHashes).size, 6, 'each model choice loads a distinct supplied image');
-assert.strictEqual(app.version, '0.6.2', 'app version matches the update');
+assert.strictEqual(app.version, '0.6.3', 'app version matches the update');
 console.log('PERFORMANCE car images: ' + (6 * 11 + 10) + ' checks passed');
