@@ -1165,6 +1165,7 @@ mgu.run({
                     view: dynoView, runs: dynoRuns, selectedAt: dynoSelectedAt,
                     baselineAt: dynoBaselineAt, cleared: dynoDisplayCleared,
                     pullStatus: recording.status, livePowerW: recording.livePowerW,
+                    liveTorqueNm: fresh(state.torque, now) ? state.torque.value : null,
                     rpm: fresh(state.rpm, now) ? state.rpm.value : null,
                     speed: fresh(state.speed, now) ? state.speed.value : null,
                     gateText: dynoGate(now).text,
