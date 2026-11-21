@@ -1,9 +1,10 @@
 # PERFORMANCE
 
-PERFORMANCE 0.5.1 is a read-only BMW HU_MGU / iDrive 7 monitor. The black-and-
-red display has a dedicated **Virtual Dyno** card above live **HORSE POWER**
-and **TORQUE** gauges. Their upper scale limits can be changed separately in
-Settings; the defaults are 300 hp and 800 Nm.
+PERFORMANCE 0.6.0 is a read-only BMW HU_MGU / iDrive 7 monitor. The black-and-
+red display places live **HORSE POWER** and **TORQUE** gauges in the large left
+area. The right area shows **DYNO RUN**, Engine Speed, and Boost. The dyno card
+always selects the latest valid saved run. The two gauge limits can be changed
+separately in Settings; the defaults are 300 hp and 800 Nm.
 Each scale now labels its configured endpoint explicitly, including values
 that do not fall on a regular tick interval.
 

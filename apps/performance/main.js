@@ -56,9 +56,10 @@ mgu.run({
         try {
             const saved = JSON.parse(fs.readFileSync(dynoFile, 'utf8'));
             if (saved && Array.isArray(saved.runs)) dynoRuns = saved.runs.filter((run) =>
-                run && finite(run.peakP) && finite(run.peakT) && finite(run.peakPrpm) && finite(run.peakTrpm) &&
+                run && finite(run.at) && finite(run.peakP) && finite(run.peakT) && finite(run.peakPrpm) && finite(run.peakTrpm) &&
                 Array.isArray(run.curve) && run.curve.length > 1 && run.curve.every((point) =>
-                    point && finite(point.rpm) && finite(point.powerW) && finite(point.torqueNm))).slice(0, 20);
+                    point && finite(point.rpm) && finite(point.powerW) && finite(point.torqueNm)))
+                .sort((a, b) => b.at - a.at).slice(0, 20);
         } catch (e) { /* first start */ }
         const dynoRecorder = new Dyno.Recorder();
         const state = {
@@ -477,12 +478,13 @@ mgu.run({
 
         function drawDynoPanel(cv, t, s) {
             const x = 1110, y = G.TOP, w = 466;
-            G.panel(cv, t, x, y, w, 190, 'VIRTUAL DYNO');
+            G.panel(cv, t, x, y, w, 190, 'DYNO RUN');
             const snap = dynoRecorder.snapshot(Date.now());
             const run = s.demo ? null : dynoRuns[0];
-            const status = s.demo ? 'PAUSED IN DEMO' : snap.status === 'recording' ? 'RECORDING FULL-THROTTLE PULL'
-                : snap.status === 'done' ? 'NEW PULL RECORDED' : snap.status === 'short' ? 'PULL TOO SHORT'
-                    : run ? 'LATEST ROAD PULL · ESTIMATE' : 'NO PULL RECORDED';
+            const status = s.demo ? 'PAUSED IN DEMO' : snap.status === 'recording' ? 'RECORDING · LAST RUN HELD'
+                : snap.status === 'done' ? 'LAST RUN · JUST RECORDED'
+                    : snap.status === 'short' ? (run ? 'LAST RUN · NEW PULL TOO SHORT' : 'PULL TOO SHORT')
+                        : run ? 'LAST RUN · ROAD ESTIMATE' : 'NO RUN RECORDED';
             const statusColor = snap.status === 'done' ? t.ok : snap.status === 'recording' ? t.crit : t.dim;
             cv.text(status, x + 24, y + 68, 18, statusColor, { font: 'bold', spacing: 1 });
 
@@ -525,43 +527,43 @@ mgu.run({
         function drawEngine(cv, t, s) {
             const room = G.pageBottom(cv) - G.BOTTOM;
             const half = Math.round(room / 2);
+            const powerGaugeKw = settings.get('powerGaugeMax');
+            const powerMax = Calc.powerValue(finite(powerGaugeKw) && powerGaugeKw > 0 ? powerGaugeKw : 223.7, s.powerUnit);
+            const torqueGaugeMax = settings.get('torqueGaugeMax');
+            const torqueMax = finite(torqueGaugeMax) && torqueGaugeMax > 0 ? torqueGaugeMax : 800;
+            const powerText = !s.power ? '--' : (s.power.approximate ? '~' : '') + formatNumber(s.power.value, 0);
+            const torqueText = s.torque === null ? '--' : formatNumber(s.torque, 0);
+
             G.segBar(cv, t, 24, G.TOP, 1062, 226 + half, {
-                label: 'Engine speed', value: s.rpm, unit: 'rpm', decimals: 0,
-                min: 0, max: RPM_MAX, step: 500, scale: { every: 1000, div: 1000 },
-                ramp: 'hot', peak: s.peaks.rpm,
+                label: 'HORSE POWER', value: s.power ? s.power.value : null, valueText: powerText,
+                unit: Calc.powerUnit(s.powerUnit), decimals: 0,
+                min: 0, max: powerMax, step: powerMax / 20,
+                scale: { every: powerMax / 4, div: 1 },
+                ramp: 'hot', peak: s.peaks.power,
             });
             G.segBar(cv, t, 24, G.TOP + 242 + half, 1062, 226 - half, {
-                label: s.demo ? 'Boost · DEMO' : !s.boost ? 'Boost' : s.boost.source === 'BMW SPORT DISPLAY'
-                    ? 'Boost · Sport Display · Approx.'
-                    : 'Boost · DME Read-Only' + (s.boost.approximate ? ' · Baro estimate' : ''),
-                value: s.boost ? s.boost.value : null, unit: 'bar', decimals: 2,
-                min: 0, max: BOOST_MAX_BAR, step: 0.125, scale: { every: 0.5, decimals: 1 },
-                ramp: 'hot', peak: s.peaks.boost,
+                label: 'TORQUE', value: s.torque, valueText: torqueText, unit: 'Nm', decimals: 0,
+                min: 0, max: torqueMax, step: torqueMax / 20,
+                scale: { every: torqueMax / 4, div: 1 },
+                ramp: 'hot', peak: s.peaks.torque,
             });
 
             drawDynoPanel(cv, t, s);
 
-            const powerGaugeKw = settings.get('powerGaugeMax');
-            const powerMax = Calc.powerValue(finite(powerGaugeKw) && powerGaugeKw > 0 ? powerGaugeKw : 223.7, s.powerUnit);
-            const powerStep = Calc.scaleStep(powerMax, 5);
-            const powerTicks = Calc.scaleTicks(powerMax, 5);
-            const torqueGaugeMax = settings.get('torqueGaugeMax');
-            const torqueMax = finite(torqueGaugeMax) && torqueGaugeMax > 0 ? torqueGaugeMax : 800;
-            const torqueStep = Calc.scaleStep(torqueMax, 5);
-            const torqueTicks = Calc.scaleTicks(torqueMax, 5);
-            const powerText = !s.power ? '--' : (s.power.approximate ? '~' : '') + formatNumber(s.power.value, 0);
+            const rpmTicks = Calc.scaleTicks(RPM_MAX, 4);
             G.bar(cv, t, 1110, G.TOP + 228, 466, 106, {
-                label: 'HORSE POWER',
-                value: s.power ? s.power.value : null, text: powerText,
-                unit: Calc.powerUnit(s.powerUnit), min: 0, max: powerMax,
-                step: powerStep, ticks: powerTicks,
-                decimals: 0, peak: s.peaks.power, peakText: true, ramp: 'hot',
+                label: 'Engine speed', value: s.rpm, text: formatNumber(s.rpm, 0), unit: 'rpm',
+                min: 0, max: RPM_MAX, step: Calc.scaleStep(RPM_MAX, 4), ticks: rpmTicks,
+                decimals: 0, peak: s.peaks.rpm, peakText: true, ramp: 'hot',
             });
-            const torqueText = s.torque === null ? '--' : formatNumber(s.torque, 0);
+            const boostLabel = !s.boost ? 'Boost' : s.boost.source === 'BMW SPORT DISPLAY'
+                ? 'Boost · Approx.' : s.boost.approximate ? 'Boost · DME estimate' : 'Boost · DME';
+            const boostTicks = Calc.scaleTicks(BOOST_MAX_BAR, 5);
             G.bar(cv, t, 1110, G.TOP + 358, 466, 106, {
-                label: 'TORQUE', value: s.torque, text: torqueText, unit: 'Nm', min: 0, max: torqueMax,
-                step: torqueStep, ticks: torqueTicks, decimals: 0,
-                peak: s.peaks.torque, peakText: true, ramp: 'hot',
+                label: boostLabel, value: s.boost ? s.boost.value : null,
+                text: s.boost ? formatNumber(s.boost.value, 2) : '--', unit: 'bar',
+                min: 0, max: BOOST_MAX_BAR, step: Calc.scaleStep(BOOST_MAX_BAR, 5), ticks: boostTicks,
+                decimals: 2, scaleDecimals: 1, peak: s.peaks.boost, peakText: true, ramp: 'hot',
             });
         }
 
