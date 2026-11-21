@@ -89,7 +89,6 @@ mgu.run({
         let carVisual = null, carVisualKey = '';
         let mSoundEnabled = false;
         let mSoundBusy = false;
-        let mSoundFeedback = 'OFF · VALVE CONTROL ONLY · SPORT+ UNCHANGED';
         let valveCommandActive = false, valvePriorityUntil = 0;
 
         function selectedCarVisual(theme) {
@@ -127,9 +126,8 @@ mgu.run({
                 !!(valveController.ident && valveController.ident.elAgk && valveController.ident.elAgk.supported);
         }
 
-        function resetMSound(message) {
+        function resetMSound() {
             mSoundEnabled = false;
-            mSoundFeedback = message;
         }
 
         function dynoSetup() {
@@ -500,45 +498,37 @@ mgu.run({
             });
         };
         const valveActions = {
-            open() { resetMSound('OPEN REQUEST · POSITION UNKNOWN'); return valvePress('OPEN')(); },
-            close() { resetMSound('CLOSE REQUEST · POSITION UNKNOWN'); return valvePress('CLOSED')(); },
-            oem() { resetMSound('BMW CONTROL · POSITION UNKNOWN'); return valvePress('OEM')(); },
-            drive() { resetMSound('DRIVE MODE CONTROL · POSITION UNKNOWN'); return valvePress('DRIVE')(); },
+            open() { resetMSound(); return valvePress('OPEN')(); },
+            close() { resetMSound(); return valvePress('CLOSED')(); },
+            oem() { resetMSound(); return valvePress('OEM')(); },
+            drive() { resetMSound(); return valvePress('DRIVE')(); },
         };
         function toggleMSoundMode() {
             if (!valveCanActuate() || valveController.state.busy || mSoundBusy) return null;
             mSoundBusy = true;
             if (mSoundEnabled) {
                 mSoundEnabled = false;
-                mSoundFeedback = 'BMW CONTROL REQUESTED · POSITION UNKNOWN';
                 queueRender();
                 const pending = valvePress('OEM')();
                 if (!pending) { mSoundBusy = false; queueRender(); return null; }
                 return pending.then(() => {
-                    if (valveController.state.requested === 'OEM' && valveController.state.accepted === false)
-                    mSoundFeedback = 'BMW CONTROL NOT ACCEPTED · SPORT+ UNCHANGED';
                     mSoundBusy = false;
                     queueRender();
                 });
             }
 
             mSoundEnabled = true;
-            mSoundFeedback = 'OPEN REQUEST · SPORT+ WILL NOT CHANGE';
             queueRender();
             const pending = valvePress('OPEN')();
             if (!pending) {
-                resetMSound('OPEN REQUEST BLOCKED · CHECK CAR CONTROL');
+                resetMSound();
                 mSoundBusy = false;
                 queueRender();
                 return null;
             }
             return pending.then(() => {
                 const state = valveController.state;
-                if (state.requested === 'OPEN' && state.accepted === true) {
-                    mSoundFeedback = 'VALVES OPEN REQUEST ACCEPTED · SPORT+ UNCHANGED';
-                } else {
-                    resetMSound('OPEN REQUEST NOT ACCEPTED · SPORT+ UNCHANGED');
-                }
+                if (state.requested !== 'OPEN' || state.accepted !== true) resetMSound();
                 mSoundBusy = false;
                 queueRender();
             });
@@ -789,20 +779,15 @@ mgu.run({
             drawDynoCurve(cv, t, run, x + 24, y + 143, w - 48, 11);
         }
 
-        function drawMSoundButton(cv, t, enabled, active, message, run) {
+        function drawMSoundButton(cv, t, enabled, active, run) {
             const x = 1110, y = G.TOP + 392, w = 466, h = 70;
             const red = '#f32635';
             const edge = active ? red : G.withAlpha('#c7cbd1', enabled ? 0.42 : 0.2);
             cv.roundRect(x, y, w, h, 8, active ? G.withAlpha(red, 0.88) : G.withAlpha('#c7cbd1', 0.07));
             cv.strokeRoundRect(x, y, w, h, 8, 2, edge);
             cv.fillRect(x + 1, y + 12, 4, h - 24, active ? red : G.withAlpha('#c7cbd1', enabled ? 0.48 : 0.24));
-            cv.roundRect(x + 20, y + 15, 40, 40, 6, active ? red : G.withAlpha('#c7cbd1', 0.16));
-            cv.text('M', x + 40, y + 44, 28, active ? '#ffffff' : (enabled ? t.text : t.dim),
-                { align: 'center', font: 'bold', literal: true });
-            cv.text('M SOUND MODE', x + 74, y + 31, 23, active ? '#ffffff' : (enabled ? t.text : t.dim),
+            cv.text('M SOUND MODE', x + 24, y + 44, 23, active ? '#ffffff' : (enabled ? t.text : t.dim),
                 { font: 'bold', spacing: 1.2, literal: true });
-            cv.text(String(message || '').toUpperCase(), x + 74, y + 53, 13, active ? '#ffe5e7' : t.dim,
-                { font: 'bold', spacing: 0.4, literal: true });
             cv.circle(x + w - 28, y + h / 2, 7, active ? '#ffffff' : G.withAlpha('#c7cbd1', 0.34));
             if (cv.own && enabled && run) cv.target(x, y, w, h, run, 'performance_m_sound_mode');
         }
@@ -847,12 +832,9 @@ mgu.run({
                 min: 0, max: BOOST_MAX_BAR, step: Calc.scaleStep(BOOST_MAX_BAR, 5), ticks: boostTicks,
                 decimals: 2, scaleDecimals: 1, peak: s.peaks.boost, peakText: true, ramp: 'hot',
             });
-            if (mSoundEnabled && !valveCanActuate()) resetMSound('CONTROL UNAVAILABLE · POSITION UNKNOWN');
+            if (mSoundEnabled && !valveCanActuate()) resetMSound();
             const mSoundReady = valveCanActuate() && !valveController.state.busy && !mSoundBusy;
-            const mSoundMessage = !valveController.armedSetting ? 'ARM CAR CONTROL · SPORT+ NOT CHANGED'
-                : !valveCanActuate() ? 'WAITING FOR MATCHED DME · POSITION UNKNOWN'
-                    : mSoundBusy || valveController.state.busy ? 'DME REQUEST IN PROGRESS · SPORT+ NOT CHANGED' : mSoundFeedback;
-            drawMSoundButton(cv, t, mSoundReady, mSoundEnabled, mSoundMessage, toggleMSoundMode);
+            drawMSoundButton(cv, t, mSoundReady, mSoundEnabled, toggleMSoundMode);
         }
 
         async function render() {

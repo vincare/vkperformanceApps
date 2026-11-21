@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.11 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.12 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -99,18 +99,13 @@ repeats; the DME is expected to resume its own strategy after its short-term
 override expires.
 
 On Engine Data, **M SOUND MODE** requests OPEN from the same guarded controller;
-pressing it again requests OEM control. The button is red while the app's open
-request is active and grey when it is off or unavailable. It requires the same
-explicit Car control arming and matched-DME checks as the Engine Config buttons.
-It only requests the exhaust flap: it does not select Sport Plus or command pops
-and bangs. The local SOME/IP catalog exposes a write setter for BMW's FES drive-
-mode control, but the operation/update-field semantics and safe preconditions
-have not been validated, so this version deliberately does not send a guessed
-drive-mode write. The UI states that Sport+ is unchanged. Selecting Sport Plus
-requires a verified setter contract or a validated vehicle-side capture before
-it can be implemented safely. The DME acceptance and commanded target do not
-prove the flap is physically at 100%, because the `0x64FD` output-position
-payload has not been decoded or validated on this car.
+pressing it again returns control to BMW. The button shows only its name. It is
+red while the app's open request is active and grey when it is off or
+unavailable. It requires the same explicit Car control arming and matched-DME
+checks as the Engine Config buttons. It controls the exhaust flap only; it does
+not select Sport Plus or command pops and bangs. DME acceptance and the
+commanded target do not prove the flap is physically at 100%, because the
+`0x64FD` output-position payload has not been decoded or validated on this car.
 
 ## Virtual Dyno card
 
