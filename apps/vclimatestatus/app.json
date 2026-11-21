@@ -1,8 +1,8 @@
 {
   "id": "vclimatestatus",
-  "title": "VClimateStatus",
-  "description": "Read-only driver and passenger climate setpoint monitor",
-  "version": "0.4.1",
+  "title": "Climate Control",
+  "description": "Read-only driver and passenger climate setpoints and A/C status",
+  "version": "0.4.2",
   "vendor": "VKPERFORMANCE",
   "loggingId": "OAA5",
   "iconGlyph": "temp",
@@ -35,7 +35,7 @@
     {
       "name": "MAIN",
       "kind": "canvas",
-      "title": "VClimateStatus",
+      "title": "Climate Control",
       "buttons": [["BTN_SETTINGS", "Settings"]]
     }
   ]

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * VClimateStatus: read-only BMW MGU climate monitor.
+ * Climate Control: read-only BMW MGU climate status display.
  *
  * ClimateMaster.statusTemperature is catalog-confirmed as an array of
  * StatusTemperature records. Each record carries targetTemperature (Float)
@@ -15,8 +15,9 @@ const W = 1600, H = 520;
 const NO_PAYLOAD_MS = 30000;
 const SAME_PAYLOAD_LOG_MS = 30000;
 const C = {
-    bg: '#090909', card: '#171717', border: '#292929',
-    red: '#E02020', darkRed: '#8B1010', white: '#FFFFFF', muted: '#969696',
+    bg: '#050505', card: '#0B090A', border: '#351014',
+    red: '#F02A38', redDim: '#62151D', redFaint: '#351014',
+    white: '#FFFFFF', muted: '#A4A0A1', faint: '#686365',
     green: '#58C98B',
 };
 const SIGNAL_POLL_MS = 5000;
@@ -450,71 +451,108 @@ mgu.run({
             };
         }
 
-        function badge(cv, label, demo) {
-            const x = 1394, y = 52, w = 126, h = 42;
-            cv.roundRect(x, y, w, h, 8, demo ? C.darkRed : '#202020');
-            cv.fillRect(x, y + 8, 4, h - 16, demo ? C.red : C.green);
-            cv.text(label, x + w / 2 + 2, y + 27, 18, C.white, { align: 'center', font: 'bold', spacing: 2 });
+        function drawSettingsMark(cv) {
+            const cx = 1440, cy = 67;
+            for (let i = 0; i < 8; i++) {
+                const a = i * Math.PI / 4;
+                cv.line(cx + Math.cos(a) * 10, cy + Math.sin(a) * 10,
+                    cx + Math.cos(a) * 17, cy + Math.sin(a) * 17, 3, C.white);
+            }
+            cv.circle(cx, cy, 10, C.white);
+            cv.circle(cx, cy, 4, C.bg);
+            cv.text('SETTINGS', 1470, 65, 14, C.white, { font: 'bold', spacing: 1.2 });
         }
 
-        function climateCard(cv, x, title, value, demo, signalStatus) {
-            const y = 160, w = 700, h = 274;
-            cv.roundRect(x, y, w, h, 12, C.card);
-            cv.fillRect(x, y + 20, 5, h - 40, C.red);
-            cv.fillRect(x + 38, y + 58, 44, 4, C.red);
-            cv.text(title, x + 38, y + 42, 22, C.white, { font: 'bold', spacing: 3 });
-            cv.text('SET TEMPERATURE', x + 38, y + 91, 17, C.muted, { font: 'bold', spacing: 2 });
+        function drawFlowLines(cv, left) {
+            // Decorative vent / airflow motif inspired by the BMW climate UI.
+            // These lines are visual only; they are not clickable climate controls.
+            for (let i = 0; i < 7; i++) {
+                const y = 216 + i * 24;
+                const spread = (i - 3) * 8;
+                const color = i === 3 ? C.red : (i % 2 ? C.redDim : C.redFaint);
+                const points = left
+                    ? [[72, y + spread], [142, y - 13], [220, y + 9], [302, y - 4], [390, y + spread / 2]]
+                    : [[1528, y + spread], [1458, y - 13], [1380, y + 9], [1298, y - 4], [1210, y + spread / 2]];
+                cv.polyline(points, i === 3 ? 2.6 : 1.4, color);
+            }
+            // Short illuminated vent slats make the airflow artwork read as one
+            // connected climate surface rather than separate data cards.
+            for (let i = 0; i < 4; i++) {
+                const y = 207 + i * 11;
+                if (left) cv.line(170, y, 388, y + 2, 1, C.redDim);
+                else cv.line(1212, y + 2, 1430, y, 1, C.redDim);
+            }
+        }
 
+        function zoneStatus(signalStatus, demo) {
+            if (demo) return { text: 'DEMO · NOT VEHICLE DATA', color: C.red };
+            if (signalStatus === 'live') return { text: 'LIVE VALUE · UNIT UNVERIFIED', color: C.red };
+            if (signalStatus === 'stale') return { text: 'SIGNAL STALE', color: C.muted };
+            if (signalStatus === 'invalid') return { text: 'INVALID SIGNAL PAYLOAD', color: C.muted };
+            if (signalStatus === 'waiting') return { text: 'WAITING FOR VEHICLE DATA', color: C.muted };
+            return { text: 'SIGNAL UNAVAILABLE', color: C.muted };
+        }
+
+        function climateZone(cv, cx, title, value, demo, signalStatus) {
             const shown = temperatureDisplay(value, demo);
-            const maxWidth = w - 76;
-            let size = shown.size;
-            const unitSize = 34, gap = 13;
-            const unitWidth = shown.unit ? cv.textWidth('°C', unitSize, { font: 'bold' }) : 0;
-            while (size > 24 && cv.textWidth(shown.text, size, { font: shown.font }) +
-                (shown.unit ? gap + unitWidth : 0) > maxWidth) size -= 2;
-            const valueWidth = cv.textWidth(shown.text, size, { font: shown.font });
-            const valueX = x + 38;
-            cv.text(shown.text, valueX, y + 198, size, shown.color, { font: shown.font });
-            if (shown.unit) cv.text('°C', valueX + valueWidth + gap, y + 194, unitSize, C.muted, { font: 'bold' });
-            cv.fillRect(x + 38, y + 224, w - 76, 1, C.border);
-            const labels = {
-                demo: 'LOCAL PREVIEW VALUE', live: 'LIVE VALUE · UNIT UNVERIFIED',
-                waiting: 'WAITING FOR SIGNAL', stale: 'SIGNAL STALE',
-                invalid: 'INVALID SIGNAL', unavailable: 'SIGNAL UNAVAILABLE',
-            };
-            const statusText = labels[demo ? 'demo' : signalStatus] || 'SIGNAL UNAVAILABLE';
-            cv.text(statusText, x + 38, y + 257, 15, demo ? C.red : signalStatus === 'live' ? C.green : C.muted, { font: 'bold', spacing: 1.3 });
+            const unitSize = 26, gap = 9;
+            const maxWidth = 280;
+            let size = shown.size + 12;
+            const valueWidthAt = (n) => cv.textWidth(shown.text, n, { font: shown.font }) +
+                (shown.unit ? gap + cv.textWidth('°C', unitSize, { font: 'bold' }) : 0);
+            while (size > 24 && valueWidthAt(size) > maxWidth) size -= 2;
+            const fullWidth = valueWidthAt(size), left = cx - fullWidth / 2;
+            const numberWidth = cv.textWidth(shown.text, size, { font: shown.font });
+
+            // Angular red accents frame the real read-only setpoint without
+            // suggesting that the user can adjust it from this screen.
+            cv.line(cx - 178, 242, cx - 144, 242, 2, C.red);
+            cv.line(cx + 144, 242, cx + 178, 242, 2, C.red);
+            cv.text(title, cx, 205, 23, C.white,
+                { align: 'center', font: 'bold', spacing: 2.8 });
+            cv.text('SET TEMPERATURE', cx, 229, 12, C.muted,
+                { align: 'center', font: 'bold', spacing: 1.9 });
+
+            cv.text(shown.text, left, 333, size, shown.color, { font: shown.font });
+            if (shown.unit) cv.text('°C', left + numberWidth + gap, 321, unitSize, C.muted, { font: 'bold' });
+
+            const status = zoneStatus(demo ? 'demo' : signalStatus, demo);
+            cv.text(status.text, cx, 371, 12, status.color,
+                { align: 'center', font: 'bold', spacing: 0.65 });
+        }
+
+        function acStatus(s) {
+            if (s.demo) return { text: 'DEMO · A/C ON', color: C.red };
+            if (live.signalError || !live.signalAvailable || live.stale) return { text: 'A/C STATUS · SIGNAL UNAVAILABLE', color: C.muted };
+            if (!live.seenAc) return { text: 'A/C STATUS · WAITING FOR DATA', color: C.muted };
+            if (live.invalidAc || s.ac === null) return { text: 'A/C STATUS · SIGNAL UNAVAILABLE', color: C.muted };
+            return { text: 'A/C STATUS · ' + (s.ac ? 'ON' : 'OFF'), color: s.ac ? C.red : C.white };
         }
 
         async function render() {
             if (stopped) return;
             const s = state();
             const cv = ctx.canvas(W, H).clear(C.bg);
+            cv.gradientRect(0, 0, W, H, [[0, '#050505'], [0.48, '#100407'], [1, '#050505']]);
 
-            cv.fillRect(48, 50, 5, 76, C.red);
-            cv.text('VKPERFORMANCE', 72, 72, 16, C.red, { font: 'bold', spacing: 2.5 });
-            cv.text('VClimateStatus', 72, 112, 31, C.white, { font: 'bold', spacing: 0.4 });
-            badge(cv, s.demo ? 'DEMO' : (live.signalAvailable || live.setpointAvailable) ? 'LIVE' : 'WAIT', s.demo);
-            cv.fillRect(48, 139, 1472, 1, C.border);
+            cv.text('CLIMATE CONTROL', 72, 72, 25, C.white, { font: 'bold', spacing: 2.1 });
+            cv.fillRect(72, 91, 156, 2, C.red);
+            cv.fillRect(228, 92, 1300, 1, C.redDim);
+            drawSettingsMark(cv);
+            drawFlowLines(cv, true);
+            drawFlowLines(cv, false);
+            climateZone(cv, 500, 'DRIVER', s.driver, s.demo, s.driverStatus);
+            climateZone(cv, 1100, 'PASSENGER', s.passenger, s.demo, s.passengerStatus);
+            cv.fillRect(799, 176, 2, 216, C.redDim);
+            cv.circle(800, 284, 4, C.red);
 
-            climateCard(cv, 72, 'DRIVER', s.driver, s.demo, s.driverStatus);
-            climateCard(cv, 828, 'PASSENGER', s.passenger, s.demo, s.passengerStatus);
-
-            cv.fillRect(72, 464, 1456, 1, C.border);
-            cv.text('CLIMATE STATUS', 72, 499, 15, C.muted, { font: 'bold', spacing: 1.8 });
-            const signalUnavailable = live.signalError || !live.signalAvailable || live.stale || live.invalidAc;
-            const acText = s.demo ? 'A/C ON' : signalUnavailable ? 'SIGNAL UNAVAILABLE' :
-                !live.seenAc ? 'WAITING FOR DATA' : s.ac === null ? 'SIGNAL UNAVAILABLE' : s.ac ? 'A/C ON' : 'A/C OFF';
-            cv.fillRect(267, 483, 5, 16, s.ac === true ? C.red : C.muted);
-            cv.text(acText, 286, 499, 17, s.ac === true ? C.white : C.muted, { font: 'bold', spacing: 1.1 });
-            const zoneStates = Object.keys(live.zones).map((name) => live.zones[name].state);
-            const hasLiveTemperature = zoneStates.indexOf('live') >= 0;
-            const sourceText = s.demo ? 'DEMO VALUES · NOT VEHICLE DATA' :
-                hasLiveTemperature ? 'VEHICLE VALUE · UNIT UNVERIFIED' :
-                    zoneStates.indexOf('invalid') >= 0 ? 'INVALID SETPOINT PAYLOAD' :
-                        zoneStates.indexOf('stale') >= 0 ? 'SETPOINT DATA STALE' :
-                            live.setpointAvailable ? 'WAITING FOR SETPOINT DATA' : 'SETPOINT SIGNAL · UNAVAILABLE';
-            cv.text(sourceText, 1528, 499, 15, s.demo ? C.red : C.muted, { align: 'right', spacing: 0.7 });
+            const status = acStatus(s);
+            cv.fillRect(72, 428, 1456, 1, C.redDim);
+            cv.roundRect(654, 445, 292, 42, 20, '#12090A');
+            cv.strokeRoundRect(654, 445, 292, 42, 20, 1.4, status.color);
+            cv.text(status.text, 800, 472, 14, status.color, { align: 'center', font: 'bold', spacing: 1.0 });
+            cv.text(s.demo ? 'DEMO PREVIEW · NOT VEHICLE DATA' : 'LIVE VEHICLE DATA · READ ONLY', 1528, 495, 10, C.faint,
+                { align: 'right', font: 'bold', spacing: 1.1 });
 
             G.frame(cv, ctx.theme(), ['Climate'], 0);
             return ui.image('MAIN_GFX', cv);
@@ -530,6 +568,11 @@ mgu.run({
             }, 35);
         }
 
+        ctx.onTap((x, y) => {
+            if (x < 1390 || x > 1560 || y < 20 || y > 100) return;
+            const button = ui.rhmi && ui.rhmi.getByName && ui.rhmi.getByName('BTN_SETTINGS');
+            if (button && typeof button.emit === 'function') button.emit('action', {});
+        });
         ctx.onLayout(queueRender);
         render().catch((e) => log.warn('first render: ' + (e && e.message || e)));
     },

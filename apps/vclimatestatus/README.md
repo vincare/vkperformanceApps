@@ -1,14 +1,19 @@
-# VClimateStatus
+# Climate Control
 
-Read-only climate monitor for BMW MGU / iDrive 7. It uses a catalog-confirmed
-front-zone setpoint candidate and the catalog-confirmed A/C status. It displays
-front driver and passenger values when the HU_MGU supplies valid records. It
-declares no climate setters, commands, or write permissions.
+Read-only climate status app for BMW MGU / iDrive 7. It shows the driver's and
+passenger's setpoints when the HU_MGU supplies valid records and reports the
+real A/C status. It does not adjust climate settings and declares no climate
+setters, commands, or write permissions.
 
 ## Implementation
 
-- App id/title: `vclimatestatus` / `VClimateStatus`; version `0.4.1`.
-- English UI, dark BMW M-style colors, 1600 x 520 logical canvas.
+- App id/title: `vclimatestatus` / `Climate Control`; version `0.4.2`. The id
+  stays the same so MGU Store updates the existing app instead of adding a
+  second tile.
+- English UI, black and red BMW M-style graphics, 1600 x 520 logical canvas.
+- The screen contains only read-only setpoint and A/C status. Its airflow lines
+  are decoration; it has no pretend temperature arrows, fan controls, defrost
+  controls, or seat-heating buttons.
 - A/C: `de.bmw.infotainment.climate.Climate2.statusACFront` (`rs`). The
   nested `statusAircon` enum maps `0` to off, `1` to on, and all other values
   (including catalog value `3`, invalid) to unavailable.
@@ -40,23 +45,25 @@ declares no climate setters, commands, or write permissions.
   module, and the preview-only `demo=on` setting. They are explicitly marked
   `DEMO VALUES · NOT VEHICLE DATA` and `LOCAL PREVIEW VALUE`. The installed
   manifest contains no demo setting; the live path never falls back to them.
-- Temporary raw diagnostics are enabled on first install/update of 0.4.1 by the
-  `climateDiagnostics` setting (`default: true`, `reset: 1`). The main screen
-  remains unchanged. Startup logs whether diagnostics are active; setpoint
-  diagnostics record interface-config lookup, whether `statusTemperature` is
-  declared with a getter, proxy initialization, availability subscription,
-  field-subscription result, provider availability, getter errors, and a
-  30-second no-payload result. Each distinct raw payload records UTC receive
-  time, its source (`event` or `getter`), raw `operationZone`, mapped zone,
-  raw `targetTemperature`, and `saveLUM`. An unchanged value is repeated in
-  the log at most every 30 seconds. The MGU kit writes this to the app's own
-  `data/vclimatestatus.log` and the system log; the file log rotates at 256 KiB.
+- Temporary raw diagnostics were enabled by default in 0.4.1 and remain
+  available in 0.4.2 through the `climateDiagnostics` setting. The main screen
+  can show real values only when the vehicle sends them. Startup logs whether
+  diagnostics are active; setpoint diagnostics record interface-config lookup,
+  whether `statusTemperature` is declared with a getter, proxy initialization,
+  availability subscription, field-subscription result, provider availability,
+  getter errors, and a 30-second no-payload result. Each distinct raw payload
+  records UTC receive time, its source (`event` or `getter`), raw
+  `operationZone`, mapped zone, raw `targetTemperature`, and `saveLUM`. An
+  unchanged value is repeated in the log at most every 30 seconds. The MGU kit
+  writes this to the app's own `data/vclimatestatus.log` and the system log; the
+  file log rotates at 256 KiB.
   Example: `CLIMATE_DIAG statusTemperature rx=2026-11-21T12:00:00.000Z source=getter record=0 zoneRaw=1 zone=DRIVER targetRaw=25 saveLUMRaw=false`.
 - `app.json` settings are built into the app's HMI interface; they are not
   toggled from MGU Store's own Settings page. In 0.4.0 the canvas had no
   `BTN_SETTINGS` action, so the generated app Settings screen had no route from
-  the screen the user opened. Version 0.4.1 adds that standard action. Open
-  `Settings` in the app header to reach the app settings and its `QR log` row.
+  the screen the user opened. Version 0.4.1 added that standard action. Open
+  `Settings` in the app header or tap the screen's Settings icon to reach the
+  app settings and its `QR log` row.
   The existing QR log shows the recent app log as scannable pages, without SSH.
 - On the OAP app `shutdown` event, redraw/freshness timers are cleared and each
   resolved watcher is shut down. The kit watcher stops its poll interval,
@@ -153,11 +160,10 @@ that a factory file/service must change. Do not use this repository's manual
 that path as installing the whole custom-app kit and restarting the app
 platform.
 
-For the MGU Store route, first push the updated project branch, then add the
-GitHub repository as a branch source and select only `VClimateStatus` from
-`codex/vclimatestatus`. The current 0.4.0 edits are local and have not been
-pushed, so the Store cannot see them yet. No package has been installed on the
-vehicle as part of this change.
+For the MGU Store route, publish the updated project branch, then refresh the
+GitHub repository source and select only `Climate Control` from
+`codex/vclimatestatus`. Version 0.4.2 source changes are local until published.
+No package has been installed on the vehicle as part of this change.
 
 ## Vehicle validation required before claiming complete live °C values
 
@@ -167,7 +173,7 @@ vehicle as part of this change.
    install details. Do not proceed if it proposes a factory-file/service
    change or a system-process restart.
 3. Once installation is separately approved, diagnostics should already be on
-   from the 0.4.1 update. Confirm `Temporary climate diagnostics (raw)` is On
+   from the 0.4.1 or newer update. Confirm `Temporary climate diagnostics (raw)` is On
    under the app's Settings. Use the factory climate controls to set Driver to
    24°C and Passenger to 27°C, changing one side at a time. The app itself has
    no climate controls.

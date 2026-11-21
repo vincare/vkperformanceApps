@@ -1,0 +1,72 @@
+{
+  "id": "performance",
+  "title": "PERFORMANCE",
+  "description": "Read-only engine performance monitor for BMW iDrive 7",
+  "version": "0.2.0",
+  "loggingId": "OAA6",
+  "iconGlyph": "dyno",
+  "mguHmi": ["ID7"],
+  "signals": {
+    "de.bmw.infotainment.vehicle.CDS": {
+      "statusEngineSpeed2": "rs"
+    },
+    "de.bmw.infotainment.vehicle.Vehicle": {
+      "statusNewCurrentUnitsStatusExt": "rs"
+    },
+    "de.bmw.infotainment.drivingexcitement.FES": {
+      "statusActualValueTorque2": "rs",
+      "statusVehicleDynamicEngine": "rs",
+      "statusVehicleDynamicEngineMaxValue": "rs",
+      "statusVehicleDynamicEngineScaling": "rs",
+      "statusSwitchDriveDynamicSport2": "rs",
+      "displaySportPowertrain": "s"
+    },
+    "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
+      "_instances": "SystemFunctionsInternalTasuInst1",
+      "_methods": ["sendTasuRequest"],
+      "_broadcasts": ["sendTasuResponse"]
+    }
+  },
+  "settings": [
+    {
+      "key": "performanceDiagnostics",
+      "label": "Performance diagnostics (raw)",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "readDmeCandidates",
+      "label": "Read DME candidates (read-only)",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "demo",
+      "label": "Demo data",
+      "type": "choice",
+      "default": "off",
+      "options": [
+        ["off", "Never"],
+        ["on", "Always"]
+      ]
+    },
+    {
+      "key": "theme",
+      "label": "Colour theme",
+      "type": "choice",
+      "default": "m_red",
+      "options": [
+        ["m_red", "M Red"],
+        ["m_tricolour", "M Tricolour"]
+      ]
+    }
+  ],
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "Engine Data",
+      "buttons": [["BTN_SETTINGS", "Settings"]]
+    }
+  ]
+}
