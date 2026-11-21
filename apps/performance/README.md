@@ -1,8 +1,8 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.12 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.13 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
-area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
+area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
 separately in Settings; the defaults are 300 hp and 800 Nm.
 Each scale now labels its configured endpoint explicitly, including values
@@ -22,6 +22,10 @@ that do not fall on a regular tick interval.
   the same maximum and power unit in both apps to compare the number. If the
   percentage is unavailable or `Torque × RPM` is selected, power is estimated
   as `Nm × RPM / 9549` kW.
+- **Vehicle speed** comes from `Vehicle2.statusCarSpeed2` (`speedVehicleCentreOfGravity`),
+  scaled by 0.015625 km/h per raw count. The current selector/gear comes from the
+  read-only `VehicleInformation.statusGearboxDrive` signal, with
+  `DataPowerTrain2.statusGearSelectionDrive` as a read-only fallback.
 - **Boost** in Auto mode prefers the FES Sport Display signal once it changes
   by at least 0.03 bar. Its scale is still unverified, so that source is marked
   approximate. Otherwise, the app tries the same read-only candidates as M

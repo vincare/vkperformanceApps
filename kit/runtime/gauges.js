@@ -380,7 +380,8 @@ function segBar(cv, t, x, y, w, h, g) {
     const uw = g.unit ? cv.textWidth(' ' + g.unit, 26) : 0;
     if (g.panel !== false) {
         const valueText = g.valueText == null ? fmt(v, g.decimals) : String(g.valueText);
-        cv.text(valueText, x + w - 24 - uw, y + 60, 64, !isNum(v) ? t.dim : over ? '#ff4a4a' : t.text, { align: 'right', font: 'num' });
+        const valueColor = g.valueColor ? (t[g.valueColor] || g.valueColor) : !isNum(v) ? t.dim : over ? '#ff4a4a' : t.text;
+        cv.text(valueText, x + w - 24 - uw, y + 60, 64, valueColor, { align: 'right', font: 'num' });
         if (g.unit) cv.text(' ' + g.unit, x + w - 24, y + 60, 26, t.dim, { align: 'right' });
     }
     const bx = x + (g.panel !== false ? 24 : 0), bw = w - (g.panel !== false ? 48 : 0) - SL;

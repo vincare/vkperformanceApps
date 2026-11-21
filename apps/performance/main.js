@@ -30,6 +30,8 @@ const PEAK_HOLD_MS = 15000;
 const RPM_MAX = 8000;
 const BOOST_MAX_BAR = 2.5;
 const PRESSURE_UNITS = { 1: 'BAR', 2: 'KPA', 3: 'PSI', BAR: 'BAR', KPA: 'KPA', PSI: 'PSI' };
+const DRIVE_STAGES = { P: 'P', R: 'R', N: 'N', D: 'D', 1: 'P', 2: 'R', 3: 'N', 4: 'D' };
+const GEAR_NAMES = { G1: 1, G2: 2, G3: 3, G4: 4, G5: 5, G6: 6, G7: 7, G8: 8, G9: 9, G10: 10 };
 
 function finite(value) { return typeof value === 'number' && isFinite(value); }
 function json(value) {
@@ -38,6 +40,24 @@ function json(value) {
 function pressureUnit(value) {
     if (typeof value === 'string') return PRESSURE_UNITS[value.trim().toUpperCase()] || null;
     return PRESSURE_UNITS[value] || null;
+}
+function gearNumber(value) {
+    if (typeof value === 'number') return value >= 3 && value <= 12 ? value - 2 : value === 1 ? -1 : value === 2 ? 0 : null;
+    const text = String(value || '').toUpperCase();
+    return GEAR_NAMES[text] === undefined ? null : GEAR_NAMES[text];
+}
+function selectedGearLabel(value) {
+    let n = typeof value === 'number' ? value : ({ N: 1, R: 2, P: 3, NP: 4 })[String(value || '').toUpperCase()];
+    if (n === undefined) {
+        const match = /^_(\d)$/.exec(String(value || '').toUpperCase());
+        if (match) n = 4 + Number(match[1]);
+    }
+    if (n === 1) return 'N';
+    if (n === 2) return 'R';
+    if (n === 3) return 'P';
+    if (n === 4) return 'N/P';
+    if (n >= 5 && n <= 13) return 'D' + (n - 4);
+    return null;
 }
 function metric() { return { raw: null, value: null, unit: '', source: '', at: 0, status: 'waiting' }; }
 function fresh(m, now) { return !!(m && m.at && now - m.at <= FRESH_MS && m.status === 'live' && finite(m.value)); }
@@ -82,6 +102,7 @@ mgu.run({
         let renderTimer = null, renderQueued = false, freshnessTimer = null, dmeTimer = null, demoTimer = null;
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
+        let vehicleGear = null, vehicleGearAt = 0;
         let page = 0, engineConfigView = 'sections', valveReady = false, drivingMode = null;
         let driveModeLoading = false, driveModePollStarting = false, driveModePollSub = null, driveModePollTimer = null;
         let valveTick = null, valveRescanTimer = null, smokeTick = null;
@@ -298,6 +319,26 @@ mgu.run({
             updateMetric('speed', raw, finite(value) && value >= 0 && value <= 400 ? value : null,
                 'km/h', source, finite(value) && value >= 0 && value <= 400 ? 'live' : 'invalid');
             feedDyno();
+        }
+
+        function setGearboxStatus(payload) {
+            if (!payload) return;
+            const gear = gearNumber(payload.statusActualGearDrive);
+            const stage = DRIVE_STAGES[payload.statusActualStageDrive];
+            const label = stage ? (stage === 'D' && gear > 0 ? 'D' + gear : stage)
+                : gear === -1 ? 'R' : gear === 0 ? 'N/P' : gear > 0 ? String(gear) : null;
+            if (!label) return;
+            vehicleGear = label;
+            vehicleGearAt = Date.now();
+            queueRender();
+        }
+
+        function setGearSelection(payload) {
+            const label = selectedGearLabel(payload && payload.statusGearSelectionDrive);
+            if (!label) return;
+            vehicleGear = label;
+            vehicleGearAt = Date.now();
+            queueRender();
         }
 
         function setLongitudinalAcceleration(payload, source) {
@@ -547,11 +588,13 @@ mgu.run({
         const CDS2 = 'de.bmw.infotainment.vehicle.CDS2';
         const VEHICLE = 'de.bmw.infotainment.vehicle.Vehicle';
         const VEHICLE2 = 'de.bmw.infotainment.vehicle.Vehicle2';
+        const VEHICLE_INFO = 'de.bmw.infrastructure.VehicleInformation';
         const FES = 'de.bmw.infotainment.drivingexcitement.FES';
         startWatch(CDS, { statusEngineSpeed2: setRpm });
         startWatch(CDS2, { statusLongitudinalAccelerationMassCenter: setLongitudinalAcceleration });
         startWatch(VEHICLE, { statusNewCurrentUnitsStatusExt: setPressureUnits });
         startWatch(VEHICLE2, { statusCarSpeed2: setVehicleSpeed });
+        startWatch(VEHICLE_INFO, { statusGearboxDrive: setGearboxStatus, DataPowerTrain2: setGearSelection });
         startWatch(FES, {
             statusActualValueTorque2: setFesTorque,
             statusVehicleDynamicEngine: setFesPercentages,
@@ -688,6 +731,8 @@ mgu.run({
                 demo: false, rpm, torque, torqueSource: tq ? tq.source : null,
                 power: powerFor(powerPct, torque, rpm), powerUnit,
                 powerPct,
+                speed: fresh(state.speed, now) ? state.speed.value : null,
+                gear: vehicleGearAt && now - vehicleGearAt <= FRESH_MS ? vehicleGear : null,
                 torquePct: fresh(state.torquePct, now) ? state.torquePct.value : null,
                 boost: boostValue(now),
             };
@@ -734,29 +779,25 @@ mgu.run({
         function drawDynoPanel(cv, t, s) {
             const x = 1110, y = G.TOP, w = 466;
             G.panel(cv, t, x, y, w, 160, 'DYNO RUN');
-            const snap = dynoRecorder.snapshot(Date.now());
             const run = s.demo ? null : dynoRuns[0];
-            const status = s.demo ? 'PAUSED IN DEMO' : snap.status === 'recording' ? 'RECORDING · LAST RUN HELD'
-                : snap.status === 'done' ? 'LAST RUN · JUST RECORDED'
-                    : snap.status === 'short' ? (run ? 'LAST RUN · NEW PULL TOO SHORT' : 'PULL TOO SHORT')
-                        : run ? 'LAST RUN · ROAD ESTIMATE' : 'NO RUN RECORDED';
-            const statusColor = snap.status === 'done' ? t.ok : snap.status === 'recording' ? t.crit : t.dim;
-            cv.text(status, x + 24, y + 64, 16, statusColor, { font: 'bold', spacing: 1 });
+            const runDate = run && finite(run.at) ? new Date(run.at) : null;
+            const dateText = runDate && finite(runDate.getTime())
+                ? String(runDate.getDate()).padStart(2, '0') + '.' + String(runDate.getMonth() + 1).padStart(2, '0') + '.' + runDate.getFullYear()
+                : '--';
+            const titleWidth = cv.textWidth('DYNO RUN', 26, { font: 'bold' });
+            cv.text('(LAST RUN - ' + dateText + ')', x + 18 + titleWidth + 10, y + 42, 15, t.dim,
+                { font: 'bold', spacing: 0.5, literal: true });
 
             if (!run) {
                 const split = x + Math.round(w / 2);
                 cv.fillRect(split, y + 76, 1, 54, G.withAlpha(t.tick, 0.65));
                 cv.text('HORSE POWER', x + 24, y + 88, 15, t.dim, { font: 'bold', spacing: 1.5 });
                 cv.text('TORQUE', split + 20, y + 88, 15, t.dim, { font: 'bold', spacing: 1.5 });
-                cv.text('--', x + 24, y + 121, 36, t.dim, { font: 'num' });
-                cv.text(Calc.powerUnit(s.powerUnit), x + 76, y + 121, 18, t.dim);
-                cv.text('--', split + 20, y + 121, 36, t.dim, { font: 'num' });
-                cv.text('Nm', split + 70, y + 121, 18, t.dim);
-                const gate = dynoGate(Date.now());
-                const note = s.demo ? 'No simulated dyno figures are shown'
-                    : snap.status === 'short' ? 'One gear · sweep at least 1500 rpm'
-                        : gate.text;
-                cv.text(note, x + 24, y + 145, 14, t.dim);
+                cv.text('0', x + 24, y + 121, 36, '#f32635', { font: 'num' });
+                const zeroWidth = cv.textWidth('0', 36, { font: 'num' });
+                cv.text(Calc.powerUnit(s.powerUnit), x + 27 + zeroWidth, y + 121, 18, t.dim);
+                cv.text('0', split + 20, y + 121, 36, '#f32635', { font: 'num' });
+                cv.text('Nm', split + 23 + zeroWidth, y + 121, 18, t.dim);
                 return;
             }
 
@@ -770,9 +811,9 @@ mgu.run({
             const torqueText = formatNumber(run.peakT, 0);
             const powerWidth = cv.textWidth(powerText, 36, { font: 'num' });
             const torqueWidth = cv.textWidth(torqueText, 36, { font: 'num' });
-            cv.text(powerText, x + 24, y + 116, 36, t.accent, { font: 'num' });
+            cv.text(powerText, x + 24, y + 116, 36, '#f32635', { font: 'num' });
             cv.text(Calc.powerUnit(powerUnit), x + 27 + powerWidth, y + 116, 18, t.dim);
-            cv.text(torqueText, split + 20, y + 116, 36, t.accent2, { font: 'num' });
+            cv.text(torqueText, split + 20, y + 116, 36, '#f32635', { font: 'num' });
             cv.text('Nm', split + 23 + torqueWidth, y + 116, 18, t.dim);
             cv.text('@ ' + formatNumber(run.peakPrpm, 0) + ' rpm', x + 24, y + 136, 13, t.dim);
             cv.text('@ ' + formatNumber(run.peakTrpm, 0) + ' rpm', split + 20, y + 136, 13, t.dim);
@@ -799,18 +840,18 @@ mgu.run({
             const powerMax = Calc.powerValue(finite(powerGaugeKw) && powerGaugeKw > 0 ? powerGaugeKw : 223.7, s.powerUnit);
             const torqueGaugeMax = settings.get('torqueGaugeMax');
             const torqueMax = finite(torqueGaugeMax) && torqueGaugeMax > 0 ? torqueGaugeMax : 800;
-            const powerText = !s.power ? '--' : (s.power.approximate ? '~' : '') + formatNumber(s.power.value, 0);
-            const torqueText = s.torque === null ? '--' : formatNumber(s.torque, 0);
+            const powerText = !s.power ? '0' : (s.power.approximate ? '~' : '') + formatNumber(s.power.value, 0);
+            const torqueText = s.torque === null ? '0' : formatNumber(s.torque, 0);
 
             G.segBar(cv, t, 24, G.TOP, 1062, 226 + half, {
-                label: 'HORSE POWER', value: s.power ? s.power.value : null, valueText: powerText,
+                label: 'HORSE POWER', value: s.power ? s.power.value : 0, valueText: powerText, valueColor: '#f32635',
                 unit: Calc.powerUnit(s.powerUnit), decimals: 0,
                 min: 0, max: powerMax, step: powerMax / 20,
                 scale: { every: powerMax / 4, div: 1 },
                 ramp: 'hot', peak: s.peaks.power,
             });
             G.segBar(cv, t, 24, G.TOP + 242 + half, 1062, 226 - half, {
-                label: 'TORQUE', value: s.torque, valueText: torqueText, unit: 'Nm', decimals: 0,
+                label: 'TORQUE', value: s.torque === null ? 0 : s.torque, valueText: torqueText, valueColor: '#f32635', unit: 'Nm', decimals: 0,
                 min: 0, max: torqueMax, step: torqueMax / 20,
                 scale: { every: torqueMax / 4, div: 1 },
                 ramp: 'hot', peak: s.peaks.torque,
@@ -818,12 +859,20 @@ mgu.run({
 
             drawDynoPanel(cv, t, s);
 
-            const rpmTicks = Calc.scaleTicks(RPM_MAX, 4);
-            G.bar(cv, t, 1110, G.TOP + 172, 466, 96, {
-                label: 'Engine speed', value: s.rpm, text: formatNumber(s.rpm, 0), unit: 'rpm',
-                min: 0, max: RPM_MAX, step: Calc.scaleStep(RPM_MAX, 4), ticks: rpmTicks,
-                decimals: 0, peak: s.peaks.rpm, peakText: true, ramp: 'hot',
+            const speedX = 1110, speedY = G.TOP + 172, speedW = 466;
+            const speedTicks = [0, 60, 120, 210, 270, 330];
+            G.bar(cv, t, speedX, speedY, speedW, 96, {
+                label: 'VEHICLE SPEED', value: s.speed, text: s.speed === null ? '--' : formatNumber(s.speed, 0), unit: 'km/h',
+                min: 0, max: 330, step: 30, ticks: speedTicks,
+                labels: [0, 120, 210, 330].map((value) => ({ value, text: String(value), align: value === 0 ? 'left' : value === 330 ? 'right' : 'center' })),
+                decimals: 0, ramp: 'hot',
             });
+            const speedScaleX = speedX + 18;
+            [60, 270].forEach((value) => cv.text(String(value), speedScaleX + value / 330 * (speedW - 18),
+                speedY + 92, 14, t.dim, { align: 'center', font: 'bold' }));
+            const gear = s.gear || '--';
+            const gearX = speedX + cv.textWidth('VEHICLE SPEED', 22, { font: 'bold', spacing: 2 }) + 18;
+            cv.text('GEAR ' + gear, gearX, speedY + 26, 16, t.accent, { font: 'bold', spacing: 1, literal: true });
             const boostLabel = 'Turbo Boost';
             const boostTicks = Calc.scaleTicks(BOOST_MAX_BAR, 5);
             G.bar(cv, t, 1110, G.TOP + 280, 466, 96, {
