@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.9 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.10 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Engine Speed, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
@@ -91,6 +91,16 @@ M340i. The DME reply and `0x62FD` commanded target are shown as command feedback
 `0x64FD` output bytes are not decoded here, so the graphic does not claim that
 the physical flap moved. Closing the app stops hold repeats; the DME is expected
 to resume its own strategy after its short-term override expires.
+
+On Engine Data, **M SOUND MODE** requests OPEN from the same guarded controller;
+pressing it again requests OEM control. The button is red while the app's open
+request is active and grey when it is off or unavailable. It requires the same
+explicit Car control arming and matched-DME checks as the Engine Config buttons.
+The DME acceptance and commanded target do not prove the flap is physically at
+100%, because the `0x64FD` output-position payload has not been decoded or
+validated on this car. Opening the flap also does not select Sport Plus or
+command pops and bangs; those sounds remain under BMW's driving-mode and DME
+strategy.
 
 ## Virtual Dyno card
 

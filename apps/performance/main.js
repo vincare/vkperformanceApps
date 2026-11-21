@@ -87,6 +87,9 @@ mgu.run({
         let valveTick = null, valveRescanTimer = null, smokeTick = null;
         let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0;
         let carVisual = null, carVisualKey = '';
+        let mSoundEnabled = false;
+        let mSoundBusy = false;
+        let mSoundFeedback = 'OFF · BMW CONTROL';
 
         function selectedCarVisual(theme) {
             const selected = CarImages.model(settings.get('carModel'));
@@ -121,6 +124,11 @@ mgu.run({
             const control = valveController.view();
             return valveReady && valveController.armedSetting && !control.blocked &&
                 !!(valveController.ident && valveController.ident.elAgk && valveController.ident.elAgk.supported);
+        }
+
+        function resetMSound(message) {
+            mSoundEnabled = false;
+            mSoundFeedback = message;
         }
 
         function dynoSetup() {
@@ -457,8 +465,48 @@ mgu.run({
             return pending.then(queueRender).catch((e) => log.warn('exhaust valve: ' + shortError(e)));
         };
         const valveActions = {
-            open: valvePress('OPEN'), close: valvePress('CLOSED'),
-            oem: valvePress('OEM'), drive: valvePress('DRIVE'),
+            open() { resetMSound('OPEN REQUEST · POSITION UNKNOWN'); return valvePress('OPEN')(); },
+            close() { resetMSound('CLOSE REQUEST · POSITION UNKNOWN'); return valvePress('CLOSED')(); },
+            oem() { resetMSound('BMW CONTROL · POSITION UNKNOWN'); return valvePress('OEM')(); },
+            drive() { resetMSound('DRIVE MODE CONTROL · POSITION UNKNOWN'); return valvePress('DRIVE')(); },
+        };
+        function toggleMSoundMode() {
+            if (!valveCanActuate() || valveController.state.busy || mSoundBusy) return null;
+            mSoundBusy = true;
+            if (mSoundEnabled) {
+                mSoundEnabled = false;
+                mSoundFeedback = 'BMW CONTROL REQUESTED · POSITION UNKNOWN';
+                queueRender();
+                const pending = valvePress('OEM')();
+                if (!pending) { mSoundBusy = false; queueRender(); return null; }
+                return pending.then(() => {
+                    if (valveController.state.requested === 'OEM' && valveController.state.accepted === false)
+                        mSoundFeedback = 'BMW CONTROL NOT ACCEPTED · POSITION UNKNOWN';
+                    mSoundBusy = false;
+                    queueRender();
+                });
+            }
+
+            mSoundEnabled = true;
+            mSoundFeedback = 'OPEN REQUEST IN PROGRESS · POSITION UNKNOWN';
+            queueRender();
+            const pending = valvePress('OPEN')();
+            if (!pending) {
+                resetMSound('OPEN REQUEST BLOCKED · CHECK CAR CONTROL');
+                mSoundBusy = false;
+                queueRender();
+                return null;
+            }
+            return pending.then(() => {
+                const state = valveController.state;
+                if (state.requested === 'OPEN' && state.accepted === true) {
+                    mSoundFeedback = 'OPEN REQUEST ACCEPTED · POSITION UNKNOWN';
+                } else {
+                    resetMSound('OPEN REQUEST NOT ACCEPTED · POSITION UNKNOWN');
+                }
+                mSoundBusy = false;
+                queueRender();
+            });
         };
         const sectionActions = {
             open() {
@@ -659,7 +707,7 @@ mgu.run({
 
         function drawDynoPanel(cv, t, s) {
             const x = 1110, y = G.TOP, w = 466;
-            G.panel(cv, t, x, y, w, 190, 'DYNO RUN');
+            G.panel(cv, t, x, y, w, 160, 'DYNO RUN');
             const snap = dynoRecorder.snapshot(Date.now());
             const run = s.demo ? null : dynoRuns[0];
             const status = s.demo ? 'PAUSED IN DEMO' : snap.status === 'recording' ? 'RECORDING · LAST RUN HELD'
@@ -667,42 +715,60 @@ mgu.run({
                     : snap.status === 'short' ? (run ? 'LAST RUN · NEW PULL TOO SHORT' : 'PULL TOO SHORT')
                         : run ? 'LAST RUN · ROAD ESTIMATE' : 'NO RUN RECORDED';
             const statusColor = snap.status === 'done' ? t.ok : snap.status === 'recording' ? t.crit : t.dim;
-            cv.text(status, x + 24, y + 68, 18, statusColor, { font: 'bold', spacing: 1 });
+            cv.text(status, x + 24, y + 64, 16, statusColor, { font: 'bold', spacing: 1 });
 
             if (!run) {
                 const split = x + Math.round(w / 2);
-                cv.fillRect(split, y + 84, 1, 61, G.withAlpha(t.tick, 0.65));
-                cv.text('HORSE POWER', x + 24, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
-                cv.text('TORQUE', split + 20, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
-                cv.text('--', x + 24, y + 137, 42, t.dim, { font: 'num' });
-                cv.text(Calc.powerUnit(s.powerUnit), x + 82, y + 137, 20, t.dim);
-                cv.text('--', split + 20, y + 137, 42, t.dim, { font: 'num' });
-                cv.text('Nm', split + 78, y + 137, 20, t.dim);
+                cv.fillRect(split, y + 76, 1, 54, G.withAlpha(t.tick, 0.65));
+                cv.text('HORSE POWER', x + 24, y + 88, 15, t.dim, { font: 'bold', spacing: 1.5 });
+                cv.text('TORQUE', split + 20, y + 88, 15, t.dim, { font: 'bold', spacing: 1.5 });
+                cv.text('--', x + 24, y + 121, 36, t.dim, { font: 'num' });
+                cv.text(Calc.powerUnit(s.powerUnit), x + 76, y + 121, 18, t.dim);
+                cv.text('--', split + 20, y + 121, 36, t.dim, { font: 'num' });
+                cv.text('Nm', split + 70, y + 121, 18, t.dim);
                 const gate = dynoGate(Date.now());
                 const note = s.demo ? 'No simulated dyno figures are shown'
                     : snap.status === 'short' ? 'One gear · sweep at least 1500 rpm'
                         : gate.text;
-                cv.text(note, x + 24, y + 161, 17, t.dim);
+                cv.text(note, x + 24, y + 145, 14, t.dim);
                 return;
             }
 
             const split = x + Math.round(w / 2);
-            cv.fillRect(split, y + 84, 1, 73, G.withAlpha(t.tick, 0.65));
-            cv.text('HORSE POWER', x + 24, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
-            cv.text('TORQUE', split + 20, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
+            cv.fillRect(split, y + 76, 1, 66, G.withAlpha(t.tick, 0.65));
+            cv.text('HORSE POWER', x + 24, y + 82, 15, t.dim, { font: 'bold', spacing: 1.5 });
+            cv.text('TORQUE', split + 20, y + 82, 15, t.dim, { font: 'bold', spacing: 1.5 });
             const powerUnit = s.powerUnit;
             const peakPower = Calc.powerValue(run.peakP / 1000, powerUnit);
             const powerText = formatNumber(peakPower, 0);
             const torqueText = formatNumber(run.peakT, 0);
-            const powerWidth = cv.textWidth(powerText, 42, { font: 'num' });
-            const torqueWidth = cv.textWidth(torqueText, 42, { font: 'num' });
-            cv.text(powerText, x + 24, y + 137, 42, t.accent, { font: 'num' });
-            cv.text(Calc.powerUnit(powerUnit), x + 27 + powerWidth, y + 137, 20, t.dim);
-            cv.text(torqueText, split + 20, y + 137, 42, t.accent2, { font: 'num' });
-            cv.text('Nm', split + 23 + torqueWidth, y + 137, 20, t.dim);
-            cv.text('@ ' + formatNumber(run.peakPrpm, 0) + ' rpm', x + 24, y + 158, 16, t.dim);
-            cv.text('@ ' + formatNumber(run.peakTrpm, 0) + ' rpm', split + 20, y + 158, 16, t.dim);
-            drawDynoCurve(cv, t, run, x + 24, y + 166, w - 48, 19);
+            const powerWidth = cv.textWidth(powerText, 36, { font: 'num' });
+            const torqueWidth = cv.textWidth(torqueText, 36, { font: 'num' });
+            cv.text(powerText, x + 24, y + 116, 36, t.accent, { font: 'num' });
+            cv.text(Calc.powerUnit(powerUnit), x + 27 + powerWidth, y + 116, 18, t.dim);
+            cv.text(torqueText, split + 20, y + 116, 36, t.accent2, { font: 'num' });
+            cv.text('Nm', split + 23 + torqueWidth, y + 116, 18, t.dim);
+            cv.text('@ ' + formatNumber(run.peakPrpm, 0) + ' rpm', x + 24, y + 136, 13, t.dim);
+            cv.text('@ ' + formatNumber(run.peakTrpm, 0) + ' rpm', split + 20, y + 136, 13, t.dim);
+            drawDynoCurve(cv, t, run, x + 24, y + 143, w - 48, 11);
+        }
+
+        function drawMSoundButton(cv, t, enabled, active, message, run) {
+            const x = 1110, y = G.TOP + 392, w = 466, h = 70;
+            const red = '#f32635';
+            const edge = active ? red : G.withAlpha('#c7cbd1', enabled ? 0.42 : 0.2);
+            cv.roundRect(x, y, w, h, 8, active ? G.withAlpha(red, 0.88) : G.withAlpha('#c7cbd1', 0.07));
+            cv.strokeRoundRect(x, y, w, h, 8, 2, edge);
+            cv.fillRect(x + 1, y + 12, 4, h - 24, active ? red : G.withAlpha('#c7cbd1', enabled ? 0.48 : 0.24));
+            cv.roundRect(x + 20, y + 15, 40, 40, 6, active ? red : G.withAlpha('#c7cbd1', 0.16));
+            cv.text('M', x + 40, y + 44, 28, active ? '#ffffff' : (enabled ? t.text : t.dim),
+                { align: 'center', font: 'bold', literal: true });
+            cv.text('M SOUND MODE', x + 74, y + 31, 23, active ? '#ffffff' : (enabled ? t.text : t.dim),
+                { font: 'bold', spacing: 1.2, literal: true });
+            cv.text(String(message || '').toUpperCase(), x + 74, y + 53, 13, active ? '#ffe5e7' : t.dim,
+                { font: 'bold', spacing: 0.4, literal: true });
+            cv.circle(x + w - 28, y + h / 2, 7, active ? '#ffffff' : G.withAlpha('#c7cbd1', 0.34));
+            if (cv.own && enabled && run) cv.target(x, y, w, h, run, 'performance_m_sound_mode');
         }
 
         function drawEngine(cv, t, s) {
@@ -732,19 +798,25 @@ mgu.run({
             drawDynoPanel(cv, t, s);
 
             const rpmTicks = Calc.scaleTicks(RPM_MAX, 4);
-            G.bar(cv, t, 1110, G.TOP + 228, 466, 106, {
+            G.bar(cv, t, 1110, G.TOP + 172, 466, 96, {
                 label: 'Engine speed', value: s.rpm, text: formatNumber(s.rpm, 0), unit: 'rpm',
                 min: 0, max: RPM_MAX, step: Calc.scaleStep(RPM_MAX, 4), ticks: rpmTicks,
                 decimals: 0, peak: s.peaks.rpm, peakText: true, ramp: 'hot',
             });
             const boostLabel = 'Turbo Boost';
             const boostTicks = Calc.scaleTicks(BOOST_MAX_BAR, 5);
-            G.bar(cv, t, 1110, G.TOP + 358, 466, 106, {
+            G.bar(cv, t, 1110, G.TOP + 280, 466, 96, {
                 label: boostLabel, value: s.boost ? s.boost.value : null,
                 text: s.boost ? formatNumber(s.boost.value, 2) : '--', unit: 'bar',
                 min: 0, max: BOOST_MAX_BAR, step: Calc.scaleStep(BOOST_MAX_BAR, 5), ticks: boostTicks,
                 decimals: 2, scaleDecimals: 1, peak: s.peaks.boost, peakText: true, ramp: 'hot',
             });
+            if (mSoundEnabled && !valveCanActuate()) resetMSound('CONTROL UNAVAILABLE · POSITION UNKNOWN');
+            const mSoundReady = valveCanActuate() && !valveController.state.busy && !mSoundBusy;
+            const mSoundMessage = !valveController.armedSetting ? 'ARM CAR CONTROL IN SETTINGS'
+                : !valveCanActuate() ? 'WAITING FOR MATCHED DME · POSITION UNKNOWN'
+                    : mSoundBusy || valveController.state.busy ? 'DME REQUEST IN PROGRESS · POSITION UNKNOWN' : mSoundFeedback;
+            drawMSoundButton(cv, t, mSoundReady, mSoundEnabled, mSoundMessage, toggleMSoundMode);
         }
 
         async function render() {
