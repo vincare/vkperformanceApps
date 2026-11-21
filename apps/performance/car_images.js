@@ -24,8 +24,11 @@ const MAX_IMAGE_SIDE = 1023;
 const IMAGE_ID = 0x564b;
 const SIDE_IMAGE_ID = 0x564c;
 let packIndex = null;
-const silhouetteByChassis = Object.create(null);
-const sideSilhouetteByChassis = Object.create(null);
+// Keep only the current chassis mask. The decoded RGBA car images already live
+// in the renderer; retaining four full-resolution alpha masks needlessly used
+// several extra megabytes for the lifetime of the app.
+let silhouetteCache = null;
+let sideSilhouetteCache = null;
 
 function model(value) {
     return MODELS.find((entry) => entry.key === value || entry.file === value) || MODELS[0];
@@ -77,7 +80,7 @@ function parseColor(hex) {
 }
 
 /** Decode the supplied 8-bit RGB/RGBA PNGs and composite transparency onto the page background. */
-function decodePng(bytes, background, silhouette, expectedWidth, expectedHeight) {
+function decodePng(bytes, background, silhouette, expectedWidth, expectedHeight, options) {
     if (bytes.length < 33 || bytes.toString('hex', 0, 8) !== '89504e470d0a1a0a') throw new Error('Car artwork is not a PNG');
     let width = 0, height = 0, bitDepth = 0, colorType = -1, interlace = 0;
     const chunks = [];
@@ -101,9 +104,11 @@ function decodePng(bytes, background, silhouette, expectedWidth, expectedHeight)
     const channels = colorType === 6 ? 4 : 3, rowBytes = width * channels;
     const inflated = zlib.inflateSync(Buffer.concat(chunks));
     if (inflated.length !== (rowBytes + 1) * height) throw new Error('Invalid PNG pixel data length');
-    const base = parseColor(background);
-    const rgba = new Uint8Array(width * height * 4);
-    const alphaData = new Uint8Array(width * height);
+    const alphaOnly = !!(options && options.alphaOnly);
+    const captureAlpha = alphaOnly || !(options && options.omitAlpha);
+    const base = alphaOnly ? null : parseColor(background);
+    const rgba = alphaOnly ? null : new Uint8Array(width * height * 4);
+    const alphaData = captureAlpha ? new Uint8Array(width * height) : null;
     let previous = Buffer.alloc(rowBytes), row = Buffer.alloc(rowBytes), inPos = 0, outPos = 0;
     for (let y = 0; y < height; y++) {
         const filter = inflated[inPos++];
@@ -122,7 +127,8 @@ function decodePng(bytes, background, silhouette, expectedWidth, expectedHeight)
             const si = x * channels, pixel = y * width + x;
             const sourceAlpha = channels === 4 ? row[si + 3] / 255 : 1;
             const alpha = silhouette ? silhouette[pixel] / 255 : sourceAlpha;
-            alphaData[pixel] = Math.round(alpha * 255);
+            if (alphaData) alphaData[pixel] = Math.round(alpha * 255);
+            if (alphaOnly) continue;
             rgba[outPos++] = Math.round(row[si] * alpha + base[0] * (1 - alpha));
             rgba[outPos++] = Math.round(row[si + 1] * alpha + base[1] * (1 - alpha));
             rgba[outPos++] = Math.round(row[si + 2] * alpha + base[2] * (1 - alpha));
@@ -163,18 +169,22 @@ function downscale(source) {
 function load(value, background) {
     const selected = model(value);
     let silhouette = null;
-    if (selected.key.slice(-5) !== '_Blue') {
-        silhouette = silhouetteByChassis[selected.chassis];
-        if (!silhouette) {
+    if (selected.key.slice(-5) === '_Blue') {
+        silhouetteCache = null;
+    } else {
+        if (!silhouetteCache || silhouetteCache.chassis !== selected.chassis) {
             const companion = MODELS.find((entry) => entry.chassis === selected.chassis && entry.key.slice(-5) === '_Blue');
             if (!companion) throw new Error('Missing transparent silhouette for ' + selected.chassis);
-            silhouette = decodePng(readPacked(companion.file), background).alpha;
-            silhouetteByChassis[selected.chassis] = silhouette;
+            const mask = decodePng(readPacked(companion.file), background, null, SOURCE_W, SOURCE_H,
+                { alphaOnly: true }).alpha;
+            silhouetteCache = { chassis: selected.chassis, alpha: mask };
         }
+        silhouette = silhouetteCache.alpha;
     }
     // Red/Black source files include a baked studio backdrop. Reuse the already
     // transparent same-body Blue cutout as a mask so the car pixels are preserved.
-    const resized = downscale(decodePng(readPacked(selected.file), background, silhouette));
+    const resized = downscale(decodePng(readPacked(selected.file), background, silhouette,
+        SOURCE_W, SOURCE_H, { omitAlpha: true }));
     setImage(IMAGE_ID, resized.width, resized.height, resized.rgba);
     return {
         id: IMAGE_ID, imageId: IMAGE_ID, width: resized.width, height: resized.height,
@@ -186,16 +196,20 @@ function load(value, background) {
 function loadSide(value, background) {
     const selected = model(value);
     let silhouette = null;
-    if (selected.key.slice(-5) !== '_Blue') {
-        silhouette = sideSilhouetteByChassis[selected.chassis];
-        if (!silhouette) {
+    if (selected.key.slice(-5) === '_Blue') {
+        sideSilhouetteCache = null;
+    } else {
+        if (!sideSilhouetteCache || sideSilhouetteCache.chassis !== selected.chassis) {
             const companion = MODELS.find((entry) => entry.chassis === selected.chassis && entry.key.slice(-5) === '_Blue');
             if (!companion) throw new Error('Missing transparent side-view silhouette for ' + selected.chassis);
-            silhouette = decodePng(readPacked(companion.sideFile), background, null, SIDE_SOURCE_W, SIDE_SOURCE_H).alpha;
-            sideSilhouetteByChassis[selected.chassis] = silhouette;
+            const mask = decodePng(readPacked(companion.sideFile), background, null,
+                SIDE_SOURCE_W, SIDE_SOURCE_H, { alphaOnly: true }).alpha;
+            sideSilhouetteCache = { chassis: selected.chassis, alpha: mask };
         }
+        silhouette = sideSilhouetteCache.alpha;
     }
-    const resized = downscale(decodePng(readPacked(selected.sideFile), background, silhouette, SIDE_SOURCE_W, SIDE_SOURCE_H));
+    const resized = downscale(decodePng(readPacked(selected.sideFile), background, silhouette,
+        SIDE_SOURCE_W, SIDE_SOURCE_H, { omitAlpha: true }));
     setImage(SIDE_IMAGE_ID, resized.width, resized.height, resized.rgba);
     return {
         id: SIDE_IMAGE_ID, imageId: SIDE_IMAGE_ID, width: resized.width, height: resized.height,

@@ -100,6 +100,7 @@ mgu.run({
             if (saved && Array.isArray(saved.runs)) dragRuns = saved.runs.filter((run) =>
                 run && finite(run.at) && run.result && typeof run.result === 'object' &&
                 Array.isArray(run.trace) && run.trace.every((point) => Array.isArray(point) && finite(point[0]) && finite(point[1])))
+                .map((run) => Object.assign({}, run, { trace: DragRun.compactTrace(run.trace) }))
                 .sort((a, b) => b.at - a.at).slice(0, 30);
             if (saved && saved.best && typeof saved.best === 'object') dragBest = saved.best;
             if (saved && finite(saved.selectedAt)) dragSelectedAt = saved.selectedAt;
@@ -247,7 +248,7 @@ mgu.run({
                     const run = Object.assign({}, event, {
                         unit, distanceKey: distance.key, distanceLabel: distance.label,
                         peakG: dragPeakG, elapsed: dragTimer && dragTimer.endAt,
-                        trace: dragTimer && Array.isArray(dragTimer.trace) ? dragTimer.trace.slice(0, 1800) : [],
+                        trace: dragTimer ? DragRun.compactTrace(dragTimer.trace) : [],
                         wheelspin: dragWheelspin.result(),
                     });
                     dragRuns.unshift(run);
@@ -264,7 +265,7 @@ mgu.run({
                     dragClearUntil = 0;
                     saveDragRuns();
                     log.info('drag run saved ' + JSON.stringify(run.result));
-                    queueRender();
+                    if (page === 3) queueRender();
                 },
             });
             lastDragState = dragTimer.state;
@@ -277,7 +278,7 @@ mgu.run({
             dragTimer.feed(at, speed);
             if (previous !== dragTimer.state) {
                 lastDragState = dragTimer.state;
-                queueRender();
+                if (page === 3) queueRender();
             }
         }
 
@@ -370,7 +371,7 @@ mgu.run({
             if (!event) return;
             if (event.type === 'short') {
                 log.info('virtual dyno: pull too short to record');
-                queueRender();
+                if (page === 2) queueRender();
                 return;
             }
             if (event.type !== 'run') return;
@@ -388,7 +389,7 @@ mgu.run({
                 torqueNm: event.run.peakT, torqueRpm: event.run.peakTrpm,
                 weightKg: event.run.weight, lossPercent: event.run.loss, body: event.run.body,
             });
-            queueRender();
+            if (page === 2) queueRender();
         }
 
         function freshWithin(m, now, maxAge) {
@@ -447,13 +448,12 @@ mgu.run({
         }
 
         function record(name, raw, value, unit, source, status) {
+            if (!diagnostics()) return;
             const details = { signal: name, source: source || 'unknown', raw, value, unit: unit || '', status: status || 'live' };
-            if (diagnostics()) {
-                const now = Date.now(), signature = json(details), old = diagnosticDedup[name];
-                if (!old || old.signature !== signature || now - old.at >= 30000) {
-                    diagnosticDedup[name] = { signature, at: now };
-                    diagLog('payload', details);
-                }
+            const now = Date.now(), signature = json(details), old = diagnosticDedup[name];
+            if (!old || old.signature !== signature || now - old.at >= 30000) {
+                diagnosticDedup[name] = { signature, at: now };
+                diagLog('payload', details);
             }
         }
 
@@ -463,7 +463,10 @@ mgu.run({
                 at: Date.now(), status: status || (finite(value) ? 'live' : 'invalid'),
             };
             record(name, raw, finite(value) ? value : null, unit, source, state[name].status);
-            queueRender();
+            // Engine Config shows valve state and a timed smoke animation, not
+            // engine telemetry. Avoid rebuilding and sending the full screen
+            // for every fast vehicle signal while that page is open.
+            if (page !== 1) queueRender();
         }
 
         function onProvider(iface, available) {
@@ -543,7 +546,7 @@ mgu.run({
             if (!label) return;
             vehicleGear = label;
             vehicleGearAt = Date.now();
-            queueRender();
+            if (page === 0) queueRender();
         }
 
         function setGearSelection(payload) {
@@ -551,7 +554,7 @@ mgu.run({
             if (!label) return;
             vehicleGear = label;
             vehicleGearAt = Date.now();
-            queueRender();
+            if (page === 0) queueRender();
         }
 
         function setLongitudinalAcceleration(payload, source) {
@@ -1241,9 +1244,11 @@ mgu.run({
             dragTimer.idle(Date.now());
             if (previous !== dragTimer.state || lastDragState !== dragTimer.state) {
                 lastDragState = dragTimer.state;
+                if (page === 3) queueRender();
+            } else if (page === 3 && dragView === 'live' && dragTimer.state === 'run') {
                 queueRender();
             }
-        }, 50);
+        }, 100);
         freshnessTimer = setInterval(() => {
             if (settings.get('demo') === 'on') dynoRecorder.reset();
             else {
@@ -1251,17 +1256,17 @@ mgu.run({
                 logDynoGate(now);
                 handleDynoEvent(dynoRecorder.tick(now, dynoSetup()));
             }
-            queueRender();
+            if (page !== 1) queueRender();
         }, 1000);
-        dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, 350);
+        dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, DME_POLL_MS);
 
         function setPage(next) {
             page = ((next % 4) + 4) % 4;
+            if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             if (page === 1) {
                 engineConfigView = 'sections';
             }
             updateDynoActionLabel();
-            if (page !== 1 && smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             queueRender();
             return render();
         }

@@ -167,10 +167,15 @@ value is a visual estimate from the car speed and longitudinal-acceleration
 signals; it is not a wheel sensor measurement.
 
 The speed unit, distance and rollout options are in PERFORMANCE Settings. Runs
-and best times are stored only in PERFORMANCE's data folder. Timing pauses in
-Demo mode and the screen labels this clearly. The feature uses BMW's vehicle
-speed and acceleration signals; its results are road-timer estimates rather
-than independent GPS measurement equipment.
+and best times are stored only in PERFORMANCE's data folder. The speed trace is
+sampled down to at most 400 points per saved run; up to 30 runs are retained.
+Timing pauses in Demo mode and the screen labels this clearly. The feature uses
+BMW's vehicle speed and acceleration signals; its results are road-timer
+estimates rather than independent GPS measurement equipment.
+
+Raw per-signal diagnostics are off by default to avoid continuous JSON work and
+log traffic. They can still be enabled temporarily from Settings when collecting
+troubleshooting information.
 
 ## License and safety
 

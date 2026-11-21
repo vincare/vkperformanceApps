@@ -1,6 +1,7 @@
 'use strict';
 
 const MPH_KMH = 1.609344;
+const MAX_TRACE_POINTS = 400;
 const DISTANCES = {
     qm: { key: 'qm', label: '1/4 MILE', metres: 402.336 },
     em: { key: 'em', label: '1/8 MILE', metres: 201.168 },
@@ -30,6 +31,16 @@ function bestKey(split, unit, rollout) {
 function speedValue(kmh, unit) { return unit === 'mph' ? kmh / MPH_KMH : kmh; }
 function speedName(unit) { return unit === 'mph' ? 'MPH' : 'KM/H'; }
 function seconds(value) { return typeof value === 'number' && isFinite(value) ? value.toFixed(2) : '--.--'; }
+
+/** Keep traces small while preserving their first/last points and overall shape. */
+function compactTrace(points, limit) {
+    if (!Array.isArray(points)) return [];
+    const max = Math.max(2, Math.floor(limit || MAX_TRACE_POINTS));
+    if (points.length <= max) return points;
+    const compact = new Array(max), span = points.length - 1;
+    for (let i = 0; i < max; i++) compact[i] = points[Math.round(i * span / (max - 1))];
+    return compact;
+}
 
 /** A short-window wheelspin estimate from body acceleration and the vehicle speed signal. */
 class WheelspinEstimate {
@@ -93,4 +104,4 @@ class WheelspinEstimate {
     }
 }
 
-module.exports = { MPH_KMH, DISTANCES, splits, bestKey, speedValue, speedName, seconds, WheelspinEstimate };
+module.exports = { MPH_KMH, MAX_TRACE_POINTS, DISTANCES, splits, bestKey, speedValue, speedName, seconds, compactTrace, WheelspinEstimate };

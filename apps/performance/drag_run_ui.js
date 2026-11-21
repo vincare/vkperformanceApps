@@ -56,7 +56,7 @@ function drawTrace(cv, G, t, s, trace) {
     const x = 576, y = 184, w = 418, h = 220;
     const unit = s.speedUnit || 'kmh';
     const factor = unit === 'mph' ? 1 / 1.609344 : 1;
-    const points = Array.isArray(trace) ? trace : [];
+    const points = DragRun.compactTrace(trace, DragRun.MAX_TRACE_POINTS);
     const tMax = Math.max(8, Math.ceil((points.length ? points[points.length - 1][0] : 0) / 2) * 2);
     const maxSpeed = points.reduce((max, point) => Math.max(max, point[1] * factor), 0);
     const vMax = Math.max(unit === 'mph' ? 100 : 160, Math.ceil((maxSpeed + 10) / 40) * 40);
