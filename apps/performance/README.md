@@ -1,60 +1,63 @@
 # PERFORMANCE
 
-PERFORMANCE is a read-only BMW HU_MGU / iDrive 7 engine monitor. Version 0.3.0
-keeps its existing black-and-red sports display and uses the same signal
-mappings and calculation approach as the locally installed source project
-`idrive7-apps-main/apps/car_vitals` (M Vitals 2.27.9).
+PERFORMANCE 0.4.0 is a read-only BMW HU_MGU / iDrive 7 monitor. The black-and-
+red display now has a dedicated **Virtual Dyno** card above live Power and
+Torque. The percentage bars have been removed.
 
-## What the readings mean
+## Live engine readings
 
 - **RPM** comes from BMW SOME/IP `CDS.statusEngineSpeed2`, field
   `actualValueRPMEngineCrankshaft`, scaled by 0.25 rpm per raw count.
-- **Torque** comes from BMW SOME/IP `FES.statusActualValueTorque2`, field
+- **Live torque** comes from BMW SOME/IP `FES.statusActualValueTorque2`, field
   `actualValueTorqueCrankshaft`, scaled as `raw × 0.5 − 1023.5 Nm`. Negative
   engine-braking values are shown as zero, as in M Vitals.
-- **Power** prefers BMW's `FES.statusVehicleDynamicEngine` field
-  `displaySportEnginePower`. That field is a 0–100% Sport Display reading,
-  **not a horsepower value**. PERFORMANCE multiplies it by the configured
-  maximum power in kW, then converts to kW, hp, or PS. The app setting defaults
-  to 215 kW, matching M Vitals' default; set both apps to the same maximum and
-  power unit to compare their numbers exactly. If the percentage is missing or
-  `Torque × RPM` is selected, power is estimated as `Nm × RPM / 9549` kW.
-- **Torque scale** is BMW's separate Sport Display percentage from
-  `displaySportEngineTorque`. The Nm value remains the direct FES torque signal.
-- **Boost** in Auto mode prefers the FES Sport Display signal once it has moved
-  by at least 0.03 bar. Its raw scale follows the M Vitals mapping: 0.01 bar
-  per count in bar/kPa mode, or 0.1 psi per count converted to bar in psi mode.
-  M Vitals marks this FES scale as unverified, so PERFORMANCE labels it
-  approximate. If it is not trusted, the app tries the same ordered read-only
-  engine-unit candidates as M Vitals: DIDs `F470`, `F487`, `F40B`, then OBD PID
-  `0B`. These are decoded as absolute kPa. It subtracts barometric pressure
-  (`F433`, then OBD PID `33`) to show gauge pressure in bar. If barometric
-  pressure cannot be read, 101.3 kPa is used and the result is labelled as an
-  estimate. An explicit source setting can select Sport Display or DME/OBD.
+- **Live power** prefers BMW's `FES.statusVehicleDynamicEngine` field
+  `displaySportEnginePower`. This is a percentage, not an HP value; the app
+  multiplies it by the configured maximum power in kW, then converts to kW,
+  hp, or PS. The setting defaults to 215 kW, matching M Vitals' default. Use
+  the same maximum and power unit in both apps to compare the number. If the
+  percentage is unavailable or `Torque × RPM` is selected, power is estimated
+  as `Nm × RPM / 9549` kW.
+- **Boost** in Auto mode prefers the FES Sport Display signal once it changes
+  by at least 0.03 bar. Its scale is still unverified, so that source is marked
+  approximate. Otherwise, the app tries the same read-only candidates as M
+  Vitals: DIDs `F470`, `F487`, `F40B`, then OBD PID `0B`, decoded as absolute
+  kPa; it subtracts barometric pressure from `F433`, then OBD PID `33`, to
+  calculate gauge pressure in bar. When barometric pressure cannot be read,
+  101.3 kPa is used and the display labels the result an estimate.
 
-The power percentage, Nm, and RPM are raw BMW signals with the above documented
-scaling. HP/hp is a converted reading, not an original BMW HP signal. Boost is
-either converted from the Sport Display's undocumented scale or calculated
-from engine-unit absolute pressure minus barometric pressure. DME replies and
-the pressure interpretation still need confirmation on this specific car.
+## Virtual Dyno card
 
-## M Vitals source and license
+The card records the peak HP and Nm from a full-throttle road pull, using the
+same calculation as the local `apps/dyno` app: acceleration, speed, selected
+vehicle weight, body drag, rolling resistance, and drivetrain-loss settings.
+Power is calculated from road load; dyno torque is derived from that power and
+RPM. These are road estimates, separate from the live BMW Sport Display and
+FES torque readings. The default weight, body, and drivetrain loss match the
+DYNO app defaults. Set them to the same values in both apps for comparable
+results.
+
+A pull is saved only when it stays in one gear and spans at least 1,500 rpm.
+The app needs fresh RPM, speed, and longitudinal-acceleration signals; a
+short or interrupted pull is not presented as a valid result. The latest
+completed PERFORMANCE pull is kept in the app's own data folder. MGU gives
+each app its own data folder, so existing saved runs inside the separate DYNO
+app are not imported. A new pull recorded after installing this version will
+appear here.
+
+## License and safety
 
 M Vitals source is present locally at
-`CUSTOM APPS/idrive7-apps-main/apps/car_vitals`; its source is also public in
-the upstream repository. PERFORMANCE ports the small signal scaling,
-power-selection, unit-conversion, and ordered boost-candidate rules; it does
-not copy M Vitals' interface or its full application source. The upstream
-repository is MIT licensed. Its copyright and license notice are retained in
-the repository's root `LICENSE` file.
+`CUSTOM APPS/idrive7-apps-main/apps/car_vitals` and publicly in the upstream
+repository. PERFORMANCE adapts its signal scaling, power selection, unit
+conversion, and boost-candidate order; it does not copy the full app. The
+Virtual Dyno calculation is adapted from this repository's `apps/dyno`. The
+repository's MIT license and attribution are retained in `LICENSE`.
 
-## Read-only and demo behavior
-
-The DME path uses the repository's `ReadOnlyDiag` helper and sends only UDS
-`0x22` reads or OBD service `0x01` reads. It does not request diagnostic
-sessions, security access, coding, resets, actuations, or writes. DME reads
-only run while RPM is live, and can be disabled in Settings. Demo data is off
-by default and the screen marks it `DEMO · NOT VEHICLE DATA` when enabled.
+The app only subscribes to SOME/IP signals and sends read-only UDS `0x22` or
+OBD `0x01` requests for boost candidates. It has no coding, reset, actuation,
+or write operations. Demo is off by default; dyno recording pauses in Demo and
+the screen clearly marks simulated live readings.
 
 ## Local checks and preview
 
@@ -62,13 +65,12 @@ From the repository root on Windows:
 
 ```powershell
 node kit/tools/test_performance.js
+node kit/tools/test_performance_dyno.js
 python kit/tools/build.py performance --preview-only
 node kit/tools/preview.js dist/performance preview/performance-demo --set demo=on render
 node kit/tools/preview.js dist/performance preview/performance-live --set demo=off render
 ```
 
-The preview-only build does not include BMW's OAP SDK and is not installable.
-No local test can verify the car's actual signal availability, DME candidate
-replies, the FES boost scale, or equality with the settings in the installed M
-Vitals app. Those points require comparing both apps during a real drive or
-controlled stationary engine test.
+Preview-only does not include BMW's OAP SDK and is not installable. Local tests
+cannot confirm live signal availability, the car's DME replies, or the road
+Dyno estimate against a pull in this vehicle.

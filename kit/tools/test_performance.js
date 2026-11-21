@@ -24,8 +24,10 @@ const scaling = {
 };
 
 equal(app.id, 'performance', 'app id');
-equal(app.version, '0.3.0', 'app version');
+equal(app.version, '0.4.0', 'app version');
 equal(app.settings.find((setting) => setting.key === 'demo').default, 'off', 'demo defaults off');
+equal(app.signals['de.bmw.infotainment.vehicle.Vehicle2'].statusCarSpeed2, 'rs', 'DYNO speed signal declared');
+equal(app.signals['de.bmw.infotainment.vehicle.CDS2'].statusLongitudinalAccelerationMassCenter, 'rs', 'DYNO acceleration signal declared');
 equal(app.config.dme.boost.map((candidate) => candidate.did || 'OBD ' + candidate.obd).join(','),
     'F470,F487,F40B,OBD 0B', 'M Vitals boost candidate order');
 equal(app.config.dme.baro.map((candidate) => candidate.did || 'OBD ' + candidate.obd).join(','),
