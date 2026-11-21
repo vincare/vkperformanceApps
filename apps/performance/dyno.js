@@ -9,6 +9,15 @@ const DRAG_CDA = { coupe: 0.62, wagon: 0.72, suv: 0.95 };
 
 function finite(value) { return typeof value === 'number' && isFinite(value); }
 
+/** Explain why a live sample is not yet eligible to start a road pull. */
+function gateReason(data) {
+    if (!data || !finite(data.rpm) || !finite(data.speedKmh) || !finite(data.longitudinalG)) return 'signals';
+    if (data.speedKmh <= 15) return 'speed';
+    if (data.rpm <= 1200) return 'rpm';
+    if (data.longitudinalG <= 0.12) return 'acceleration';
+    return 'ready';
+}
+
 /** Crankshaft power in watts, using the same road-load estimate as the DYNO app. */
 function estimatePowerW(speedKmh, longitudinalG, setup) {
     if (!finite(speedKmh) || !finite(longitudinalG) || !setup ||
@@ -147,4 +156,4 @@ class Recorder {
     }
 }
 
-module.exports = { Recorder, estimatePowerW, analyse, MIN_RPM_SPAN };
+module.exports = { Recorder, estimatePowerW, analyse, gateReason, MIN_RPM_SPAN };

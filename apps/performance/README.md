@@ -1,8 +1,9 @@
 # PERFORMANCE
 
-PERFORMANCE 0.4.0 is a read-only BMW HU_MGU / iDrive 7 monitor. The black-and-
-red display now has a dedicated **Virtual Dyno** card above live Power and
-Torque. The percentage bars have been removed.
+PERFORMANCE 0.5.0 is a read-only BMW HU_MGU / iDrive 7 monitor. The black-and-
+red display has a dedicated **Virtual Dyno** card above live **HORSE POWER**
+and **TORQUE** gauges. Their upper scale limits can be changed separately in
+Settings; the defaults are 300 hp and 800 Nm.
 
 ## Live engine readings
 
@@ -39,11 +40,14 @@ results.
 
 A pull is saved only when it stays in one gear and spans at least 1,500 rpm.
 The app needs fresh RPM, speed, and longitudinal-acceleration signals; a
-short or interrupted pull is not presented as a valid result. The latest
-completed PERFORMANCE pull is kept in the app's own data folder. MGU gives
-each app its own data folder, so existing saved runs inside the separate DYNO
-app are not imported. A new pull recorded after installing this version will
-appear here.
+short or interrupted pull is not presented as a valid result. The card shows
+which prerequisite is missing (RPM, speed, acceleration, or signal freshness)
+and records gate changes in diagnostics. Start above 15 km/h and 1,200 rpm,
+with acceleration above 0.12 g; hold one gear for a sweep of at least 1,500
+rpm. The latest completed PERFORMANCE pull is kept in the app's own data
+folder. MGU gives each app its own data folder, so existing saved runs inside
+the separate DYNO app are not imported. A new pull recorded after installing
+this version will appear here.
 
 ## License and safety
 

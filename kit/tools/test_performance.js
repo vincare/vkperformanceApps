@@ -9,6 +9,10 @@ function equal(actual, expected, name) {
     checks++;
     if (actual !== expected) throw new Error(name + ': expected ' + expected + ', got ' + actual);
 }
+function ok(condition, name) {
+    checks++;
+    if (!condition) throw new Error(name);
+}
 function close(actual, expected, name) {
     checks++;
     if (actual === null || Math.abs(actual - expected) > 1e-6) {
@@ -24,8 +28,12 @@ const scaling = {
 };
 
 equal(app.id, 'performance', 'app id');
-equal(app.version, '0.4.0', 'app version');
+equal(app.version, '0.5.0', 'app version');
 equal(app.settings.find((setting) => setting.key === 'demo').default, 'off', 'demo defaults off');
+equal(app.settings.find((setting) => setting.key === 'powerGaugeMax').default, 223.7, 'power scale defaults to 300 hp');
+equal(app.settings.find((setting) => setting.key === 'torqueGaugeMax').default, 800, 'torque scale default');
+ok(app.settings.find((setting) => setting.key === 'powerGaugeMax').steps.some((step) => step === 745.7), 'power scale includes 1000 hp');
+ok(app.settings.find((setting) => setting.key === 'torqueGaugeMax').steps.includes(1600), 'torque scale can be raised to 1600 Nm');
 equal(app.signals['de.bmw.infotainment.vehicle.Vehicle2'].statusCarSpeed2, 'rs', 'DYNO speed signal declared');
 equal(app.signals['de.bmw.infotainment.vehicle.CDS2'].statusLongitudinalAccelerationMassCenter, 'rs', 'DYNO acceleration signal declared');
 equal(app.config.dme.boost.map((candidate) => candidate.did || 'OBD ' + candidate.obd).join(','),

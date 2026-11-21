@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Read-only live engine monitor with virtual dyno pull peaks",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": ["ID7"],
@@ -77,6 +77,27 @@
       },
       "default": 215,
       "steps": [100, 120, 135, 140, 150, 160, 170, 185, 190, 200, 215, 230, 240, 250, 260, 275, 285, 300, 320, 340, 360, 375, 390, 405, 420, 450, 460, 480, 500, 530, 550, 600]
+    },
+    {
+      "key": "powerGaugeMax",
+      "label": "HORSE POWER scale max",
+      "type": "number",
+      "unit": "kW",
+      "unitBy": "powerUnit",
+      "units": {
+        "hp": {"unit": "hp", "mul": 1.34102},
+        "ps": {"unit": "PS", "mul": 1.35962}
+      },
+      "default": 223.7,
+      "steps": [149.1, 186.4, 223.7, 261.0, 298.3, 335.6, 372.9, 447.4, 522.0, 596.6, 671.1, 745.7]
+    },
+    {
+      "key": "torqueGaugeMax",
+      "label": "TORQUE scale max",
+      "type": "number",
+      "unit": "Nm",
+      "default": 800,
+      "steps": [300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600]
     },
     {
       "key": "dynoWeight",

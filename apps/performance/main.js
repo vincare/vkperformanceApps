@@ -76,6 +76,7 @@ mgu.run({
         const diagnosticDedup = Object.create(null);
         let renderTimer = null, renderQueued = false, freshnessTimer = null, dmeTimer = null, demoTimer = null;
         let link = null, reader = null, dmeInit = null;
+        let lastDynoGate = null;
 
         function dynoSetup() {
             const weight = settings.get('dynoWeight');
@@ -113,9 +114,40 @@ mgu.run({
             return !!(m && m.at && now >= m.at && now - m.at <= maxAge && m.status === 'live' && finite(m.value));
         }
 
+        function dynoGate(now) {
+            const metrics = [['RPM', state.rpm], ['SPEED', state.speed], ['ACCEL', state.gLong]];
+            const waiting = metrics.filter((entry) => !entry[1].at || entry[1].status === 'waiting').map((entry) => entry[0]);
+            if (waiting.length) return { code: 'waiting', text: 'WAITING FOR ' + waiting.join(' / ') };
+            const invalid = metrics.filter((entry) => entry[1].status === 'invalid').map((entry) => entry[0]);
+            if (invalid.length) return { code: 'invalid', text: 'INVALID ' + invalid.join(' / ') + ' SIGNAL' };
+            const stale = metrics.filter((entry) => !freshWithin(entry[1], now, DYNO_FRESH_MS)).map((entry) => entry[0]);
+            if (stale.length) return { code: 'stale', text: 'STALE ' + stale.join(' / ') + ' SIGNAL' };
+            const reason = Dyno.gateReason({ rpm: state.rpm.value, speedKmh: state.speed.value, longitudinalG: state.gLong.value });
+            const labels = {
+                speed: 'NEED SPEED >15 KM/H',
+                rpm: 'NEED RPM >1200',
+                acceleration: 'NEED ACCELERATION >0.12 G',
+                ready: 'READY · HOLD ONE GEAR',
+            };
+            return { code: reason, text: labels[reason] || 'WAITING FOR LIVE SIGNALS' };
+        }
+
+        function logDynoGate(now) {
+            const gate = dynoGate(now);
+            if (gate.text === lastDynoGate) return;
+            lastDynoGate = gate.text;
+            diagLog('dyno_gate', {
+                reason: gate.code, text: gate.text,
+                rpm: { raw: state.rpm.raw, value: state.rpm.value, ageMs: state.rpm.at ? now - state.rpm.at : null, status: state.rpm.status },
+                speed: { raw: state.speed.raw, value: state.speed.value, ageMs: state.speed.at ? now - state.speed.at : null, status: state.speed.status },
+                acceleration: { raw: state.gLong.raw, value: state.gLong.value, ageMs: state.gLong.at ? now - state.gLong.at : null, status: state.gLong.status },
+            });
+        }
+
         function feedDyno() {
             if (settings.get('demo') === 'on') { dynoRecorder.reset(); return; }
             const now = Date.now();
+            logDynoGate(now);
             const input = freshWithin(state.rpm, now, DYNO_FRESH_MS) &&
                 freshWithin(state.speed, now, DYNO_FRESH_MS) && freshWithin(state.gLong, now, DYNO_FRESH_MS)
                 ? { rpm: state.rpm.value, speedKmh: state.speed.value, longitudinalG: state.gLong.value }
@@ -457,21 +489,24 @@ mgu.run({
             if (!run) {
                 const split = x + Math.round(w / 2);
                 cv.fillRect(split, y + 84, 1, 61, G.withAlpha(t.tick, 0.65));
-                cv.text('PEAK POWER', x + 24, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
-                cv.text('PEAK TORQUE', split + 20, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
+                cv.text('HORSE POWER', x + 24, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
+                cv.text('TORQUE', split + 20, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
                 cv.text('--', x + 24, y + 137, 42, t.dim, { font: 'num' });
                 cv.text(Calc.powerUnit(s.powerUnit), x + 82, y + 137, 20, t.dim);
                 cv.text('--', split + 20, y + 137, 42, t.dim, { font: 'num' });
                 cv.text('Nm', split + 78, y + 137, 20, t.dim);
-                const note = s.demo ? 'No simulated dyno figures are shown' : 'Full throttle · one gear · flat road';
+                const gate = dynoGate(Date.now());
+                const note = s.demo ? 'No simulated dyno figures are shown'
+                    : snap.status === 'short' ? 'One gear · sweep at least 1500 rpm'
+                        : gate.text;
                 cv.text(note, x + 24, y + 161, 17, t.dim);
                 return;
             }
 
             const split = x + Math.round(w / 2);
             cv.fillRect(split, y + 84, 1, 73, G.withAlpha(t.tick, 0.65));
-            cv.text('PEAK POWER', x + 24, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
-            cv.text('PEAK TORQUE', split + 20, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
+            cv.text('HORSE POWER', x + 24, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
+            cv.text('TORQUE', split + 20, y + 94, 17, t.dim, { font: 'bold', spacing: 1.5 });
             const powerUnit = s.powerUnit;
             const peakPower = Calc.powerValue(run.peakP / 1000, powerUnit);
             const powerText = formatNumber(peakPower, 0);
@@ -506,19 +541,23 @@ mgu.run({
 
             drawDynoPanel(cv, t, s);
 
-            const powerMax = Calc.powerValue(settings.get('maxPower') || 215, s.powerUnit);
+            const powerGaugeKw = settings.get('powerGaugeMax');
+            const powerMax = Calc.powerValue(finite(powerGaugeKw) && powerGaugeKw > 0 ? powerGaugeKw : 223.7, s.powerUnit);
+            const torqueGaugeMax = settings.get('torqueGaugeMax');
+            const torqueMax = finite(torqueGaugeMax) && torqueGaugeMax > 0 ? torqueGaugeMax : 800;
             const powerText = !s.power ? '--' : (s.power.approximate ? '~' : '') + formatNumber(s.power.value, 0);
             G.bar(cv, t, 1110, G.TOP + 228, 466, 106, {
-                label: s.demo ? 'Power · DEMO' : !s.power ? 'Power' : s.power.source === 'BMW SPORT DISPLAY'
-                    ? 'Power · Sport Display × configured max' : 'Power · torque × RPM · approx.',
+                label: 'HORSE POWER',
                 value: s.power ? s.power.value : null, text: powerText,
-                unit: Calc.powerUnit(s.powerUnit), min: 0, max: powerMax, niceMax: true,
+                unit: Calc.powerUnit(s.powerUnit), min: 0, max: powerMax,
+                step: Math.max(25, Math.ceil(powerMax / 4 / 50) * 50),
                 decimals: 0, peak: s.peaks.power, peakText: true, ramp: 'hot',
             });
             const torqueText = s.torque === null ? '--' : formatNumber(s.torque, 0);
             G.bar(cv, t, 1110, G.TOP + 358, 466, 106, {
-                label: 'Live engine torque', value: s.torque, text: torqueText, unit: 'Nm', min: 0, max: 800,
-                step: 100, decimals: 0, peak: s.peaks.torque, peakText: true, ramp: 'hot',
+                label: 'TORQUE', value: s.torque, text: torqueText, unit: 'Nm', min: 0, max: torqueMax,
+                step: Math.max(50, Math.ceil(torqueMax / 4 / 50) * 50), decimals: 0,
+                peak: s.peaks.torque, peakText: true, ramp: 'hot',
             });
         }
 
@@ -575,7 +614,11 @@ mgu.run({
         if (settings.get('demo') === 'on') demoTimer = setInterval(queueRender, 250);
         freshnessTimer = setInterval(() => {
             if (settings.get('demo') === 'on') dynoRecorder.reset();
-            else handleDynoEvent(dynoRecorder.tick(Date.now(), dynoSetup()));
+            else {
+                const now = Date.now();
+                logDynoGate(now);
+                handleDynoEvent(dynoRecorder.tick(now, dynoSetup()));
+            }
             queueRender();
         }, 1000);
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, 350);

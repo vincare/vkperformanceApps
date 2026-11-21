@@ -15,6 +15,11 @@ function close(actual, expected, name) {
 }
 
 const setup = { weight: 1750, body: 'coupe', loss: 15 };
+ok(Dyno.gateReason(null) === 'signals', 'wait when a required signal is missing');
+ok(Dyno.gateReason({ rpm: 2500, speedKmh: 0, longitudinalG: 0.2 }) === 'speed', 'require road speed');
+ok(Dyno.gateReason({ rpm: 1000, speedKmh: 30, longitudinalG: 0.2 }) === 'rpm', 'require engine speed');
+ok(Dyno.gateReason({ rpm: 2500, speedKmh: 30, longitudinalG: 0.12 }) === 'acceleration', 'require hard acceleration');
+ok(Dyno.gateReason({ rpm: 2500, speedKmh: 30, longitudinalG: 0.2 }) === 'ready', 'arm with all pull conditions');
 const expected = (1750 * (0.18 * 9.80665) * (50 / 3.6) +
     0.5 * 1.2 * 0.62 * Math.pow(50 / 3.6, 3) + 0.013 * 1750 * 9.80665 * (50 / 3.6)) / 0.85;
 close(Dyno.estimatePowerW(50, 0.18, setup), expected, 'road-load / loss calculation');
