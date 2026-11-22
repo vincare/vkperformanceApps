@@ -1,0 +1,58 @@
+{
+  "id": "moreambients",
+  "title": "MoreAmbients",
+  "description": "Custom ambient colours, zone control, BMW palette and saved cabin looks",
+  "version": "0.1.0",
+  "vendor": "VKPERFORMANCE",
+  "loggingId": "OAA7",
+  "iconGlyph": "ambient",
+  "mguHmi": ["ID7"],
+  "requires": { "idrive7-renderd": "2.1.18", "mgu-inputgate": "1.1.0" },
+  "signals": {
+    "de.bmw.infotainment.misc.ComfortFunctionIuK": {
+      "ambientLightInteriorColour": "w",
+      "statusAmbientLightInteriorColour": "rs"
+    },
+    "de.bmw.infotainment.vehicle.Vehicle2": {
+      "statusCarSpeed2": "rs"
+    },
+    "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
+      "_instances": "SystemFunctionsInternalTasuInst1",
+      "_methods": ["sendTasuRequest"],
+      "_broadcasts": ["sendTasuResponse"]
+    }
+  },
+  "settings": [
+    { "key": "hue", "label": "Custom colour hue", "type": "number", "default": 205, "hidden": true, "steps": [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240, 255, 270, 285, 300, 315, 330, 345] },
+    { "key": "saturation", "label": "Custom colour saturation", "type": "number", "default": 86, "hidden": true, "steps": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100] },
+    { "key": "brightness", "label": "Custom colour brightness", "type": "number", "default": 76, "hidden": true, "steps": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] }
+  ],
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "MoreAmbients",
+      "buttons": [
+        ["BTN_VIEW", "Switch studio / BMW palette"],
+        ["BTN_ZONE", "Change lighting zone"],
+        ["BTN_HUE_MINUS", "Hue down"],
+        ["BTN_HUE_PLUS", "Hue up"],
+        ["BTN_SAT_MINUS", "Saturation down"],
+        ["BTN_SAT_PLUS", "Saturation up"],
+        ["BTN_BRIGHTNESS_MINUS", "Brightness down"],
+        ["BTN_BRIGHTNESS_PLUS", "Brightness up"],
+        ["BTN_SCAN", "Find ambient light modules"],
+        ["BTN_APPLY", "Apply custom colour"],
+        ["BTN_RESTORE", "Restore BMW lighting"],
+        ["BTN_FACTORY_PREV", "Previous BMW colour slot"],
+        ["BTN_FACTORY_NEXT", "Next BMW colour slot"],
+        ["BTN_FACTORY_APPLY", "Apply BMW colour slot"],
+        ["BTN_FAV_PREV", "Previous saved look"],
+        ["BTN_FAV_NEXT", "Next saved look"],
+        ["BTN_FAV_SAVE", "Save current look"],
+        ["BTN_FAV_LOAD", "Apply saved look"],
+        ["BTN_SETTINGS", "Settings"]
+      ]
+    }
+  ]
+}
