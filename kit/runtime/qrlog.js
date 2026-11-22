@@ -167,8 +167,8 @@ function qrLogSheet(opts) {
             const tx = x0 + box + 50, tw = 1600 - 40 - tx;
             r.text('QR log', tx, TOP + 46, 34, t.text, { font: 'bold' });
             r.text('Page ' + (st.page + 1) + ' of ' + st.list.length, tx, TOP + 92, 26, t.text);
-            const help = ['Take a photo of every page and add', 'the photos to your issue on GitHub.', 'The newest lines are on page 1.'];
-            // (a phone's QR reader shows gibberish after the first line: the log is compressed, we decode the photos)
+            const help = ['Compressed app log · not a website link.', 'Photograph every page for support.', 'Newest log lines are on page 1.'];
+            // A phone camera should not open a URL: these codes carry compressed log text for photo decoding.
             help.forEach((h, i) => r.text(h, tx, TOP + 138 + i * 32, 22, t.dim));
             // the buttons: the controller's one lit (Next until the controller moves it)
             const by = TOP + 250, bw = Math.floor((tw - 16) / 2), sy = by + 68, ky = sy + 68;

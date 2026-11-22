@@ -2,14 +2,16 @@
   "id": "vclimatestatus",
   "title": "Climate Control",
   "description": "Read-only driver and passenger climate setpoints and A/C status",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "vendor": "VKPERFORMANCE",
   "loggingId": "OAA5",
   "iconGlyph": "temp",
   "mguHmi": ["ID7"],
   "signals": {
     "de.bmw.infotainment.climate.Climate2": {
-      "statusACFront": "rs"
+      "statusACFront": "rs",
+      "statusAirConditionDRStatus": "rs",
+      "statusAirConditionPSStatus": "rs"
     },
     "de.bmw.infotainment.climate.climatemaster.ClimateMaster": {
       "statusTemperature": "rs"

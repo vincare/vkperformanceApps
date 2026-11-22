@@ -7,7 +7,7 @@ setters, commands, or write permissions.
 
 ## Implementation
 
-- App id/title: `vclimatestatus` / `Climate Control`; version `0.4.2`. The id
+- App id/title: `vclimatestatus` / `Climate Control`; version `0.4.3`. The id
   stays the same so MGU Store updates the existing app instead of adding a
   second tile.
 - English UI, black and red BMW M-style graphics, 1600 x 520 logical canvas.
@@ -17,54 +17,47 @@ setters, commands, or write permissions.
 - A/C: `de.bmw.infotainment.climate.Climate2.statusACFront` (`rs`). The
   nested `statusAircon` enum maps `0` to off, `1` to on, and all other values
   (including catalog value `3`, invalid) to unavailable.
-- Setpoint: `de.bmw.infotainment.climate.climatemaster.ClimateMaster.statusTemperature`
-  (`rs`), instance `1`, service ID `45210`, interface version `1.0`. The field
-  has getter ID `2`, notifier event ID `32801`, event group `1`, and is marked
-  unreliable in the catalog. Its declared array can contain up to six
-  `StatusTemperature` records.
-- Each record has `targetTemperature` (`Float`), `operationZone` and
-  `saveLUM`. Catalog enum values `DRIVER=1` and `PASSENGER=2` select the two
-  front zones. Other enum values, including `ALL_ZONES` and second/third row
-  zones, are ignored instead of being assigned to a front seat by position.
-- The catalog does not state the Float's unit, scale, special-value encoding,
-  or whether HI/LO can be represented. Live numbers are therefore displayed
-  without a `°C` suffix and marked `LIVE VALUE · UNIT UNVERIFIED` until the
-  values are compared with the factory display. Non-finite or non-numeric
-  payloads are rejected. HI/LO are supported only as offline preview strings;
-  they are not guessed from numeric sentinel values.
-- The separate `Climate2.statusAirConditionDRStatus` and
-  `statusAirConditionPSStatus` fields contain UInt8 temperature target members,
-  but the catalog does not define their encoding. They are intentionally not
-  used as a fallback.
-- A valid front-zone record updates only that zone. Provider loss clears both
-  displayed values. A zone with no valid record remains waiting; a zone whose
-  last accepted record is older than 15 seconds is cleared and marked stale.
-  The kit performs initial getters and re-reads subscribed getter fields every
-  five seconds while the provider is available.
+- Front setpoints primarily use
+  `Climate2.statusAirConditionDRStatus.temperatureTargetDRIHKA` and
+  `Climate2.statusAirConditionPSStatus.temperatureTargetPSIHKA`. These are the
+  same driver/passenger fields read by the climate telemetry bridge in the
+  supplied `_sources` collection. Its decoder accepts raw values from 32 to 56
+  and converts them to Celsius by dividing by two (for example, `50` → `25°C`).
+  NaviSport/ClimateControl now shows the unit for this decoded source.
+- `ClimateMaster.statusTemperature` remains a lower-priority fallback. Its
+  records carry `targetTemperature` and `operationZone`; DRIVER=1 and
+  PASSENGER=2 map to the front zones. Other zones are ignored. Because this
+  field's unit is not stated, fallback numbers are shown without `°C` and are
+  labelled `LIVE VALUE · UNIT UNVERIFIED`.
+- Updates are tracked separately for each zone. A fresh Climate2 value takes
+  precedence over the unscaled fallback; loss of a signal does not erase a
+  still-fresh reading, and values older than 15 seconds are cleared and marked
+  stale. The kit performs initial getters and re-reads subscribed getter fields
+  every five seconds while each provider is available.
 - Offline demo values `22` / `21` require the preview stub, no native SOME/IP
   module, and the preview-only `demo=on` setting. They are explicitly marked
   `DEMO VALUES · NOT VEHICLE DATA` and `LOCAL PREVIEW VALUE`. The installed
   manifest contains no demo setting; the live path never falls back to them.
-- Temporary raw diagnostics were enabled by default in 0.4.1 and remain
-  available in 0.4.2 through the `climateDiagnostics` setting. The main screen
+- Temporary raw diagnostics remain available through the
+  `climateDiagnostics` setting. The main screen
   can show real values only when the vehicle sends them. Startup logs whether
-  diagnostics are active; setpoint diagnostics record interface-config lookup,
-  whether `statusTemperature` is declared with a getter, proxy initialization,
-  availability subscription, field-subscription result, provider availability,
-  getter errors, and a 30-second no-payload result. Each distinct raw payload
-  records UTC receive time, its source (`event` or `getter`), raw
-  `operationZone`, mapped zone, raw `targetTemperature`, and `saveLUM`. An
+  diagnostics are active; diagnostics record provider availability, getter
+  errors, and a 30-second no-payload result. Each distinct Climate2 payload
+  logs the raw value, decoded Celsius value and zone. Each distinct fallback
+  payload records raw `operationZone`, mapped zone, `targetTemperature`, and
+  `saveLUM`. An
   unchanged value is repeated in the log at most every 30 seconds. The MGU kit
   writes this to the app's own `data/vclimatestatus.log` and the system log; the
   file log rotates at 256 KiB.
-  Example: `CLIMATE_DIAG statusTemperature rx=2026-11-21T12:00:00.000Z source=getter record=0 zoneRaw=1 zone=DRIVER targetRaw=25 saveLUMRaw=false`.
+  Example: `CLIMATE_DIAG at=... stage=ihka_setpoint zone=DRIVER field=temperatureTargetDRIHKA raw=50 decodedC=25 source=Climate2`.
 - `app.json` settings are built into the app's HMI interface; they are not
   toggled from MGU Store's own Settings page. In 0.4.0 the canvas had no
   `BTN_SETTINGS` action, so the generated app Settings screen had no route from
   the screen the user opened. Version 0.4.1 added that standard action. Open
   `Settings` in the app header or tap the screen's Settings icon to reach the
   app settings and its `QR log` row.
-  The existing QR log shows the recent app log as scannable pages, without SSH.
+  The QR log contains compressed diagnostic text, not a website link. Photograph
+  each page for support; a phone camera is not expected to open a URL from it.
 - On the OAP app `shutdown` event, redraw/freshness timers are cleared and each
   resolved watcher is shut down. The kit watcher stops its poll interval,
   ignores subsequent callbacks, and shuts down its SOME/IP proxy.
@@ -77,13 +70,13 @@ extract, not valid JSON; it contains none of the exact setpoint field/type
 names, so it cannot establish additional interfaces or encodings. The JSON
 catalog is the source used for this implementation.
 
-The other candidate names `ClimateDriver`, `ClimatePassenger`, and
-`CLIMATEANDRADIOCONTROL` are not interface names in this catalog and are not
-used as signal guesses. `Climate2.statusAirConditionDRStatus` and
-`statusAirConditionPSStatus` are real catalog fields, but their UInt8 encoding
-is unconfirmed. The chosen `ClimateMaster.statusTemperature` field provides
-the explicit zone enum and a Float target member, but the live payload shape,
-unit and behavior on this specific HU_MGU still need vehicle-side validation.
+The climate telemetry bridge at
+`_sources/collection-alexp50-bmw-apps-4fb5a5dba1ec/components/remote-telemetry-bridge/files/bridge.js`
+reads the same `Climate2` driver/passenger records through getters and event
+subscriptions and applies the `/2` conversion above. ClimateMaster remains as
+a fallback because its explicit zone records may still be provided by some
+head units. Live values and field availability still need confirmation on this
+specific HU_MGU.
 
 Catalog cross-checks for this app (replace the path with the supplied catalog
 location):
@@ -94,7 +87,7 @@ python kit\tools\check_signals.py C:\Users\User\Downloads\someip-interfaces.json
 
 `check_signals.py` checks every app manifest in the repository against the
 catalog, so unrelated repository/catalog mismatches may also be reported.
-For the ClimateMaster datatype details, inspect the catalog's
+For the fallback ClimateMaster datatype details, inspect the catalog's
 `interfaces["de.bmw.infotainment.climate.climatemaster.ClimateMaster"]` and
 `datatypes["de.bmw.infotainment.climate.climatemastertypes.ClimateMasterTypes.StatusTemperature"]`
 entries, along with `Temperature` and `OperationZone`.
@@ -160,9 +153,8 @@ that a factory file/service must change. Do not use this repository's manual
 that path as installing the whole custom-app kit and restarting the app
 platform.
 
-For the MGU Store route, publish the updated project branch, then refresh the
-GitHub repository source and select only `Climate Control` from
-`codex/vclimatestatus`. Version 0.4.2 source changes are local until published.
+For the MGU Store route, refresh the GitHub repository source on
+`codex/vclimatestatus`, then select `Climate Control` for the update.
 No package has been installed on the vehicle as part of this change.
 
 ## Vehicle validation required before claiming complete live °C values

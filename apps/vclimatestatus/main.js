@@ -3,10 +3,9 @@
 /**
  * Climate Control: read-only BMW MGU climate status display.
  *
- * ClimateMaster.statusTemperature is catalog-confirmed as an array of
- * StatusTemperature records. Each record carries targetTemperature (Float)
- * and operationZone. Its unit/scale is not stated in the catalog, so live
- * values are intentionally shown without a °C suffix until verified in-car.
+ * Climate2's driver/passenger status payloads carry BMW's raw IHKA target
+ * values. The source app's decoder maps values 32..56 to Celsius by dividing
+ * by two. ClimateMaster.statusTemperature remains as an unscaled fallback.
  */
 const mgu = require('./kit/mgu');
 const G = require('./kit/gauges');
@@ -104,10 +103,11 @@ mgu.run({
         const live = {
             ac: null, signalError: false, signalAvailable: false,
             seenAc: false, invalidAc: false, stale: false,
-            setpointAvailable: false,
+            setpointAvailable: false, climate2SetpointAvailable: false,
+            masterSetpointAvailable: false,
             zones: {
-                driver: { value: null, state: 'waiting', lastSeen: 0 },
-                passenger: { value: null, state: 'waiting', lastSeen: 0 },
+                driver: { value: null, state: 'waiting', lastSeen: 0, unitC: false, source: null, priority: 0 },
+                passenger: { value: null, state: 'waiting', lastSeen: 0, unitC: false, source: null, priority: 0 },
             },
         };
         let renderQueued = false, renderTimer = null, staleTimer = null, freshnessTimer = null;
@@ -223,17 +223,71 @@ mgu.run({
                 climateDiag('setpoint_provider_availability', { available: current });
                 if (current && !payloadCount) armNoPayloadTimer();
             }
-            live.setpointAvailable = current;
+            live.masterSetpointAvailable = current;
+            updateSetpointAvailability();
+        }
+
+        function updateSetpointAvailability() {
+            live.setpointAvailable = live.masterSetpointAvailable || live.climate2SetpointAvailable;
             Object.keys(live.zones).forEach((name) => {
                 const zone = live.zones[name];
-                if (!available) {
-                    zone.value = null;
-                    zone.lastSeen = 0;
-                    zone.state = 'unavailable';
-                } else if (zone.state === 'unavailable') {
-                    zone.state = 'waiting';
-                }
+                if (zone.lastSeen) return;
+                zone.state = live.setpointAvailable ? 'waiting' : 'unavailable';
             });
+            queueRender();
+        }
+
+        function applyZoneValue(name, value, source, priority, unitC) {
+            const zone = live.zones[name];
+            if (!zone) return;
+            const now = Date.now();
+            const previousIsFresh = zone.lastSeen && now - zone.lastSeen <= SIGNAL_STALE_MS;
+            if (previousIsFresh && zone.priority > priority) return;
+            zone.value = value;
+            zone.state = 'live';
+            zone.lastSeen = now;
+            zone.unitC = !!unitC;
+            zone.source = source;
+            zone.priority = priority;
+        }
+
+        function applyZoneInvalid(name, source, priority) {
+            const zone = live.zones[name];
+            if (!zone) return;
+            const now = Date.now();
+            const previousIsFresh = zone.lastSeen && now - zone.lastSeen <= SIGNAL_STALE_MS;
+            if (previousIsFresh && (zone.priority > priority || zone.state === 'live')) return;
+            zone.value = null;
+            zone.state = 'invalid';
+            zone.lastSeen = now;
+            zone.unitC = false;
+            zone.source = source;
+            zone.priority = priority;
+        }
+
+        function decodedIhkaTemperature(value, field, zoneNameValue) {
+            if (stopped) return;
+            const found = findValues(value, field);
+            if (!found.length) return;
+            onClimate2SetpointAvailability(true);
+            const raw = found[0];
+            const valid = typeof raw === 'number' && isFinite(raw) && raw >= 32 && raw <= 56;
+            const now = Date.now();
+            if (diagnosticsEnabled) {
+                payloadCount++;
+                clearNoPayloadTimer();
+                const signature = field + ':' + diagnosticValue(raw);
+                if (signature !== lastPayloadSignature || now - lastPayloadLoggedAt >= SAME_PAYLOAD_LOG_MS) {
+                    lastPayloadSignature = signature;
+                    lastPayloadLoggedAt = now;
+                    climateDiag('ihka_setpoint', {
+                        zone: zoneNameValue.toUpperCase(), field: field,
+                        raw: raw, decodedC: valid ? raw / 2 : 'unavailable', source: 'Climate2',
+                    });
+                }
+            }
+            if (valid) applyZoneValue(zoneNameValue, raw / 2, 'IHKA', 2, true);
+            else applyZoneInvalid(zoneNameValue, 'IHKA', 2);
             queueRender();
         }
 
@@ -245,9 +299,7 @@ mgu.run({
             logTemperaturePayload(value, source, records, now);
             if (!records.length && hasPayloadContent(value)) {
                 Object.keys(live.zones).forEach((name) => {
-                    live.zones[name].value = null;
-                    live.zones[name].lastSeen = now;
-                    live.zones[name].state = 'invalid';
+                    applyZoneInvalid(name, 'ClimateMaster', 1);
                 });
                 queueRender();
                 return;
@@ -255,21 +307,17 @@ mgu.run({
             records.forEach((record) => {
                 const name = zoneName(record.operationZone);
                 if (!name) return; // Ignore ALL_ZONES and the second/third row enum values.
-                const zone = live.zones[name];
-                zone.lastSeen = now;
                 if (typeof record.targetTemperature === 'number' && isFinite(record.targetTemperature)) {
-                    zone.value = record.targetTemperature;
-                    zone.state = 'live';
+                    applyZoneValue(name, record.targetTemperature, 'ClimateMaster', 1, false);
                 } else {
-                    zone.value = null;
-                    zone.state = 'invalid';
+                    applyZoneInvalid(name, 'ClimateMaster', 1);
                 }
             });
             queueRender();
         }
 
         function checkSetpointFreshness() {
-            if (stopped || !live.setpointAvailable) return;
+            if (stopped) return;
             const now = Date.now();
             let changed = false;
             Object.keys(live.zones).forEach((name) => {
@@ -277,6 +325,9 @@ mgu.run({
                 if (zone.lastSeen && now - zone.lastSeen > SIGNAL_STALE_MS && zone.state !== 'stale') {
                     zone.value = null;
                     zone.state = 'stale';
+                    zone.unitC = false;
+                    zone.source = null;
+                    zone.priority = 0;
                     changed = true;
                 }
             });
@@ -319,6 +370,17 @@ mgu.run({
             queueRender();
         }
 
+        function onClimate2SetpointAvailability(available) {
+            if (stopped) return;
+            const current = !!available;
+            if (live.climate2SetpointAvailable !== current) {
+                live.climate2SetpointAvailable = current;
+                climateDiag('ihka_setpoint_provider_availability', { available: current });
+                if (current && !payloadCount) armNoPayloadTimer();
+            }
+            updateSetpointAvailability();
+        }
+
         function cleanup() {
             if (stopped) return;
             stopped = true;
@@ -342,12 +404,26 @@ mgu.run({
         try {
             watch = ctx.signals.watch(
                 'de.bmw.infotainment.climate.Climate2', '1',
-                { statusACFront: onAcSignal }, log,
-                { pollMs: SIGNAL_POLL_MS, onAvailability }
+                {
+                    statusACFront: onAcSignal,
+                    statusAirConditionDRStatus: (value) => decodedIhkaTemperature(
+                        value, 'temperatureTargetDRIHKA', 'driver'),
+                    statusAirConditionPSStatus: (value) => decodedIhkaTemperature(
+                        value, 'temperatureTargetPSIHKA', 'passenger'),
+                }, log,
+                {
+                    pollMs: SIGNAL_POLL_MS,
+                    onAvailability: (available) => {
+                        onAvailability(available);
+                        onClimate2SetpointAvailability(available);
+                    },
+                    onDiagnostic: diagnosticsEnabled ? diagnosticSignalEvent : undefined,
+                }
             );
         } catch (e) {
             live.signalError = true;
             log.warn('A/C status signal: ' + (e && e.message || e));
+            onClimate2SetpointAvailability(false);
         }
         Promise.resolve(watch).then((result) => {
             if (!result) return;
@@ -361,16 +437,19 @@ mgu.run({
                 live.signalError = true;
                 live.signalAvailable = false;
                 live.stale = true;
+                onClimate2SetpointAvailability(false);
                 log.warn('A/C status signal: ' + result.error);
                 queueRender();
             } else if (typeof result.available === 'boolean') {
                 onAvailability(result.available);
+                onClimate2SetpointAvailability(result.available);
             }
         }).catch((e) => {
             if (stopped) return;
             live.signalError = true;
             live.signalAvailable = false;
             live.stale = true;
+            onClimate2SetpointAvailability(false);
             log.warn('A/C status signal: ' + (e && e.message || e));
             queueRender();
         });
@@ -437,6 +516,7 @@ mgu.run({
                     demo: true,
                     driver: previewValue('demoDriver', 22),
                     passenger: previewValue('demoPassenger', 21),
+                    driverUnitC: true, passengerUnitC: true,
                     driverStatus: 'demo', passengerStatus: 'demo',
                     ac: true,
                 };
@@ -445,6 +525,8 @@ mgu.run({
                 demo: false,
                 driver: live.zones.driver.state === 'live' ? live.zones.driver.value : null,
                 passenger: live.zones.passenger.state === 'live' ? live.zones.passenger.value : null,
+                driverUnitC: live.zones.driver.unitC,
+                passengerUnitC: live.zones.passenger.unitC,
                 driverStatus: live.zones.driver.state,
                 passengerStatus: live.zones.passenger.state,
                 ac: live.ac,
@@ -484,17 +566,17 @@ mgu.run({
             }
         }
 
-        function zoneStatus(signalStatus, demo) {
+        function zoneStatus(signalStatus, demo, unitC) {
             if (demo) return { text: 'DEMO · NOT VEHICLE DATA', color: C.red };
-            if (signalStatus === 'live') return { text: 'LIVE VALUE · UNIT UNVERIFIED', color: C.red };
+            if (signalStatus === 'live') return { text: unitC ? 'LIVE VALUE · IHKA' : 'LIVE VALUE · UNIT UNVERIFIED', color: C.red };
             if (signalStatus === 'stale') return { text: 'SIGNAL STALE', color: C.muted };
             if (signalStatus === 'invalid') return { text: 'INVALID SIGNAL PAYLOAD', color: C.muted };
             if (signalStatus === 'waiting') return { text: 'WAITING FOR VEHICLE DATA', color: C.muted };
             return { text: 'SIGNAL UNAVAILABLE', color: C.muted };
         }
 
-        function climateZone(cv, cx, title, value, demo, signalStatus) {
-            const shown = temperatureDisplay(value, demo);
+        function climateZone(cv, cx, title, value, demo, signalStatus, unitC) {
+            const shown = temperatureDisplay(value, demo || unitC);
             const unitSize = 26, gap = 9;
             const maxWidth = 280;
             let size = shown.size + 12;
@@ -516,7 +598,7 @@ mgu.run({
             cv.text(shown.text, left, 333, size, shown.color, { font: shown.font });
             if (shown.unit) cv.text('°C', left + numberWidth + gap, 321, unitSize, C.muted, { font: 'bold' });
 
-            const status = zoneStatus(demo ? 'demo' : signalStatus, demo);
+            const status = zoneStatus(demo ? 'demo' : signalStatus, demo, unitC);
             cv.text(status.text, cx, 371, 12, status.color,
                 { align: 'center', font: 'bold', spacing: 0.65 });
         }
@@ -541,8 +623,8 @@ mgu.run({
             drawSettingsMark(cv);
             drawFlowLines(cv, true);
             drawFlowLines(cv, false);
-            climateZone(cv, 500, 'DRIVER', s.driver, s.demo, s.driverStatus);
-            climateZone(cv, 1100, 'PASSENGER', s.passenger, s.demo, s.passengerStatus);
+            climateZone(cv, 500, 'DRIVER', s.driver, s.demo, s.driverStatus, s.driverUnitC);
+            climateZone(cv, 1100, 'PASSENGER', s.passenger, s.demo, s.passengerStatus, s.passengerUnitC);
             cv.fillRect(799, 176, 2, 216, C.redDim);
             cv.circle(800, 284, 4, C.red);
 
