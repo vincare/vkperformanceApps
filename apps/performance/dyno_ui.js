@@ -129,7 +129,6 @@ function chart(cv, G, t, s, current, baseline) {
     }
     if (current) {
         const pPoints = linePoints(current, 'powerW', YP);
-        if (pPoints.length > 1) cv.fillUnder(pPoints, y + h, G.withAlpha(POWER, 0.11));
         if (pPoints.length > 1) {
             cv.polyline(pPoints, 7, G.withAlpha(POWER, 0.14));
             cv.polyline(pPoints, 3.4, POWER);

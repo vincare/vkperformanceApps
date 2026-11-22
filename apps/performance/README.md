@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.24 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.25 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run until the
@@ -155,6 +155,8 @@ one to inspect or pin a baseline. **CLEAR RUNS** deletes the saved road-dyno
 history and baseline from PERFORMANCE's app data; the Engine Data card then
 shows no last-run result, including after restarting the app. The history does
 not import or copy the separate DYNO application or its data.
+The plotted power and torque traces stay unfilled so they remain distinct from
+the chart grid and do not form a block below a short RPM sweep.
 
 The page displays a side-view image paired to the selected **Car Model** in
 Settings. All six supplied side-view PNG files are included unchanged and are
