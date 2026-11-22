@@ -49,44 +49,56 @@ function drawCar(cv, G, t, valve, car, bounds, now, effects) {
     drawValveFlaps(cv, G, t, car, imageRect, valveMode, now);
 }
 
+function drawConfigCard(cv, G, t, x, y, w, h, title, subtitle, kind, action) {
+    cv.roundRect(x, y, w, h, 9, G.withAlpha('#ffffff', 0.035));
+    cv.strokeRoundRect(x, y, w, h, 9, 1.5, G.withAlpha('#ffffff', 0.18));
+    cv.fillRect(x + 1, y + 24, 4, 64, t.accent);
+
+    const ix = x + 38, iy = y + 112, is = 144, cx = ix + is / 2, cy = iy + is / 2;
+    cv.roundRect(ix, iy, is, is, 8, G.withAlpha('#111317', 0.96));
+    cv.strokeRoundRect(ix, iy, is, is, 8, 2, G.withAlpha(t.accent, 0.72));
+    cv.fillRect(ix + 14, iy + 14, 28, 3, t.accent);
+
+    if (kind === 'exhaust') {
+        [cy - 17, cy + 17].forEach((pipeY) => {
+            cv.roundRect(cx - 46, pipeY - 8, 76, 16, 8, G.withAlpha('#9ca4ae', 0.94));
+            cv.roundRect(cx - 43, pipeY - 5, 68, 10, 5, G.withAlpha('#16181c', 1));
+            cv.circle(cx + 30, pipeY, 12, G.withAlpha('#d4d9df', 0.98));
+            cv.circle(cx + 30, pipeY, 7, G.withAlpha('#17191d', 1));
+            cv.circle(cx + 30, pipeY, 2.5, G.withAlpha(t.accent, 0.92));
+        });
+    } else {
+        cv.roundRect(cx - 48, cy + 12, 62, 22, 10, G.withAlpha('#9ca4ae', 0.94));
+        cv.roundRect(cx - 44, cy + 16, 52, 14, 7, G.withAlpha('#16181c', 1));
+        cv.polyline([[cx + 15, cy + 10], [cx + 35, cy - 10], [cx + 28, cy + 8],
+            [cx + 48, cy + 13], [cx + 28, cy + 22], [cx + 35, cy + 40]], 4, t.accent);
+        cv.line(cx - 17, cy - 18, cx - 17, cy - 34, 2.5, G.withAlpha('#c7cbd1', 0.82));
+        cv.line(cx - 1, cy - 22, cx + 5, cy - 36, 2.5, G.withAlpha(t.accent, 0.9));
+        cv.line(cx + 15, cy - 18, cx + 26, cy - 29, 2.5, G.withAlpha('#c7cbd1', 0.82));
+    }
+
+    const tx = x + 222;
+    cv.text(title, tx, y + 153, 29, '#ffffff', { font: 'bold', spacing: 1.2, literal: true });
+    cv.text(subtitle, tx, y + 188, 15, t.dim, { font: 'bold', spacing: 0.9, literal: true });
+    drawActionButton(cv, G, t, tx, y + 267, w - 258, 54, 'OPEN ' + title, action,
+        { key: 'performance_' + kind + '_section', color: t.accent, primary: kind === 'exhaust' });
+}
+
 function drawSectionMenu(cv, G, t, car, actions) {
-    const x = 54, y = (G.TOP || 44) + 28, w = 320, h = 390;
-    cv.roundRect(x, y, w, h, 8, G.withAlpha('#ffffff', 0.035));
-    cv.strokeRoundRect(x, y, w, h, 8, 1.5, G.withAlpha('#ffffff', 0.18));
-    cv.fillRect(x + 1, y + 26, 4, 62, t.accent);
-
-    const ix = x + (w - 126) / 2, iy = y + 40, is = 126;
-    cv.roundRect(ix, iy, is, is, 6, G.withAlpha('#111317', 0.96));
-    cv.strokeRoundRect(ix, iy, is, is, 6, 2, G.withAlpha(t.accent, 0.72));
-    cv.fillRect(ix + 14, iy + 16, 28, 3, t.accent);
-    // Two parallel metal outlets with dark bores and subtle hot-gas strokes.
-    // This uses only the MGU canvas primitives and remains crisp at any scale.
-    [iy + 57, iy + 80].forEach((cy) => {
-        cv.roundRect(ix + 25, cy - 7, 68, 14, 7, G.withAlpha('#9ca4ae', 0.92));
-        cv.roundRect(ix + 27, cy - 4, 63, 8, 4, G.withAlpha('#16181c', 1));
-        cv.circle(ix + 91, cy, 11, G.withAlpha('#d4d9df', 0.98));
-        cv.circle(ix + 91, cy, 7, G.withAlpha('#17191d', 1));
-        cv.circle(ix + 91, cy, 2.5, G.withAlpha(t.accent, 0.9));
-    });
-    cv.line(ix + 47, iy + 38, ix + 43, iy + 30, 2, G.withAlpha('#c7cbd1', 0.62));
-    cv.line(ix + 65, iy + 36, ix + 65, iy + 27, 2, G.withAlpha(t.accent, 0.78));
-    cv.line(ix + 83, iy + 38, ix + 88, iy + 30, 2, G.withAlpha('#c7cbd1', 0.62));
-
-    drawActionButton(cv, G, t, x + 28, y + 202, w - 56, 60,
-        'EXHAUST SYSTEM', actions && actions.open, { key: 'performance_exhaust_section', color: t.accent, primary: true });
-    drawActionButton(cv, G, t, x + 28, y + 278, w - 56, 60,
-        'ENGINE BURBLES', actions && actions.burbles, { key: 'performance_engine_burbles', color: t.accent });
+    const y = (G.TOP || 44) + 30, h = 414, w = 760, gap = 32;
+    drawConfigCard(cv, G, t, 24, y, w, h, 'EXHAUST SYSTEM', 'VALVE CONTROL · DRIVE MODES', 'exhaust', actions && actions.open);
+    drawConfigCard(cv, G, t, 24 + w + gap, y, w, h, 'EXHAUST BURBLES', 'BM3 BURBLE ADJUSTMENT', 'burbles', actions && actions.burbles);
 }
 
 function drawBurbles(cv, G, t, valve, actions) {
-    const y = G.TOP || 44, bottom = G.pageBottom(cv) - (cv.own ? G.MARGIN : 0);
-    G.panel(cv, t, 24, y, W - 48, bottom - y, 'BMW ENGINE BURBLES · BM3');
+    const y = (G.TOP || 44) + 28, bottom = G.pageBottom(cv) - (cv.own ? G.MARGIN : 0);
+    G.panel(cv, t, 24, y, W - 48, bottom - y, 'EXHAUST BURBLES · BM3');
     const tune = valve.tune || {};
     const active = tune.burblesEnabled === true;
     const current = active ? (typeof tune.burbles === 'number' ? tune.burbles.toFixed(1) : 'CUSTOM')
         : tune.burblesEnabled === false ? 'OFF' : 'UNKNOWN';
     const stateColor = active ? (t.accent2 || '#81c4ff') : current === 'OFF' ? t.text : (t.warn || '#d29922');
-    cv.text('ENGINE BURBLES', W / 2, y + 102, 17, t.dim, { align: 'center', font: 'bold', spacing: 2 });
+    cv.text('EXHAUST BURBLES', W / 2, y + 102, 17, t.dim, { align: 'center', font: 'bold', spacing: 2 });
     cv.text(current, W / 2, y + 190, 68, stateColor, { align: 'center', font: 'bold', spacing: 2.4 });
     cv.text('TARGET AGGRESSION', W / 2, y + 225, 13, t.dim, { align: 'center', font: 'bold', spacing: 1.8 });
     cv.text(Number(valve.burbleTarget || 0).toFixed(1), W / 2, y + 274, 32, t.text, { align: 'center', font: 'num' });
@@ -118,7 +130,7 @@ function drawBurbles(cv, G, t, valve, actions) {
 }
 
 function drawSidebar(cv, G, t, valve, car, actions, now) {
-    const x = 24, y = G.TOP || 44, w = 320, h = (G.BOTTOM || 512) - y;
+    const x = 24, y = (G.TOP || 44) + 28, w = 320, h = (G.BOTTOM || 512) - y;
     drawPanelShell(cv, G, t, x, y, w, h);
     cv.fillRect(x + 1, y + 27, 4, 54, t.accent);
     cv.text('SELECT MODE', x + 20, y + 57, 28, '#ffffff',
@@ -142,9 +154,9 @@ function drawSidebar(cv, G, t, valve, car, actions, now) {
 
     // The centered page title occupies its own row above the car. Image bounds
     // start below it, keeping the car level with both sidebar cards.
-    cv.text('BMW EXHAUST SYSTEM', 800, 116, 46, '#ffffff',
+    cv.text('BMW EXHAUST SYSTEM', 800, y + 72, 46, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.5, literal: true });
-    drawCar(cv, G, t, valve, car, { x: 354, y: 128, w: 892, h: 372 }, now, true);
+    drawCar(cv, G, t, valve, car, { x: 354, y: y + 84, w: 892, h: (G.BOTTOM || 512) - y - 96 }, now, true);
 }
 
 function drawValveFlaps(cv, G, t, car, imageRect, valveMode, now) {
@@ -180,7 +192,7 @@ function contain(rect, width, height) {
 }
 
 function drawStatus(cv, G, t, valve) {
-    const x = 1256, y = G.TOP || 44, w = 320, h = (G.BOTTOM || 512) - y;
+    const x = 1256, y = (G.TOP || 44) + 28, w = 320, h = (G.BOTTOM || 512) - y;
     drawPanelShell(cv, G, t, x, y, w, h);
     cv.fillRect(x + 1, y + 27, 4, 54, t.accent);
     cv.text('EXHAUST MODE', x + 20, y + 57, 28, t.text,
@@ -236,6 +248,7 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 1, [
         v.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
     ]);
+    G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, RED);
     if (view === 'sections') drawSectionMenu(cv, G, t, car, sectionActions);
     else if (view === 'burbles') drawBurbles(cv, G, t, v, act);
     else {

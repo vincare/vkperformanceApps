@@ -228,11 +228,8 @@ mgu.run({
         }
 
         function updateDynoActionLabel() {
-            const run = displayedDynoRun();
-            const label = page !== 3 ? 'Open DYNO RUN' : dynoView === 'runs' ? 'Next saved run'
-                : run && dynoBaselineAt === run.at ? 'Clear baseline' : 'Set baseline';
-            if (ui.text) ui.text('BTN_DYNO_ACTION', label);
-            if (ui.text) ui.text('BTN_DYNO_VIEW', page !== 3 ? 'Saved runs' : dynoView === 'runs' ? 'DYNO sheet' : 'Saved runs');
+            if (ui.text) ui.text('BTN_DYNO_ACTION', 'Open DYNO RUN');
+            if (ui.text) ui.text('BTN_DYNO_VIEW', 'DYNO RUN');
         }
 
         function saveDragRuns() {
@@ -1247,6 +1244,7 @@ mgu.run({
                     gateText: dynoGate(now).text,
                     demo, powerUnit: settings.get('powerUnit') || 'hp',
                     torqueUnit: settings.get('dynoTorqueUnit') || 'nm',
+                    loss: dynoSetup().loss,
                     ecuTorque: settings.get('dynoEcuTorque') !== false,
                     graphMaxRpm: settings.get('dynoGraphMaxRpm') || 0,
                 }, selectedCarSideVisual(t), {
@@ -1400,17 +1398,15 @@ mgu.run({
         ui.onClick('BTN_OEM', valveActions.oem);
         ui.onClick('BTN_DRIVE', valveActions.drive);
         ui.onClick('BTN_DYNO_ACTION', () => {
-            if (page !== 3) {
-                dynoView = 'sheet';
-                dynoDisplayCleared = false;
-                updateDynoActionLabel();
-                return setPage(3);
-            }
-            return dynoView === 'runs' ? nextDynoRun() : toggleDynoBaseline();
+            if (page === 3) return null;
+            dynoView = 'sheet';
+            dynoDisplayCleared = false;
+            updateDynoActionLabel();
+            return setPage(3);
         });
         ui.onClick('BTN_DYNO_VIEW', () => {
-            if (page === 3) return toggleDynoView();
-            dynoView = 'runs';
+            if (page === 3) return null;
+            dynoView = 'sheet';
             dynoDisplayCleared = false;
             updateDynoActionLabel();
             return setPage(3);

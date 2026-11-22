@@ -38,6 +38,7 @@ function card(cv, G, t, x, y, w, h, title, subtitle, kind, onOpen) {
 function draw(cv, G, t, actions) {
     cv.clear(t.bg);
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 2);
+    G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, '#f32635');
     const y = Math.max(98, (G.TOP || 44) + 32), h = Math.min(340, (G.pageBottom(cv) || H) - y - 12);
     const w = 580, gap = 56, x0 = (W - (w * 2 + gap)) / 2;
     card(cv, G, t, x0, y, w, h, 'DYNO RUN', 'ROAD POWER & TORQUE ESTIMATE', 'dyno', actions && actions.dyno);

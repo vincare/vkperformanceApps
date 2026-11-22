@@ -96,7 +96,7 @@ function drawLive(cv, G, t, s, car, actions) {
     const splits = s.splits || [];
     G.panel(cv, t, 24, 92, 480, 398, 'LAUNCH CONTROL');
     G.panel(cv, t, 520, 92, 530, 398, 'ACCELERATION TRACE');
-    sectionTitle(cv, G, t, 1066, 92, 510, 'SELECTED BMW');
+    G.panel(cv, t, 1066, 92, 510, 398, 'DISTANCE RESULT');
 
     const stateLabel = s.demo ? 'DEMO · TIMER PAUSED' : s.speed === null && s.timerState !== 'run' ? 'WAITING FOR SPEED' :
         s.timerState === 'run' ? 'TIMING' :
@@ -153,27 +153,25 @@ function drawLive(cv, G, t, s, car, actions) {
     });
 
     drawTrace(cv, G, t, s, s.timerState === 'run' ? s.trace : current.trace);
-    const modelLabel = car && car.model ? car.model.label : 'BMW';
-    cv.text(modelLabel, 1092, 149, 11, t.dim, { font: 'bold', spacing: 1 });
-    drawCar(cv, t, car, { x: 1082, y: 154, w: 478, h: 159 });
-    G.panel(cv, t, 1066, 320, 510, 170, 'DISTANCE RESULT');
     const distance = splits.find((split) => split.dist);
     const distanceTime = distance && current.result && current.result[distance.key];
     const distanceTrap = distance && current.trap && current.trap[distance.key];
-    cv.roundRect(1092, 374, 166, 76, 7, G.withAlpha('#000000', 0.22));
-    cv.roundRect(1272, 374, 266, 76, 7, G.withAlpha('#000000', 0.22));
-    cv.strokeRoundRect(1092, 374, 166, 76, 7, 1, G.withAlpha('#f3b548', 0.25));
-    cv.strokeRoundRect(1272, 374, 266, 76, 7, 1, G.withAlpha(t.text, 0.1));
-    cv.text(distance ? distance.label : 'DISTANCE', 1106, 391, 10, t.dim, { font: 'bold', spacing: 0.8 });
+    cv.roundRect(1092, 150, 166, 76, 7, G.withAlpha('#000000', 0.22));
+    cv.roundRect(1272, 150, 266, 76, 7, G.withAlpha('#000000', 0.22));
+    cv.strokeRoundRect(1092, 150, 166, 76, 7, 1, G.withAlpha('#f3b548', 0.25));
+    cv.strokeRoundRect(1272, 150, 266, 76, 7, 1, G.withAlpha(t.text, 0.1));
+    cv.text(distance ? distance.label : 'DISTANCE', 1106, 167, 10, t.dim, { font: 'bold', spacing: 0.8 });
     const distanceTimeText = DragRunSeconds(distanceTime);
-    cv.text(distanceTimeText, 1106, 431, 31, distanceTime ? '#f3b548' : t.dim, { font: 'num' });
-    cv.text('s', 1110 + cv.textWidth(distanceTimeText, 31, { font: 'num' }), 429, 13, t.dim, { font: 'bold' });
-    cv.text('TRAP SPEED', 1288, 391, 10, t.dim, { font: 'bold', spacing: 0.8 });
+    cv.text(distanceTimeText, 1106, 207, 31, distanceTime ? '#f3b548' : t.dim, { font: 'num' });
+    cv.text('s', 1110 + cv.textWidth(distanceTimeText, 31, { font: 'num' }), 205, 13, t.dim, { font: 'bold' });
+    cv.text('TRAP SPEED', 1288, 167, 10, t.dim, { font: 'bold', spacing: 0.8 });
     cv.text((distanceTrap ? number(DragRunSpeed(distanceTrap, speedUnit), 0) : '0') + ' ' + (speedUnit === 'mph' ? 'MPH' : 'KM/H'),
-        1288, 428, 20, t.text, { font: 'bold' });
+        1288, 204, 20, t.text, { font: 'bold' });
     const spin = s.timerState === 'run' ? s.wheelspin : current.wheelspin;
     cv.text(spin ? 'WHEELSPIN EST.  ' + spin.peak + '%  ·  ' + number(spin.seconds, 1) + ' s' : 'WHEELSPIN EST.  --',
-        1094, 463, 12, spin ? '#f3b548' : t.dim, { font: 'bold', spacing: 0.35 });
+        1094, 248, 12, spin ? '#f3b548' : t.dim, { font: 'bold', spacing: 0.35 });
+    cv.fillRect(1092, 266, 458, 1, G.withAlpha(t.tick, 0.3));
+    drawCar(cv, t, car, { x: 1082, y: 276, w: 478, h: 194 });
 
 }
 
@@ -229,8 +227,6 @@ function drawHistory(cv, G, t, s, car, actions) {
     cv.text(shown.length ? (start + 1) + '–' + (start + shown.length) + ' / ' + visibleRuns.length : '0 / 0',
         830, 481, 10, t.dim, { align: 'center', font: 'bold' });
 
-    const modelLabel = car && car.model ? car.model.label : 'BMW';
-    cv.text(modelLabel, 1110, 149, 10, t.dim, { font: 'bold', spacing: 0.8 });
     drawCar(cv, t, car, { x: 1102, y: 154, w: 458, h: 138 });
     G.panel(cv, t, 1086, 300, 490, 190, 'RUN DETAILS');
     if (selected) {
@@ -258,6 +254,7 @@ function draw(cv, G, t, s, car, actions) {
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 2, [
         s.demo && { text: 'DEMO · TIMING DISABLED', color: 'crit' },
     ]);
+    G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, RED);
     button(cv, G, t, 24, 50, 174, 34, s.view === 'history' ? 'LIVE RUN' : 'RUN HISTORY', actions.toggleView, s.view === 'history',
         s.view !== 'history' || (s.runs && s.runs.length > 0));
     if (s.view === 'history') drawHistory(cv, G, t, s, car, actions);

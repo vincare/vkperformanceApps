@@ -26,24 +26,13 @@ function selectedRun(s) {
     if (s.cleared) return null;
     return (s.runs || []).find((run) => run.at === s.selectedAt) || (s.runs || [])[0] || null;
 }
-function baselineRun(s) { return (s.runs || []).find((run) => run.at === s.baselineAt) || null; }
 function contain(rect, width, height) {
     const scale = Math.min(rect.w / width, rect.h / height);
     const w = width * scale, h = height * scale;
     return { x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h };
 }
-function drawButton(cv, G, t, x, y, w, h, label, run, active, enabled) {
-    const color = active ? RED : G.withAlpha('#ffffff', 0.12);
-    const disabled = enabled === false;
-    cv.roundRect(x, y, w, h, 7, active ? G.withAlpha(RED, 0.88) : G.withAlpha('#ffffff', disabled ? 0.02 : 0.055));
-    cv.strokeRoundRect(x, y, w, h, 7, 1.5, active ? RED : G.withAlpha('#ffffff', disabled ? 0.12 : 0.28));
-    cv.text(label, x + w / 2, y + h / 2 + 5, 15, disabled ? t.dim : active ? '#ffffff' : t.text,
-        { align: 'center', font: 'bold', spacing: 1.1 });
-    if (cv.own && run && !disabled) cv.target(x, y, w, h, run, 'performance_dyno_' + label.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
-}
-
-function chart(cv, G, t, s, current, baseline) {
-    const curves = [current, baseline].filter((run) => run && Array.isArray(run.curve) && run.curve.length > 1);
+function chart(cv, G, t, s, current) {
+    const curves = [current].filter((run) => run && Array.isArray(run.curve) && run.curve.length > 1);
     const unit = s.powerUnit || 'hp', torqueUnit = s.torqueUnit || 'nm';
     const xMin = 1000;
     const maxPointRpm = curves.reduce((max, run) => Math.max(max, run.curve[run.curve.length - 1].rpm), 0);
@@ -123,10 +112,6 @@ function chart(cv, G, t, s, current, baseline) {
         if (points.length > 1) cv.polyline(points, width, color);
         return points;
     }
-    if (baseline && baseline !== current) {
-        drawLine(baseline, 'powerW', YP, G.withAlpha(t.dim, 0.62), 2.2);
-        drawLine(baseline, 'torqueNm', YT, G.withAlpha(t.dim, 0.42), 1.8);
-    }
     if (current) {
         const pPoints = linePoints(current, 'powerW', YP);
         if (pPoints.length > 1) {
@@ -154,9 +139,8 @@ function chart(cv, G, t, s, current, baseline) {
     }
 }
 
-function drawLegend(cv, G, t, current, baseline, ecuTorque) {
+function drawLegend(cv, G, t, current, ecuTorque) {
     const items = [[POWER, 'POWER'], [TORQUE, 'ROAD TORQUE']];
-    if (baseline) items.push([G.withAlpha(t.dim, 0.78), 'BASELINE']);
     if (ecuTorque && current && current.curve.some((point) => typeof point.ecuTorqueNm === 'number')) items.push([G.withAlpha(ECU_TORQUE, 0.64), 'ECU TORQUE']);
     let x = 48;
     items.forEach(([color, label]) => {
@@ -175,129 +159,56 @@ function drawCar(cv, G, t, car, rect) {
     cv.image(car.imageId, image.x, image.y, image.w, image.h);
 }
 
-function drawSheet(cv, G, t, s, car, current, baseline) {
-    G.panel(cv, t, 24, 92, 984, 398, 'ROAD DYNO · POWER / TORQUE');
-    drawLegend(cv, G, t, current, baseline, s.ecuTorque);
-    chart(cv, G, t, s, current, baseline);
+function drawResultCard(cv, G, t, x, y, w, label, value, unit, detail, color) {
+    cv.roundRect(x, y, w, 122, 7, G.withAlpha('#000000', 0.28));
+    cv.strokeRoundRect(x, y, w, 122, 7, 1, G.withAlpha(color, 0.3));
+    cv.text(label, x + 11, y + 22, 10, t.dim, { font: 'bold', spacing: 0.5 });
+    const valueText = number(value, 0);
+    cv.text(valueText, x + 11, y + 68, 31, color, { font: 'num' });
+    cv.text(unit, x + 17 + cv.textWidth(valueText, 31, { font: 'num' }), y + 68, 12, t.dim);
+    cv.text(detail, x + 11, y + 96, 9, t.dim, { font: 'bold', spacing: 0.25 });
+}
 
-    G.panel(cv, t, 1024, 92, 552, 210, s.pullStatus === 'recording' ? 'PULL IN PROGRESS' : 'DYNO TELEMETRY');
+function drawSheet(cv, G, t, s, car, current) {
+    G.panel(cv, t, 24, 92, 984, 398, 'ROAD DYNO STATS');
+    drawLegend(cv, G, t, current, s.ecuTorque);
+    chart(cv, G, t, s, current);
+
     const isPull = s.pullStatus === 'recording';
-    const powerX = 1048, torqueX = 1318, metricY = 150, metricW = 238, metricH = 106;
-    cv.roundRect(powerX, metricY, metricW, metricH, 7, G.withAlpha('#000000', 0.28));
-    cv.roundRect(torqueX, metricY, metricW, metricH, 7, G.withAlpha('#000000', 0.28));
-    cv.strokeRoundRect(powerX, metricY, metricW, metricH, 7, 1, G.withAlpha(POWER, 0.28));
-    cv.strokeRoundRect(torqueX, metricY, metricW, metricH, 7, 1, G.withAlpha(TORQUE, 0.28));
+    G.panel(cv, t, 1024, 92, 552, 398, 'DYNO RESULTS');
     const stateLabel = isPull ? 'LIVE' : current ? 'LAST RUN' : 'STANDBY';
     const stateColor = isPull ? RED : current ? TORQUE : t.dim;
     cv.roundRect(1430, 103, 122, 24, 12, G.withAlpha(stateColor, 0.16));
     cv.text(stateLabel, 1491, 119, 10, stateColor, { align: 'center', font: 'bold', spacing: 1.1 });
-    cv.text(isPull ? 'LIVE ROAD POWER' : 'PEAK POWER', 1064, 172, 11, t.dim, { font: 'bold', spacing: 1 });
-    cv.text(isPull ? 'LIVE ENGINE TORQUE' : 'PEAK TORQUE', 1334, 172, 11, t.dim, { font: 'bold', spacing: 1 });
-    if (isPull) {
-        cv.circle(1538, 123, 6, Math.floor(Date.now() / 300) % 2 ? RED : G.withAlpha(RED, 0.3));
-        const liveHp = powerValue(s.livePowerW || 0, s.powerUnit);
-        const hpText = number(liveHp, 0);
-        cv.text(hpText, 1064, 218, 42, POWER, { font: 'num' });
-        cv.text(powerName(s.powerUnit), 1072 + cv.textWidth(hpText, 42, { font: 'num' }), 218, 16, t.dim);
-        const tqText = s.liveTorqueNm == null ? '0' : number(s.liveTorqueNm * torqueFactor(s.torqueUnit), torqueDigits(s.torqueUnit));
-        cv.text(tqText, 1334, 218, 40, TORQUE, { font: 'num' });
-        cv.text(torqueName(s.torqueUnit), 1342 + cv.textWidth(tqText, 40, { font: 'num' }), 218, 14, t.dim);
-        cv.text((s.rpm ? number(s.rpm, 0) : '0') + ' rpm  ·  ' + (s.speed ? number(s.speed, 0) : '0') + ' km/h', 1064, 241, 12, t.dim, { font: 'bold' });
-        cv.text('ENGINE SIGNAL', 1334, 241, 12, t.dim, { font: 'bold' });
-    } else if (current) {
-        const hp = powerValue(current.peakP, s.powerUnit);
-        const torque = current.peakT * torqueFactor(s.torqueUnit);
-        const hpText = number(hp, 0), torqueText = number(torque, torqueDigits(s.torqueUnit));
-        cv.text(hpText, 1064, 218, 42, POWER, { font: 'num' });
-        cv.text(powerName(s.powerUnit), 1072 + cv.textWidth(hpText, 42, { font: 'num' }), 218, 16, t.dim);
-        cv.text('@ ' + number(current.peakPrpm, 0) + ' rpm', 1064, 241, 12, t.dim);
-        cv.text(torqueText, 1334, 218, 40, TORQUE, { font: 'num' });
-        cv.text(torqueName(s.torqueUnit), 1342 + cv.textWidth(torqueText, 40, { font: 'num' }), 218, 14, t.dim);
-        cv.text('@ ' + number(current.peakTrpm, 0) + ' rpm', 1334, 241, 12, t.dim);
-        const wheel = powerValue(current.peakP * (1 - current.loss / 100), s.powerUnit);
-        cv.text('CRANK ' + number(hp, 0) + ' ' + powerName(s.powerUnit) + '   ·   WHEELS ' + number(wheel, 0) + ' ' + powerName(s.powerUnit),
-            1064, 276, 11, t.dim, { font: 'bold', spacing: 0.2 });
-    } else {
-        cv.text('0', 1064, 218, 42, POWER, { font: 'num' });
-        cv.text(powerName(s.powerUnit), 1072 + cv.textWidth('0', 42, { font: 'num' }), 218, 16, t.dim);
-        cv.text('0', 1334, 218, 40, TORQUE, { font: 'num' });
-        cv.text(torqueName(s.torqueUnit), 1342 + cv.textWidth('0', 40, { font: 'num' }), 218, 14, t.dim);
-        cv.text(s.demo ? 'DEMO · ROAD RECORDING DISABLED' : (s.gateText || 'WAITING FOR LIVE VEHICLE SIGNALS'),
-            1064, 241, 11, t.dim, { font: 'bold', spacing: 0.4 });
-    }
-    const baselineLabel = baseline ? 'BASELINE SET' : 'NO BASELINE';
-    cv.text(baselineLabel, 1064, 292, 10, baseline ? TORQUE : t.dim, { font: 'bold', spacing: 0.9 });
-    cv.fillRect(1048, 302, 528, 1, G.withAlpha(t.tick, 0.28));
-    drawCar(cv, G, t, car, { x: 1048, y: 306, w: 528, h: 168 });
-}
+    if (isPull) cv.circle(1538, 123, 6, Math.floor(Date.now() / 300) % 2 ? RED : G.withAlpha(RED, 0.3));
 
-function drawRuns(cv, G, t, s, car, current, baseline, actions) {
-    G.panel(cv, t, 24, 92, 1018, 398, 'SAVED ROAD RUNS');
-    const columns = [48, 270, 478, 675, 850];
-    ['DATE / TIME', 'PEAK POWER', 'PEAK TORQUE', 'SPEED', 'SETUP'].forEach((label, i) =>
-        cv.text(label, columns[i], 160, 11, t.dim, { font: 'bold', spacing: 0.7 }));
-    const runs = s.runs || [];
-    if (!runs.length) {
-        cv.text('NO SAVED RUNS YET', 530, 260, 20, t.dim, { align: 'center', font: 'bold', spacing: 1.2 });
-        cv.text('A qualifying full-throttle pull is saved here automatically.', 530, 286, 13, t.dim, { align: 'center' });
-    }
-    runs.slice(0, 7).forEach((run, index) => {
-        const y = 192 + index * 39;
-        const date = new Date(run.at);
-        const pad = (value) => String(value).padStart(2, '0');
-        const selected = current && current.at === run.at;
-        const isBaseline = baseline && baseline.at === run.at;
-        if (selected) cv.roundRect(36, y - 22, 994, 30, 4, G.withAlpha(RED, 0.17));
-        if (isBaseline) cv.fillRect(36, y - 22, 3, 30, TORQUE);
-        const hp = number(powerValue(run.peakP, s.powerUnit), 0) + ' ' + powerName(s.powerUnit);
-        const torque = number(run.peakT * torqueFactor(s.torqueUnit), torqueDigits(s.torqueUnit)) + ' ' + torqueName(s.torqueUnit);
-        const setup = number(run.weight, 0) + ' kg · ' + number(run.loss, 0) + '%';
-        cv.text(pad(date.getDate()) + '.' + pad(date.getMonth() + 1) + '  ' + pad(date.getHours()) + ':' + pad(date.getMinutes()), columns[0], y, 14, t.text);
-        cv.text(hp + ' @ ' + number(run.peakPrpm, 0), columns[1], y, 14, selected ? POWER : t.text, { font: 'bold' });
-        cv.text(torque + ' @ ' + number(run.peakTrpm, 0), columns[2], y, 14, selected ? TORQUE : t.text, { font: 'bold' });
-        cv.text(number(run.v0, 0) + '–' + number(run.v1, 0) + ' km/h', columns[3], y, 13, t.dim);
-        cv.text(setup, columns[4], y, 12, t.dim);
-        if (isBaseline) cv.text('BASE', 990, y, 10, TORQUE, { align: 'right', font: 'bold' });
-        if (cv.own && actions.select) cv.target(36, y - 23, 994, 32, () => actions.select(run.at), 'performance_run_' + index, 4);
-    });
-    G.panel(cv, t, 1058, 92, 518, 190, 'SELECTED RUN');
-    if (current) {
-        const hp = powerValue(current.peakP, s.powerUnit);
-        const torque = current.peakT * torqueFactor(s.torqueUnit);
-        cv.text(number(hp, 0), 1090, 181, 42, POWER, { font: 'num' });
-        cv.text(powerName(s.powerUnit), 1098 + cv.textWidth(number(hp, 0), 42, { font: 'num' }), 181, 16, t.dim);
-        cv.text(number(torque, torqueDigits(s.torqueUnit)), 1340, 181, 38, TORQUE, { font: 'num' });
-        cv.text(torqueName(s.torqueUnit), 1348 + cv.textWidth(number(torque, torqueDigits(s.torqueUnit)), 38, { font: 'num' }), 181, 15, t.dim);
-        cv.text('PEAK POWER', 1090, 202, 11, t.dim, { font: 'bold' });
-        cv.text('PEAK TORQUE', 1340, 202, 11, t.dim, { font: 'bold' });
-        const wheel = powerValue(current.peakP * (1 - current.loss / 100), s.powerUnit);
-        cv.text('WHEELS EST.  ' + number(wheel, 0) + ' ' + powerName(s.powerUnit) + '  ·  ' + current.loss + '% LOSS',
-            1090, 236, 11, t.dim, { font: 'bold', spacing: 0.2 });
-        drawCar(cv, G, t, car, { x: 1058, y: 294, w: 518, h: 142 });
-    } else {
-        cv.text('SELECT A RUN TO SEE ITS DETAILS', 1317, 212, 13, t.dim, { align: 'center', font: 'bold' });
-        drawCar(cv, G, t, car, { x: 1058, y: 294, w: 518, h: 142 });
-    }
-    const currentIsBase = !!(current && baseline && current.at === baseline.at);
-    drawButton(cv, G, t, 1090, 447, 214, 30, baseline && currentIsBase ? 'CLEAR BASELINE' : 'SET BASELINE', actions.toggleBaseline, !!(baseline && currentIsBase), !!current);
-    drawButton(cv, G, t, 1320, 447, 224, 30, 'NEXT SAVED RUN', actions.nextRun, false, runs.length > 0);
+    const loss = current ? current.loss : (typeof s.loss === 'number' ? s.loss : 15);
+    const enginePowerW = isPull ? (s.livePowerW || 0) : current ? current.peakP : 0;
+    const torqueNm = isPull ? (s.liveTorqueNm || 0) : current ? current.peakT : 0;
+    const powerRpm = isPull ? (s.rpm || 0) : current ? current.peakPrpm : 0;
+    const torqueRpm = isPull ? (s.rpm || 0) : current ? current.peakTrpm : 0;
+    const power = powerValue(enginePowerW, s.powerUnit);
+    const torque = torqueNm * torqueFactor(s.torqueUnit);
+    const wheelPower = powerValue(enginePowerW * (1 - loss / 100), s.powerUnit);
+    const powerUnit = powerName(s.powerUnit);
+    const torqueUnit = torqueName(s.torqueUnit);
+    const detailPower = isPull ? 'LIVE ROAD ESTIMATE' : current ? '@ ' + number(powerRpm, 0) + ' RPM' : 'NO RUN RECORDED';
+    const detailTorque = isPull ? 'LIVE ENGINE SIGNAL' : current ? '@ ' + number(torqueRpm, 0) + ' RPM' : 'NO RUN RECORDED';
+    const detailWheels = current || isPull ? number(loss, 0) + '% LOSS ESTIMATE' : 'NO RUN RECORDED';
+    drawResultCard(cv, G, t, 1048, 140, 160, 'ENGINE POWER', power, powerUnit, detailPower, POWER);
+    drawResultCard(cv, G, t, 1220, 140, 160, 'TORQUE', torque, torqueUnit, detailTorque, TORQUE);
+    drawResultCard(cv, G, t, 1392, 140, 160, 'WHEELS POWER', wheelPower, powerUnit, detailWheels, POWER);
+    cv.fillRect(1048, 278, 504, 1, G.withAlpha(t.tick, 0.3));
+    drawCar(cv, G, t, car, { x: 1048, y: 286, w: 528, h: 186 });
 }
 
 function draw(cv, G, t, s, car, actions) {
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 2, [
         s.demo && { text: 'DEMO · NO ROAD DATA', color: 'crit' },
     ]);
-    drawButton(cv, G, t, 24, 50, 174, 34, s.view === 'runs' ? 'DYNO SHEET' : 'SAVED RUNS', actions.toggleView, s.view === 'runs');
-    const current = selectedRun(s), baseline = baselineRun(s);
-    if (s.view === 'runs') drawRuns(cv, G, t, s, car, current, baseline, actions);
-    else drawSheet(cv, G, t, s, car, current, baseline);
-    if (s.view !== 'runs') {
-        drawButton(cv, G, t, 798, 104, 92, 28,
-            baseline && current && baseline.at === current.at ? 'BASELINE ON' : 'SET BASE', current ? actions.toggleBaseline : null,
-            !!(baseline && current && baseline.at === current.at));
-        drawButton(cv, G, t, 898, 104, 110, 28, 'CLEAR RUNS', actions.clear, false);
-    }
+    G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, RED);
+    drawSheet(cv, G, t, s, car, selectedRun(s));
     return cv;
 }
 
-module.exports = { W, H, draw, selectedRun, baselineRun, contain, powerValue, torqueFactor };
+module.exports = { W, H, draw, selectedRun, contain, powerValue, torqueFactor };

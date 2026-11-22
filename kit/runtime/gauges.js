@@ -155,6 +155,14 @@ function drawPanel(cv, t, x, y, w, h, title) {
     if (title) cv.text(String(title), x + 18, y + 42, 26, t.text, { font: 'bold' });
 }
 
+/** A page-level section rule: red lead-in followed by a thin grey continuation. */
+function sectionRule(cv, t, x, y, w, accent) {
+    const lead = Math.min(78, w);
+    cv.fillRect(x + lead + 2, y + 2, Math.max(0, w - lead - 2), 1.5,
+        withAlpha('#c7cbd1', 0.82));
+    cv.fillRect(x, y, lead, 4, accent || '#f32635');
+}
+
 /* ---------------- radial dial ---------------- */
 /** 270-degree radial gauge centred at (cx, cy). */
 function radial(cv, t, cx, cy, r, g) {
@@ -869,7 +877,7 @@ function stripes(cv, t, x, y, w) {
 }
 
 module.exports = {
-    BAR_H, TOP, BOTTOM, pageBottom, MARGIN, toMargin, frame, header, layer, onLayerDrop, panel, segBar, radial, needle, ring, bar, stat, readout,
+    BAR_H, TOP, BOTTOM, pageBottom, MARGIN, toMargin, frame, header, layer, onLayerDrop, panel, sectionRule, segBar, radial, needle, ring, bar, stat, readout,
     shiftLights, gear, chart, table, pill, tyres, gmeter, menuBar, stripes, button, onConfirm, smooth, hold, niceStep,
     fmt, isNum, clamp, mix, zoneColor, withAlpha, ramp,
 };
