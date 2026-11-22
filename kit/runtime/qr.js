@@ -19,6 +19,7 @@ const BLOCKS = {
     M: [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49],
 };
 const FORMAT_BITS = { L: 1, M: 0 };
+const ALPHANUMERIC = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
 
 /** Modules that carry data (and error correction) in a code of this version. */
 function rawModules(ver) {
@@ -33,6 +34,12 @@ function rawModules(ver) {
 const dataCodewords = (ver, ecl) => Math.floor(rawModules(ver) / 8) - ECC[ecl][ver] * BLOCKS[ecl][ver];
 /** Bytes that fit in one code: the data codewords less the mode (4 bits) and count (8 or 16 bits). */
 const capacity = (ver, ecl) => dataCodewords(ver, ecl) - (ver < 10 ? 2 : 3);
+function capacityAlphanumeric(ver, ecl) {
+    const bits = dataCodewords(ver, ecl) * 8, countBits = ver < 10 ? 9 : ver < 27 ? 11 : 13;
+    let n = 0;
+    while (4 + countBits + Math.floor((n + 1) / 2) * 11 + ((n + 1) % 2) * 6 <= bits) n++;
+    return n;
+}
 
 /* ---- Reed-Solomon over GF(256), polynomial 0x11D ---- */
 function gfMul(x, y) {
@@ -221,12 +228,8 @@ class Matrix {
     }
 }
 
-/** The data bits: byte mode, the count, the bytes, the terminator and the padding, as codewords. */
-function dataBits(bytes, ver, ecl) {
-    const bits = [], put = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); };
-    put(4, 4);
-    put(bytes.length, ver < 10 ? 8 : 16);
-    for (const b of bytes) put(b, 8);
+function finishBits(bits, ver, ecl) {
+    const put = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); };
     const cap = dataCodewords(ver, ecl) * 8;
     put(0, Math.min(4, cap - bits.length));
     put(0, (8 - bits.length % 8) % 8);
@@ -236,17 +239,41 @@ function dataBits(bytes, ver, ecl) {
     return out;
 }
 
+/** The data bits: byte mode, the count, the bytes, the terminator and the padding, as codewords. */
+function dataBits(bytes, ver, ecl) {
+    const bits = [], put = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); };
+    put(4, 4);
+    put(bytes.length, ver < 10 ? 8 : 16);
+    for (const b of bytes) put(b, 8);
+    return finishBits(bits, ver, ecl);
+}
+
+/** QR alphanumeric mode packs each pair of printable characters into 11 bits. */
+function alphanumericBits(text, ver, ecl) {
+    const bits = [], put = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); };
+    put(2, 4);
+    put(text.length, ver < 10 ? 9 : ver < 27 ? 11 : 13);
+    for (let i = 0; i + 1 < text.length; i += 2) {
+        put(ALPHANUMERIC.indexOf(text[i]) * 45 + ALPHANUMERIC.indexOf(text[i + 1]), 11);
+    }
+    if (text.length % 2) put(ALPHANUMERIC.indexOf(text[text.length - 1]), 6);
+    return finishBits(bits, ver, ecl);
+}
+
 /**
  * A QR code of bytes. opts.version: that version (an error if the bytes don't fit), else the smallest that fits;
  * opts.ecl: 'L' (default, 7 % may be lost) or 'M' (15 %).
  */
 function encode(bytes, opts) {
     const o = opts || {}, ecl = o.ecl === 'M' ? 'M' : 'L';
-    const data = Array.prototype.slice.call(bytes || []);
+    const alpha = o.mode === 'alphanumeric';
+    const data = alpha ? (Buffer.isBuffer(bytes) ? bytes.toString('ascii') : String(bytes || '')) : Array.prototype.slice.call(bytes || []);
     let ver = o.version;
-    if (!ver) { ver = 1; while (ver < 40 && capacity(ver, ecl) < data.length) ver++; }
-    if (ver < 1 || ver > 40 || capacity(ver, ecl) < data.length) throw new Error('QR: ' + data.length + ' bytes do not fit in version ' + ver);
-    const words = addEcc(dataBits(data, ver, ecl), ver, ecl);
+    const fits = (v) => alpha ? capacityAlphanumeric(v, ecl) >= data.length : capacity(v, ecl) >= data.length;
+    if (!ver) { ver = 1; while (ver < 40 && !fits(ver)) ver++; }
+    if (ver < 1 || ver > 40 || !fits(ver)) throw new Error('QR: ' + data.length + (alpha ? ' characters' : ' bytes') + ' do not fit in version ' + ver);
+    if (alpha && Array.from(data).some((c) => ALPHANUMERIC.indexOf(c) < 0)) throw new Error('QR: invalid alphanumeric character');
+    const words = addEcc(alpha ? alphanumericBits(data, ver, ecl) : dataBits(data, ver, ecl), ver, ecl);
     const mx = new Matrix(ver);
     mx.functionPatterns();
     mx.codewords(words);
@@ -261,4 +288,4 @@ function encode(bytes, opts) {
     return { version: ver, ecl, size: mx.size, get: (x, y) => mx.get(x, y), mask: best };
 }
 
-module.exports = { encode, capacity };
+module.exports = { encode, capacity, capacityAlphanumeric };

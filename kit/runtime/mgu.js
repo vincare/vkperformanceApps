@@ -569,7 +569,7 @@ function wireSettings(ctx) {
             const d = ctx.display;
             if (d.sheet && d.sheet.settings) { d.closeSheet(); return null; }
             // every app's last row: its log as QR codes (qrlog.js), for an issue sent without SSH
-            const qrRow = { label: 'QR log', value: 'The app\'s log as codes to photograph', open: () => qrLogSheet({ file: LOG_FILE, app: SPEC.id, version: SPEC.version }) };
+            const qrRow = { label: 'QR log', value: 'Scan each page to copy the app log text', open: () => qrLogSheet({ file: LOG_FILE, app: SPEC.id, version: SPEC.version }) };
             const sh = listSheet(settings, null, { version: SPEC.version, extra: () => settingsRows.concat([qrRow]) });
             sh.settings = true;
             sh.onClose = () => refresh();

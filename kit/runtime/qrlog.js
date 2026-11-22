@@ -1,14 +1,13 @@
 'use strict';
 /**
- * qrlog.js - Settings > QR log: the app's recent log as QR codes on screen, for a phone photo. Someone without
+ * qrlog.js - Settings > QR log: the app's recent log as QR codes on screen, for a phone scan or photo. Someone without
  * SSH can send the photos with an issue; kit/tools/qrlog_decode.py turns them back into the log.
  *
- * A code: a text line "MGULOG2 d<dictionary> <app> <version> <page>/<pages>" and a newline, then that page's lines
- * compressed (raw deflate with a preset dictionary of the apps' log words, qrlog-dict-<n>.txt). In a page a line's
- * time is "+<seconds> " after the line before (the first keeps hh:mm:ss). Each page compressed on its own: any photo
- * reads without the others. A phone's QR reader shows the first line, then gibberish.
+ * A code: an ASCII header "MGULOG3:D<dictionary>:<app>:<version>:<page>/<pages>:" followed by the page's
+ * compressed log encoded as Base45 (with a trailing sentinel). QR alphanumeric mode keeps this scan-friendly ASCII payload about the same
+ * size as the old binary form. The decoder accepts both MGULOG2 photos and scanned/copied MGULOG3 text.
  *
- *   pages(text, size, head)  the log cut into codes' worth of whole lines, the newest on page 1: [Buffer]
+ *   pages(text, size, head)  the log cut into codes' worth of whole lines, the newest on page 1: [ASCII Buffer]
  *   logText(file)            the log made short: times without the date, stack lines left out, a VIN masked
  *   qrLogSheet(opts)         the sheet (sheet.js): { file, app, version } -> a page with the code, page and size buttons
  *
@@ -82,17 +81,31 @@ const pack = (lines) => {
     return zlib.deflateRawSync(Buffer.from(relTimes(lines).join('\n'), 'utf8'), o);
 };
 // (no dictionary file: "d0", plain deflate, still read by the decoder)
-const magic = () => 'MGULOG2 d' + (dictionary() ? DICT : 0);
+const magic = () => 'MGULOG3:D' + (dictionary() ? DICT : 0);
+const BASE45 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+function base45(bytes) {
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 2) {
+        let n = bytes[i] * 256 + (i + 1 < bytes.length ? bytes[i + 1] : 0);
+        const a = n % 45; n = Math.floor(n / 45);
+        const b = n % 45; n = Math.floor(n / 45);
+        out += BASE45[a] + BASE45[b];
+        if (i + 1 < bytes.length) out += BASE45[n];
+    }
+    return out;
+}
 
 /**
  * The log cut into pages, each the most whole lines whose compressed size fits the size's code, from the newest back:
  * page 1 has the newest lines (oldest first within a page), and the oldest are left out when they don't all fit in
- * MAX_PAGES. -> [Buffer] (header line + deflate)
+ * MAX_PAGES. -> [ASCII Buffer] (header + Base45 compressed data)
  */
 function pages(text, size, head) {
-    const cap = qr.capacity(SIZES[size].version, 'L');
-    const top = (n, of) => magic() + ' ' + String(head || 'app').replace(/\s+/g, ' ').trim() + ' ' + n + '/' + of + '\n';
-    const room = cap - Buffer.byteLength(top(MAX_PAGES, MAX_PAGES));
+    const version = SIZES[size].version, cap = qr.capacityAlphanumeric(version, 'L');
+    const meta = String(head || 'app').replace(/[^A-Za-z0-9 .-]/g, '-').trim().split(/\s+/);
+    const app = (meta[0] || 'APP').toUpperCase(), appVersion = (meta[1] || '0').toUpperCase();
+    const top = (n, of) => magic() + ':' + app + ':' + appVersion + ':' + n + '/' + of + ':';
+    const packed = (a, b, of) => top(1, of).length + base45(pack(part(a, b))).length + 1;
     const lines = String(text || '').split('\n').filter((l) => l.length);
     // each page starts with its day (the "-- date" line before its first line), so every page reads alone
     const days = [];
@@ -103,17 +116,17 @@ function pages(text, size, head) {
     while (end > 0 && rev.length < MAX_PAGES) {
         // the most lines ending at `end` that fit (binary search: compressed size grows with the lines)
         let lo = 1, hi = end;
-        if (pack(part(end - 1, end)).length > room) { end--; continue; }   // one line too long alone: left out
+        if (packed(end - 1, end, MAX_PAGES) > cap) { end--; continue; }   // one line too long alone: left out
         while (lo < hi) {
             const mid = Math.ceil((lo + hi) / 2);
-            if (pack(part(end - mid, end)).length <= room) lo = mid; else hi = mid - 1;
+            if (packed(end - mid, end, MAX_PAGES) <= cap) lo = mid; else hi = mid - 1;
         }
         rev.push(pack(part(end - lo, end)));
         end -= lo;
     }
     if (!rev.length) rev.push(pack(['(the log is empty)']));
     const list = rev;
-    return list.map((z, i) => Buffer.concat([Buffer.from(top(i + 1, list.length), 'utf8'), z]));
+    return list.map((z, i) => Buffer.from(top(i + 1, list.length) + base45(z) + '0', 'ascii'));
 }
 
 /** The settings' QR log sheet. opts: { file (the app's log), app (its id), version, settings (for the size) } */
@@ -134,7 +147,7 @@ function qrLogSheet(opts) {
         { id: 'back', label: () => 'Back', run: () => 'close' },
     ];
     st.focus = 1;
-    const code = (i) => st.codes[i] || (st.codes[i] = qr.encode(st.list[i], { version: SIZES[st.size].version, ecl: 'L' }));
+    const code = (i) => st.codes[i] || (st.codes[i] = qr.encode(st.list[i], { version: SIZES[st.size].version, ecl: 'L', mode: 'alphanumeric' }));
     const setSize = (s) => {
         st.size = s; st.page = 0; load();
     };
@@ -167,8 +180,7 @@ function qrLogSheet(opts) {
             const tx = x0 + box + 50, tw = 1600 - 40 - tx;
             r.text('QR log', tx, TOP + 46, 34, t.text, { font: 'bold' });
             r.text('Page ' + (st.page + 1) + ' of ' + st.list.length, tx, TOP + 92, 26, t.text);
-            const help = ['Compressed app log · not a website link.', 'Photograph every page for support.', 'Newest log lines are on page 1.'];
-            // A phone camera should not open a URL: these codes carry compressed log text for photo decoding.
+            const help = ['Scan to copy diagnostic text · no web link.', 'Share each page with support.', 'Newest log lines are on page 1.'];
             help.forEach((h, i) => r.text(h, tx, TOP + 138 + i * 32, 22, t.dim));
             // the buttons: the controller's one lit (Next until the controller moves it)
             const by = TOP + 250, bw = Math.floor((tw - 16) / 2), sy = by + 68, ky = sy + 68;

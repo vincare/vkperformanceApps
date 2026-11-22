@@ -3,11 +3,12 @@
 
     pip install zxing-cpp pillow
     python3 kit/tools/qrlog_decode.py photo1.jpg photo2.jpg ...   (or a folder of photos)
+    python3 kit/tools/qrlog_decode.py scanned-code.txt
 
 Prints the log in time order (page 1 holds the newest lines, so it comes last) (a photo with several codes, or the same page twice, is fine). A page that
-didn't read is named, so you can ask for that photo again.
+didn't read is named, so you can ask for that photo again. A scanner's copied MGULOG3 text may also be saved to a .txt file and decoded.
 
-A code is a text line "MGULOG2 d<n> <app> <version> <page>/<pages>" and a newline, then the page's log lines
+A code is either the older binary MGULOG2 format or scanner-friendly ASCII MGULOG3 text, followed by the page's log lines
 compressed with raw deflate and the preset dictionary kit/runtime/qrlog-dict-<n>.txt (d0: none). In a page, a time
 after the first is "+<seconds>" since the line before; the decoder writes hh:mm:ss again.
 """
@@ -19,9 +20,11 @@ try:
     import zxingcpp
     from PIL import Image, ImageFilter, ImageOps
 except ImportError:
-    sys.exit('needs: pip install zxing-cpp pillow')
+    zxingcpp = None
 
 MAGIC = b'MGULOG2 '
+MAGIC_TEXT = b'MGULOG3:'
+BASE45 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:'
 DICTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'runtime')
 
 
@@ -47,8 +50,36 @@ def abs_times(text):
     return '\n'.join(out)
 
 
+def base45_decode(text):
+    """Decode the Base45 payload used by the scanner-friendly MGULOG3 QR text."""
+    values = {c: i for i, c in enumerate(BASE45)}
+    if len(text) % 3 == 1:
+        raise ValueError('bad Base45 length')
+    out = bytearray()
+    i = 0
+    while i < len(text):
+        count = 2 if len(text) - i == 2 else 3
+        n = values[text[i]] + values[text[i + 1]] * 45
+        if count == 3:
+            n += values[text[i + 2]] * 2025
+        if n > (255 if count == 2 else 65535):
+            raise ValueError('bad Base45 value')
+        if count == 2:
+            out.append(n)
+        else:
+            out.extend((n // 256, n % 256))
+        i += count
+    return bytes(out)
+
+
 def codes(path):
     """The QR codes' bytes in one photo (as is, then cleaned up: grey with more contrast, sharpened, bigger)."""
+    with open(path, 'rb') as f:
+        raw = f.read().strip()
+    if raw.startswith(MAGIC_TEXT) or raw.startswith(MAGIC):
+        return [raw]
+    if zxingcpp is None:
+        raise RuntimeError('photos need: pip install zxing-cpp pillow')
     img = ImageOps.exif_transpose(Image.open(path)).convert('RGB')
     grey = ImageOps.autocontrast(img.convert('L'), cutoff=1)
     sharp = grey.filter(ImageFilter.UnsharpMask(radius=3, percent=200, threshold=0))
@@ -65,6 +96,20 @@ def codes(path):
 
 def page(data):
     """A code's bytes -> (app version, page, pages, text) or None if it isn't a QR log code."""
+    if data.startswith(MAGIC_TEXT):
+        try:
+            fields = data.decode('ascii').split(':', 5)
+            if len(fields) != 6 or not fields[5].endswith('0'):
+                return None
+            _, d, app, version, page_no, payload = fields
+            n, of = (int(x) for x in page_no.split('/'))
+            compressed = base45_decode(payload[:-1])
+            preset = dictionary(int(d[1:]))
+            z = zlib.decompressobj(-15, zdict=preset) if preset else zlib.decompressobj(-15)
+            text = abs_times((z.decompress(compressed) + z.flush()).decode('utf8', 'replace'))
+            return app + ' ' + version, n, of, text
+        except (ValueError, IndexError, KeyError, OSError, zlib.error):
+            return None
     if not data.startswith(MAGIC) or b'\n' not in data:
         return None
     head, body = data.split(b'\n', 1)

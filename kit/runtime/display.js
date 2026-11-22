@@ -119,7 +119,19 @@ class Display {
         this.ui.onVisible((name, v) => {
             if (name === 'SETTINGS') { this._syncVisible(); if (!v) this._lost(); return; }
             if (name !== this.screen.name) return;
-            if (v) this.barOff = 0;                   // the HMI builds the screen afresh
+            if (v) {
+                this.barOff = 0;                       // the HMI builds the screen afresh
+                if (this.gpu && this.gpu.ready) {
+                    // Re-entry can follow a screen-size/placement change while this renderer stayed alive.
+                    // Refresh the viewport and force the app's first frame through the HMI's image cache.
+                    const oldLayoutKey = this.layoutKey;
+                    this._place();
+                    this.lastWords = null; this.bgShown = null;
+                    this.ui._invalidate && this.ui._invalidate();
+                    if (this.layoutKey === oldLayoutKey) this._layoutChanged();
+                    this.log.info('display: screen reopened; placement and first frame refreshed');
+                }
+            }
             if (!v) this.closeSheet();
             this._syncVisible();
         });
