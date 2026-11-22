@@ -2,10 +2,10 @@
   "id": "navisport",
   "title": "NaviSport",
   "description": "CarPlay map preview with live BMW power, torque and M SOUND MODE",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "vendor": "VKPERFORMANCE",
   "loggingId": "OAA7",
-  "iconGlyph": "dyno",
+  "iconGlyph": "navisport",
   "mguHmi": ["ID7"],
   "maxDiskUsage": 16777216,
   "requires": {

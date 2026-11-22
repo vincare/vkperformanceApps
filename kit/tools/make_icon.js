@@ -60,6 +60,15 @@ if (glyph === 'gauge') {
     }
     c.polyline(tq, 5, W);
     c.polyline(pw, 6, A);
+} else if (glyph === 'navisport') {
+    // Navigation route and destination pin, sized to stay clear of the app title.
+    const route = [[20, 118], [38, 102], [48, 87], [62, 75], [72, 59], [87, 47], [96, 40]];
+    c.polyline(route, 12, W);
+    c.polyline(route, 5, A);
+    c.convex([[85, 38], [119, 38], [102, 66]], A);
+    c.circle(102, 32, 20, A);
+    c.circle(102, 32, 9, W);
+    c.circle(102, 32, 4, '#10151b');
 } else if (glyph === 'brake') {
     // brake disc + caliper
     c.arc(64, 72, 40, 50, 0, 360, W);
@@ -107,10 +116,12 @@ if (glyph === 'gauge') {
     c.convex([[70, 82], [64, 94], [76, 94]], '#000000');     // nose
     for (let i = 0; i < 4; i++) c.fillRect(52 + i * 11, 104, 3, 16, '#000000');   // teeth
 } else if (glyph === 'ambient') {
-    // a door panel's light line in three colours, and the glow under it
-    c.strokeRoundRect(14, 30, 112, 80, 16, 6, W);
-    [[26, '#2a8cff'], [56, '#2fd27a'], [86, A]].forEach(([x, col]) => c.roundRect(x, 58, 28, 10, 5, col));
-    c.fillRect(40, 84, 60, 5, W);
+    // Clear ambient light strips within a compact door panel silhouette.
+    c.strokeRoundRect(20, 20, 100, 100, 16, 5, W);
+    c.line(36, 36, 36, 104, 3, W);
+    c.roundRect(48, 40, 56, 10, 5, '#ff355e');
+    c.roundRect(48, 65, 56, 10, 5, '#2a8cff');
+    c.roundRect(48, 90, 56, 10, 5, '#2fd27a');
 } else {
     c.strokeRoundRect(14, 14, 112, 112, 22, 6, W);
     c.text(glyph, 70, 88, 56, W, { font: 'bold', align: 'center' });
