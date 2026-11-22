@@ -385,6 +385,15 @@ mgu.run({
             mSoundEnabled = false;
         }
 
+        function mSoundActive() {
+            const requested = valveAuto.effective();
+            if (mSoundEnabled || requested === 'OPEN') return true;
+            if (requested === 'CLOSED') return false;
+            // In OEM mode the car follows its own drive-mode strategy. Sport,
+            // Sport+, and Sport Individual request the open-valve behavior.
+            return flapFor(drivingMode) === 'OPEN';
+        }
+
         function dynoSetup() {
             const weight = settings.get('dynoWeight');
             const loss = settings.get('dynoLoss');
@@ -1208,7 +1217,7 @@ mgu.run({
             });
             if (mSoundEnabled && !valveCanActuate()) resetMSound();
             const mSoundReady = valveCanActuate() && !valveController.state.busy && !mSoundBusy;
-            drawMSoundButton(cv, t, mSoundReady, mSoundEnabled, toggleMSoundMode);
+            drawMSoundButton(cv, t, mSoundReady, mSoundActive(), toggleMSoundMode);
         }
 
         async function render() {

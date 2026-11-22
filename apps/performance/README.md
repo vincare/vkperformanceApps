@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.26 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.27 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run. The two gauge limits can be changed
@@ -111,8 +111,10 @@ override expires.
 
 On Engine Data, **M SOUND MODE** requests OPEN from the same guarded controller;
 pressing it again returns control to BMW. The button shows only its name. It is
-red while the app's open request is active and grey when it is off or
-unavailable. It uses the default Armed setting and the same matched-DME checks as
+red while the app's open request is active or the vehicle is in Sport, Sport+,
+or Sport Individual, and grey for an active manual CLOSED request. In BMW's OEM
+mode, the indicator follows the selected driving mode; physical valve position
+is not read directly. It uses the default Armed setting and the same matched-DME checks as
 the Engine Config buttons. If diagnostics are starting or no supported DME is
 matched, taps still respond and the status panel explains why no command was sent.
 It controls the exhaust flap only; it does
