@@ -1,13 +1,16 @@
 # MoreAmbients
 
-MoreAmbients is an iDrive 7 canvas app with two ways to change the cabin lighting:
+MoreAmbients is an iDrive 7 canvas app with three lighting views:
 
+- **OEM** follows the BMW ambience layout. Its 36 named colour choices are sent immediately when selected; no separate Apply step is needed. Background and accent brightness are separate for discovered lower and upper zones. Night reduction dims both zones.
 - **BMW palette** requests one of BMW's 12 factory colour slots through `ComfortFunctionIuK` and shows the slot reported by the vehicle.
-- **Custom RGB** scans both BDC ambient-light buses first, then writes only to the healthy modules returned by that scan. The colour wheel, saturation, brightness, all/upper/lower zone choice, and six saved looks are included.
+- **Colour Studio** offers custom RGB, brightness, zone choice, and six saved looks.
 
-Custom RGB changes are static and held for 60 seconds at a time. While the app is running, the hold is renewed every 40 seconds. Restore BMW Lighting sends each discovered module the release request, which returns it to the car's own colour. If the app stops unexpectedly, the short hold expires by itself. A missing or stale vehicle-speed signal blocks colour changes; the car must be stationary.
+The app reads the vehicle speed and automatically scans both BDC ambient-light buses when it starts. It writes only to healthy modules returned by that scan. Custom RGB changes are held for 60 seconds and renewed every 40 seconds while the app is running. Restore BMW Lighting sends each discovered module a release request, returning control to the car. If the app stops unexpectedly, the short hold expires by itself. Colour and brightness changes require a fresh speed signal and a stationary vehicle.
 
-The RGB path is based on the public BMW BDC_G05 ambient LIN descriptions and the G20-capable `ambient_config` and `gs_ambient` implementations included in the user's AQ_MGU source collection. It does not use guessed module addresses, flashing effects, or unverified module responses. A positive BDC acknowledgement means the request was accepted; it does not prove the LED visibly changed. Hardware support must be confirmed in the vehicle.
+The OEM on/off switch uses BMW's ambient brightness request (zero to turn off, menu value to restore normal brightness). The night reduction is an app-controlled dimming preset, not an automatic light sensor.
+
+The RGB path is based on the public BMW BDC_G05 ambient LIN descriptions and the G20-capable `ambient_config` and `gs_ambient` implementations included in the user's AQ_MGU source collection. It does not use guessed module addresses or flashing effects. A positive BDC acknowledgement means the request was accepted; it does not prove the LED visibly changed. If no RGB modules are discovered, custom colours remain unavailable and the car's lighting is left unchanged. Hardware support must be confirmed in the vehicle.
 
 Factory colour slot numbers have vehicle-specific colours. The app therefore displays slot numbers, not promised colour names. BMW's ambient-light system must be enabled in the vehicle for those slots to be visible.
 

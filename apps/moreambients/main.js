@@ -23,6 +23,14 @@ const C = {
     cyan: '#54D9FF', blue: '#4B8BFF', violet: '#9C73FF', pink: '#EE5AAE',
     green: '#63D99B', amber: '#F4BE5E', red: '#F35C65',
 };
+const OEM_COLORS = [
+    ['DARK RED', '#6B0F1A'], ['RED', '#F0172F'], ['CRIMSON', '#B00035'], ['RUBY', '#8B001D'], ['BURGUNDY', '#5C0A24'], ['CORAL', '#FF735A'],
+    ['ORANGE', '#FF5A1F'], ['AMBER', '#FF9D00'], ['GOLD', '#FFC400'], ['YELLOW', '#FFE600'], ['LIME', '#B7E000'], ['MINT', '#51D7A1'],
+    ['GREEN', '#00C853'], ['EMERALD', '#007F5F'], ['TURQUOISE', '#00BFA5'], ['TEAL', '#008C95'], ['CYAN', '#00D7E8'], ['ICE BLUE', '#8CEBFF'],
+    ['SKY BLUE', '#4DB8FF'], ['BMW BLUE', '#1582FF'], ['ELECTRIC BLUE', '#005CFF'], ['DEEP BLUE', '#1533B8'], ['NAVY BLUE', '#14204F'], ['INDIGO', '#3F32B8'],
+    ['VIOLET', '#6F37D5'], ['PURPLE', '#9A35D5'], ['MAGENTA', '#E100B5'], ['HOT PINK', '#FF3C9D'], ['PINK', '#FF75B5'], ['ROSE', '#FF557A'],
+    ['LAVENDER', '#BCA7FF'], ['LILAC', '#D4A7FF'], ['WARM WHITE', '#FFD9A8'], ['SOFT WHITE', '#FFEED5'], ['COOL WHITE', '#E9F5FF'], ['ICE WHITE', '#F7FCFF'],
+].map(([name, color]) => ({ name, color, rgb: [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) * 254 / 255) }));
 const UPPER_LOC = new Set([0x05, 0x06, 0x09, 0x0a, 0x0c, 0x0d, 0x10, 0x11, 0x13, 0x14, 0x15, 0x16,
     0x17, 0x18, 0x19, 0x1a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x35, 0x36, 0x37,
     0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46,
@@ -78,7 +86,7 @@ function readSlot(v) {
     const n = match ? Number(match[1]) : Number(raw);
     return Number.isInteger(n) && n >= 1 && n <= 12 ? n : null;
 }
-function factoryRequest(n) {
+function factoryRequest(n, brightness) {
     const unfilled = 'SIGNAL_UNBEFUELLT';
     return {
         controlMenuAmbientePanoramicRoofInteriorLighting: 'FARBAUSWAHL_' + n,
@@ -89,7 +97,7 @@ function factoryRequest(n) {
         controlHueValueLayer1IndividualGroup: 255,
         controlHueValueLayer2IndividualGroup: 255,
         controlHueValueLayer3IndividualGroup: 255,
-        controlBrightnessValueBrightnessOffsetAmbientePanoramicRoofInteriorLighting: 255,
+        controlBrightnessValueBrightnessOffsetAmbientePanoramicRoofInteriorLighting: brightness === undefined ? 255 : brightness,
     };
 }
 function shortError(e) { return String(e && e.message || e || 'unknown').replace(/[\r\n]+/g, ' '); }
@@ -100,11 +108,13 @@ mgu.run({
         const state = {
             page: 'studio', zone: 'all', slot: 1, liveSlot: null, speed: null, speedAt: 0,
             speedAvailable: false, proxy: null, diag: null, modules: [], scan: 'not scanned',
-            busy: false, notice: 'Choose a colour, then scan the car to begin.', noticeColor: C.muted,
+            busy: false, notice: 'Module scan starts automatically when the app opens.', noticeColor: C.muted,
             scanBusy: false, applyBusy: false, activeCustom: false, renewTimer: null,
+            oemPaletteOpen: false, oemSelected: null, oemBackground: 62, oemAccent: 76,
+            oemNight: false, oemEnabled: true, oemWantApply: false,
             favorites: [], favorite: 0, upperRead: null, lowerRead: null, customUpper: null, customLower: null, customOther: null,
         };
-        let stopped = false, renderTimer = null, renderQueued = false;
+        let stopped = false, renderTimer = null, autoScanTimer = null, renderQueued = false;
         let lastAction = Object.create(null), hitboxes = [];
         const favFile = path.join(ctx.dataDir, 'moreambients_favourites.json');
         const freshSpeed = () => !!(state.speedAt && Date.now() - state.speedAt < 8000 && isFiniteNumber(state.speed));
@@ -141,7 +151,12 @@ mgu.run({
         async function watchSignals() {
             try {
                 const watch = await ctx.signals.watch(LIGHT, '1', {
-                    statusAmbientLightInteriorColour: (v) => { state.liveSlot = readSlot(v); queueRender(); },
+                    statusAmbientLightInteriorColour: (v) => {
+                        state.liveSlot = readSlot(v);
+                        const brightness = v && v.statusBrightnessValueBrightnessOffsetAmbientePanoramicRoofInteriorLighting;
+                        if (isFiniteNumber(brightness)) state.oemEnabled = brightness !== 0;
+                        queueRender();
+                    },
                 }, log, { pollMs: 5000 });
                 if (watch) { state.proxy = watch.proxy || null; if (watch.shutdown) ctx._moreAmbientWatches.push(watch); }
                 if (watch && watch.error) log.warn('BMW ambient palette: ' + watch.error);
@@ -189,7 +204,10 @@ mgu.run({
                 state.scan = 'SCAN FAILED';
                 setNotice('SCAN FAILED · ' + shortError(e).slice(0, 76), C.red);
                 log.warn('ambient module scan: ' + shortError(e));
-            } finally { state.scanBusy = false; queueRender(); }
+            } finally {
+                state.scanBusy = false; queueRender();
+                if (state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
+            }
         }
         function average(list) {
             if (!list || !list.length) return null;
@@ -219,7 +237,7 @@ mgu.run({
                 modules: state.modules.filter((m) => !m.fault && m.part === 'unknown') });
             return looks.filter((look) => look.modules.length);
         }
-        async function applyCustom(isRenewal) {
+        async function applyCustom(isRenewal, requestedColour, requestedZones) {
             if (stopped || state.applyBusy || state.scanBusy || state.busy) return;
             if (!canChangeColor()) {
                 if (isRenewal) {
@@ -229,22 +247,27 @@ mgu.run({
                 return;
             }
             if (!state.modules.length) {
-                if (!isRenewal) setNotice('SCAN LIGHT MODULES FIRST · THIS ONLY READS THE CAR', C.amber);
+                if (!isRenewal) setNotice('NO DISCOVERED RGB MODULES · BMW FACTORY LIGHTING IS UNCHANGED', C.amber);
                 return;
             }
-            const chosen = state.zone === 'all' ? ['upper', 'lower', 'other'] : [state.zone];
-            const colour = { rgb: rgb(), brightness: brightnessValue() };
+            const chosen = isRenewal ? [] : (requestedZones || (state.zone === 'all' ? ['upper', 'lower', 'other'] : [state.zone]));
             const healthy = state.modules.filter((m) => !m.fault);
-            const applicable = chosen.filter((zone) => healthy.some((m) => zone === 'other' ? m.part === 'unknown' : m.part === zone));
-            if (!applicable.length) { setNotice('NO HEALTHY LIGHT MODULES FOUND IN THIS ZONE', C.amber); return; }
-            if (applicable.indexOf('upper') >= 0) state.customUpper = Object.assign({}, colour);
-            if (applicable.indexOf('lower') >= 0) state.customLower = Object.assign({}, colour);
-            if (applicable.indexOf('other') >= 0) state.customOther = Object.assign({}, colour);
+            const applicable = isRenewal ? [] : chosen.filter((zone) => healthy.some((m) => zone === 'other' ? m.part === 'unknown' : m.part === zone));
+            if (!isRenewal && !applicable.length) { setNotice('NO HEALTHY LIGHT MODULES FOUND IN THIS ZONE', C.amber); return; }
+            const fallback = requestedColour && requestedColour.rgb ? requestedColour : { rgb: rgb(), brightness: brightnessValue() };
+            const colorFor = (zone) => {
+                const map = requestedColour && requestedColour.byZone;
+                const value = map && (map[zone] || map.lower || map.upper);
+                return value && value.rgb ? value : fallback;
+            };
+            if (applicable.indexOf('upper') >= 0) state.customUpper = Object.assign({}, colorFor('upper'));
+            if (applicable.indexOf('lower') >= 0) state.customLower = Object.assign({}, colorFor('lower'));
+            if (applicable.indexOf('other') >= 0) state.customOther = Object.assign({}, colorFor('other'));
             const looks = activeZoneLooks();
             if (!looks.length) { setNotice('NO HEALTHY MODULES FOUND IN THIS ZONE', C.amber); return; }
             clearTimeout(state.renewTimer); state.renewTimer = null;
             state.applyBusy = true;
-            if (!isRenewal) setNotice('SENDING COLOUR TO ' + looks.map((x) => x.modules.length).reduce((a, b) => a + b, 0) + ' DISCOVERED MODULES…', C.cyan);
+            if (!isRenewal) setNotice('APPLYING ' + (state.oemSelected ? state.oemSelected.name : 'COLOUR') + ' TO ' + looks.map((x) => x.modules.length).reduce((a, b) => a + b, 0) + ' MODULES…', C.cyan);
             let ok = 0, failed = 0;
             try {
                 // Renew both selected zones when needed; only use module addresses returned by the live BDC scan.
@@ -293,6 +316,90 @@ mgu.run({
                 setNotice('BMW COLOUR SLOT ' + String(state.slot).padStart(2, '0') + ' REQUESTED · WAITING FOR VEHICLE STATUS', C.green);
             } catch (e) { setNotice('BMW COLOUR REQUEST FAILED · ' + shortError(e).slice(0, 65), C.red); log.warn('factory colour: ' + shortError(e)); }
         }
+        function brightnessRequest(value) {
+            const request = factoryRequest(state.liveSlot || state.slot, value);
+            request.controlMenuAmbientePanoramicRoofInteriorLighting = 'SIGNAL_UNBEFUELLT';
+            return request;
+        }
+        async function setOemLightingEnabled(enabled) {
+            if (!canChangeColor()) return false;
+            if (!state.proxy) { setNotice('BMW AMBIENT LIGHT CONTROL IS NOT AVAILABLE', C.amber); return false; }
+            try {
+                if (!enabled && state.activeCustom) await restoreBmw();
+                await ctx.signals.set(state.proxy, 'ambientLightInteriorColour', brightnessRequest(enabled ? 255 : 0));
+                state.oemEnabled = !!enabled;
+                setNotice(enabled ? 'AMBIENT LIGHTING ON' : 'AMBIENT LIGHTING OFF', C.green);
+                return true;
+            } catch (e) {
+                setNotice('AMBIENT LIGHT REQUEST FAILED · ' + shortError(e).slice(0, 64), C.red);
+                log.warn('ambient on/off: ' + shortError(e));
+                return false;
+            }
+        }
+        function effectiveOemBrightness(value) {
+            return clamp(Math.round(value * (state.oemNight ? 0.45 : 1)), 10, 100);
+        }
+        async function applyOemSelection() {
+            if (!state.oemSelected || stopped) return;
+            if (state.scanBusy) { state.oemWantApply = true; setNotice('COLOUR READY · APPLYING WHEN MODULE SCAN FINISHES', C.cyan); return; }
+            if (!state.modules.length) {
+                if (state.scan === 'not scanned') { state.oemWantApply = true; setNotice('COLOUR READY · WAITING FOR AUTOMATIC MODULE SCAN', C.cyan); return; }
+                state.oemWantApply = false;
+                setNotice('NO RGB MODULES FOUND · BMW LIGHTING WAS NOT CHANGED', C.amber);
+                return;
+            }
+            if (!state.oemEnabled) {
+                const enabled = await setOemLightingEnabled(true);
+                if (!enabled) return;
+            }
+            state.oemWantApply = false;
+            const color = {
+                byZone: {
+                    upper: { rgb: state.oemSelected.rgb, brightness: effectiveOemBrightness(state.oemAccent) },
+                    lower: { rgb: state.oemSelected.rgb, brightness: effectiveOemBrightness(state.oemBackground) },
+                    other: { rgb: state.oemSelected.rgb, brightness: effectiveOemBrightness(Math.round((state.oemAccent + state.oemBackground) / 2)) },
+                },
+            };
+            await applyCustom(false, color, ['upper', 'lower', 'other']);
+        }
+        async function applyOemBrightness() {
+            if (state.oemSelected) return applyOemSelection();
+            const healthy = state.modules.filter((m) => !m.fault);
+            if (healthy.length) {
+                if (!state.oemEnabled && !await setOemLightingEnabled(true)) return;
+                const byZone = {};
+                ['upper', 'lower', 'other'].forEach((zone) => {
+                    const modules = healthy.filter((m) => zone === 'other' ? m.part === 'unknown' : m.part === zone);
+                    const color = average(modules);
+                    if (!color) return;
+                    const base = zone === 'upper' ? state.oemAccent : zone === 'lower' ? state.oemBackground :
+                        Math.round((state.oemAccent + state.oemBackground) / 2);
+                    byZone[zone] = { rgb: color, brightness: effectiveOemBrightness(base) };
+                });
+                return applyCustom(false, { byZone }, ['upper', 'lower', 'other']);
+            }
+            const averageBrightness = effectiveOemBrightness(Math.round((state.oemBackground + state.oemAccent) / 2));
+            if (!canChangeColor()) return;
+            if (!state.proxy) { setNotice('BMW AMBIENT LIGHT CONTROL IS NOT AVAILABLE', C.amber); return; }
+            try {
+                await ctx.signals.set(state.proxy, 'ambientLightInteriorColour', brightnessRequest(Math.round(averageBrightness * 2.54)));
+                setNotice('BMW AMBIENT BRIGHTNESS UPDATED', C.green);
+            } catch (e) { setNotice('BRIGHTNESS REQUEST FAILED · ' + shortError(e).slice(0, 64), C.red); }
+        }
+        async function adjustOemBrightness(zone, value) {
+            if (zone === 'background') state.oemBackground = clamp(value, 10, 100);
+            else state.oemAccent = clamp(value, 10, 100);
+            queueRender();
+            return applyOemBrightness();
+        }
+        async function selectOemColor(color) {
+            state.oemSelected = color;
+            state.oemPaletteOpen = true;
+            queueRender();
+            if (!state.oemEnabled && !await setOemLightingEnabled(true)) return;
+            if (state.scanBusy) { state.oemWantApply = true; setNotice('COLOUR READY · APPLYING WHEN MODULE SCAN FINISHES', C.cyan); return; }
+            await applyOemSelection();
+        }
         function changeSetting(key, delta, min, max) {
             const n = clamp(Number(settings.get(key) || 0) + delta, min, max);
             settings.set(key, n); queueRender();
@@ -313,9 +420,21 @@ mgu.run({
         }
         function chooseFavorite(step) { state.favorite = (state.favorite + step + FAVOURITES) % FAVOURITES; queueRender(); }
         function changeZone() { state.zone = state.zone === 'all' ? 'upper' : state.zone === 'upper' ? 'lower' : 'all'; queueRender(); }
+        function setPage(page) { state.page = page; queueRender(); }
         function toggleView() { state.page = state.page === 'studio' ? 'bmw' : 'studio'; queueRender(); }
         const actions = {
             view: toggleView, zone: changeZone,
+            studioPage: () => setPage('studio'), bmwPage: () => setPage('bmw'), oemPage: () => setPage('oem'),
+            oemColorPanel: () => { state.oemPaletteOpen = !state.oemPaletteOpen; queueRender(); },
+            oemLight: async () => {
+                const enabled = await setOemLightingEnabled(!state.oemEnabled);
+                if (enabled && state.oemSelected) await applyOemSelection();
+            },
+            oemNight: async () => { state.oemNight = !state.oemNight; queueRender(); await applyOemBrightness(); },
+            backgroundDown: () => adjustOemBrightness('background', state.oemBackground - 10),
+            backgroundUp: () => adjustOemBrightness('background', state.oemBackground + 10),
+            accentDown: () => adjustOemBrightness('accent', state.oemAccent - 10),
+            accentUp: () => adjustOemBrightness('accent', state.oemAccent + 10),
             hueMinus: () => changeSetting('hue', -15, 0, 345), huePlus: () => changeSetting('hue', 15, 0, 345),
             satMinus: () => changeSetting('saturation', -10, 0, 100), satPlus: () => changeSetting('saturation', 10, 0, 100),
             brightnessMinus: () => changeSetting('brightness', -10, 10, 100), brightnessPlus: () => changeSetting('brightness', 10, 10, 100),
@@ -331,6 +450,7 @@ mgu.run({
             BTN_BRIGHTNESS_PLUS: 'brightnessPlus', BTN_SCAN: 'scan', BTN_APPLY: 'apply', BTN_RESTORE: 'restore',
             BTN_FACTORY_PREV: 'factoryPrev', BTN_FACTORY_NEXT: 'factoryNext', BTN_FACTORY_APPLY: 'factoryApply',
             BTN_FAV_PREV: 'favPrev', BTN_FAV_NEXT: 'favNext', BTN_FAV_SAVE: 'favSave', BTN_FAV_LOAD: 'favLoad',
+            BTN_STUDIO: 'studioPage', BTN_BMW: 'bmwPage', BTN_OEM: 'oemPage',
         };
         Object.keys(clickBindings).forEach((button) => {
             const key = clickBindings[button];
@@ -412,7 +532,7 @@ mgu.run({
                 cv.strokeRoundRect(x, y, 32, 28, 8, 1, '#606D80');
                 hitboxes.push({ x, y, w: 32, h: 28, key: 'quick', hue: h, sat: quickSat[i] });
             });
-            cv.text('Tap a swatch or ring to preview. The car changes only after Apply.', 458, 364, 9, C.dim, { font: 'bold' });
+            cv.text('Preview a colour, then apply it to the car.', 458, 364, 9, C.dim, { font: 'bold' });
             cv.text(state.activeCustom ? 'CUSTOM COLOUR ACTIVE' : 'BMW COLOUR STAYS ACTIVE UNTIL APPLY', 458, 390, 8,
                 state.activeCustom ? C.green : C.dim, { font: 'bold', spacing: 0.55 });
 
@@ -472,13 +592,120 @@ mgu.run({
             addButton(cv, 1485, 441, 75, 38, 'NEXT', 'factoryNext', { size: 9 });
             cv.text(state.notice, 58, 486, 9, state.noticeColor, { font: 'bold', spacing: 0.5 });
         }
+        function drawOemPage(cv, t) {
+            G.panel(cv, t, 24, 72, 384, 422, 'AMBIENCE');
+            G.panel(cv, t, 424, 72, 696, 422, state.oemPaletteOpen ? 'COLOR' : 'OEM CONTROLS');
+            G.panel(cv, t, 1136, 72, 440, 422, 'CABIN PREVIEW');
+
+            cv.text('Ambient lighting', 48, 126, 14, C.white, { font: 'bold' });
+            cv.text(state.oemEnabled ? 'ON' : 'OFF', 48, 145, 8, state.oemEnabled ? C.green : C.dim, { font: 'bold', spacing: 1 });
+            addButton(cv, 294, 108, 90, 39, state.oemEnabled ? 'ON' : 'OFF', 'oemLight', {
+                primary: state.oemEnabled, accent: state.oemEnabled ? C.green : C.red, size: 10,
+            });
+            cv.fillRect(44, 157, 344, 1, C.edge);
+
+            const colorY = 168;
+            cv.roundRect(42, colorY, 348, 50, 9, state.oemPaletteOpen ? '#1B2837' : '#151A23');
+            cv.strokeRoundRect(42, colorY, 348, 50, 9, state.oemPaletteOpen ? 1.5 : 1, state.oemPaletteOpen ? C.cyan : C.edge);
+            cv.text('COLOR', 57, colorY + 22, 11, C.white, { font: 'bold', spacing: 0.7 });
+            cv.text(state.oemSelected ? state.oemSelected.name : 'CHOOSE A COLOUR', 57, colorY + 39, 8, C.muted, { font: 'bold', spacing: 0.45 });
+            cv.roundRect(319, colorY + 13, 54, 24, 5, state.oemSelected ? state.oemSelected.color : '#273142');
+            cv.text(state.oemPaletteOpen ? 'CLOSE' : '›', 365, colorY + 31, 12, C.white, { align: 'right', font: 'bold' });
+            hitboxes.push({ x: 42, y: colorY, w: 348, h: 50, key: 'oemColorPanel' });
+
+            function slider(label, value, y, zone, downKey, upKey, trackKey) {
+                cv.text(label, 48, y, 10, C.white, { font: 'bold', spacing: 0.75 });
+                cv.text(String(value) + '%', 375, y, 10, C.cyan, { align: 'right', font: 'bold' });
+                addButton(cv, 47, y + 12, 30, 26, '−', downKey, { size: 16 });
+                const tx = 87, ty = y + 21, tw = 253;
+                cv.roundRect(tx, ty, tw, 8, 4, '#28303C');
+                const active = Math.max(1, Math.round(tw * value / 100));
+                cv.roundRect(tx, ty, active, 8, 4, state.oemSelected ? state.oemSelected.color : C.cyan);
+                for (let i = 1; i < 10; i++) cv.fillRect(tx + Math.round(tw * i / 10), ty - 2, 1, 12, '#778292');
+                addButton(cv, 350, y + 12, 30, 26, '+', upKey, { size: 16 });
+                hitboxes.push({ x: tx, y: y + 10, w: tw, h: 30, key: trackKey, zone });
+            }
+            slider('BACKGROUND LIGHT', state.oemBackground, 235, 'background', 'backgroundDown', 'backgroundUp', 'oemBrightness');
+            slider('ACCENT LIGHTING', state.oemAccent, 316, 'accent', 'accentDown', 'accentUp', 'oemBrightness');
+
+            cv.fillRect(44, 385, 344, 1, C.edge);
+            cv.text('REDUCED FOR NIGHT DRIVING', 48, 411, 9, C.white, { font: 'bold', spacing: 0.65 });
+            cv.text(state.oemNight ? 'DIMMED' : 'STANDARD', 48, 431, 8, state.oemNight ? C.cyan : C.dim, { font: 'bold', spacing: 0.65 });
+            addButton(cv, 294, 396, 90, 38, state.oemNight ? 'ON' : 'OFF', 'oemNight', {
+                primary: state.oemNight, accent: C.blue, size: 10,
+            });
+            cv.text(state.notice, 48, 481, 8, state.noticeColor, { font: 'bold', spacing: 0.35 });
+
+            if (state.oemPaletteOpen) {
+                cv.text('36 NAMED COLOURS · TAP TO APPLY', 446, 105, 8, C.muted, { font: 'bold', spacing: 0.9 });
+                addButton(cv, 1025, 88, 74, 22, 'DONE', 'oemColorPanel', { accent: C.violet, size: 8 });
+                const x0 = 442, y0 = 125, cw = 104, ch = 46, gx = 7, gy = 7;
+                OEM_COLORS.forEach((color, i) => {
+                    const col = i % 6, row = Math.floor(i / 6), x = x0 + col * (cw + gx), y = y0 + row * (ch + gy);
+                    const selected = state.oemSelected && state.oemSelected.name === color.name;
+                    cv.roundRect(x, y, cw, ch, 7, selected ? '#1B2938' : '#111722');
+                    cv.strokeRoundRect(x, y, cw, ch, 7, selected ? 1.5 : 0.8, selected ? C.cyan : C.edge);
+                    cv.roundRect(x + 7, y + 9, 4, ch - 18, 2, color.color);
+                    cv.text(color.name, x + 17, y + 27, 8, C.white, { font: 'bold', spacing: 0.35 });
+                    hitboxes.push({ x, y, w: cw, h: ch, key: 'oemColor', color });
+                });
+                cv.text(state.scanBusy ? 'SCANNING MODULES AUTOMATICALLY…' : state.modules.length ?
+                    state.modules.filter((m) => !m.fault).length + ' HEALTHY MODULES · COLOUR IS SENT ON SELECTION' :
+                    'WAITING FOR AUTOMATIC MODULE SCAN', 442, 475, 8, state.modules.length ? C.green : C.dim,
+                { font: 'bold', spacing: 0.45 });
+            } else {
+                cv.text('Tap COLOR to open the palette.', 458, 150, 16, C.white, { font: 'bold' });
+                cv.text('Every named colour is sent as soon as you select it.', 458, 178, 10, C.muted, { font: 'bold' });
+                cv.roundRect(458, 212, 222, 102, 12, state.oemSelected ? state.oemSelected.color : '#151D29');
+                cv.strokeRoundRect(458, 212, 222, 102, 12, 1, C.edge);
+                const selectedInk = state.oemSelected && state.oemSelected.rgb.reduce((sum, channel) => sum + channel, 0) / 3 > 145 ? '#10141B' : C.white;
+                cv.text(state.oemSelected ? state.oemSelected.name : 'BMW OEM LIGHTING', 479, 265, 15,
+                    state.oemSelected ? selectedInk : C.white, { font: 'bold', spacing: 0.8 });
+                cv.text(state.scanBusy ? 'AUTOMATIC SCAN IN PROGRESS' : state.scan.toUpperCase(), 458, 355, 9,
+                    state.modules.length ? C.green : C.muted, { font: 'bold', spacing: 0.7 });
+                cv.text(state.modules.length ? String(state.modules.filter((m) => !m.fault).length) + ' HEALTHY LIGHT MODULES' :
+                    'Module scan starts automatically when the app opens.', 458, 379, 9, C.dim, { font: 'bold' });
+                if (!state.modules.length && !state.scanBusy) addButton(cv, 458, 411, 172, 34, 'RETRY SCAN', 'scan', { accent: C.blue, size: 9 });
+                cv.text('The car must be stationary before a colour can be changed.', 458, 475, 8, C.dim, { font: 'bold' });
+            }
+
+            const px = 1158, py = 122, pw = 396, ph = 218;
+            const upper = state.oemSelected ? state.oemSelected.color : '#263244';
+            const lower = state.oemSelected ? state.oemSelected.color : '#263244';
+            cv.roundRect(px, py, pw, ph, 24, '#0A0E14');
+            cv.strokeRoundRect(px, py, pw, ph, 24, 1.5, '#3A4658');
+            cv.roundRect(px + 25, py + 25, pw - 50, ph - 50, 20, '#111824');
+            cv.strokeRoundRect(px + 25, py + 25, pw - 50, ph - 50, 20, '#263243');
+            cv.roundRect(px + 50, py + 44, pw - 100, 7, 4, upper);
+            cv.roundRect(px + 50, py + 61, 7, 91, 4, upper);
+            cv.roundRect(px + pw - 57, py + 61, 7, 91, 4, upper);
+            cv.roundRect(px + 83, py + 143, 85, 6, 3, lower);
+            cv.roundRect(px + pw - 168, py + 143, 85, 6, 3, lower);
+            cv.roundRect(px + 174, py + 73, 48, 82, 12, '#0A0E14');
+            cv.strokeRoundRect(px + 174, py + 73, 48, 82, 12, 1, '#344154');
+            cv.roundRect(px + 91, py + 86, 52, 46, 14, '#1A2330');
+            cv.roundRect(px + pw - 143, py + 86, 52, 46, 14, '#1A2330');
+            cv.circle(px + 66, py + 177, 3, lower); cv.circle(px + pw - 66, py + 177, 3, lower);
+
+            cv.text(state.oemSelected ? state.oemSelected.name : 'BMW FACTORY COLOUR', 1158, 374, 12, C.white, { font: 'bold', spacing: 0.8 });
+            cv.text(state.oemSelected ? hex(state.oemSelected.rgb) : 'SELECT A COLOUR', 1554, 374, 10, C.cyan, { align: 'right', font: 'bold' });
+            cv.text('BACKGROUND', 1158, 411, 8, C.dim, { font: 'bold', spacing: 0.8 });
+            cv.text(String(effectiveOemBrightness(state.oemBackground)) + '%', 1554, 411, 9, C.white, { align: 'right', font: 'bold' });
+            cv.text('ACCENT', 1158, 435, 8, C.dim, { font: 'bold', spacing: 0.8 });
+            cv.text(String(effectiveOemBrightness(state.oemAccent)) + '%', 1554, 435, 9, C.white, { align: 'right', font: 'bold' });
+            cv.roundRect(1158, 457, 396, 23, 11, state.scanBusy ? '#302718' : state.modules.length ? '#123025' : '#1B2029');
+            cv.text(state.scanBusy ? 'SCANNING BMW LIGHT MODULES' : state.modules.length ?
+                'AUTO SCAN  ·  ' + state.modules.filter((m) => !m.fault).length + ' READY' : 'AUTO SCAN  ·  ' + state.scan.toUpperCase(),
+            1356, 473, 8, state.scanBusy ? C.amber : state.modules.length ? C.green : C.muted, { align: 'center', font: 'bold', spacing: 0.45 });
+        }
         async function render() {
             if (stopped || !ui.isVisible('MAIN')) return;
             hitboxes = [];
             const t = ctx.theme(), cv = ctx.canvas(W, H).clear(C.bg);
             G.frame(cv, t, ['MoreAmbients'], 0, [{ text: state.activeCustom ? 'CUSTOM RGB' : 'BMW LIGHTING', color: state.activeCustom ? 'good' : 'dim' }]);
             cv.text('MORE AMBIENTS', 28, 60, 16, C.white, { font: 'bold', spacing: 1.5 });
-            cv.text('CABIN LIGHTING STUDIO', 194, 59, 8, C.dim, { font: 'bold', spacing: 1.2 });
+            cv.text(state.page === 'oem' ? 'OEM AMBIENCE' : state.page === 'bmw' ? 'BMW FACTORY PALETTE' : 'CABIN LIGHTING STUDIO',
+                194, 59, 8, C.dim, { font: 'bold', spacing: 1.2 });
             cv.roundRect(1284, 41, 146, 24, 12, state.activeCustom ? '#143629' : '#171C26');
             cv.circle(1301, 53, 4, state.activeCustom ? C.green : C.dim);
             cv.text(state.activeCustom ? 'CUSTOM ACTIVE' : 'BMW CONTROL', 1313, 57, 8, state.activeCustom ? C.green : C.muted,
@@ -486,9 +713,13 @@ mgu.run({
             cv.roundRect(1441, 41, 133, 24, 12, freshSpeed() ? state.speed <= 1 ? '#143629' : '#3B2D19' : '#1D2028');
             cv.text(freshSpeed() ? state.speed.toFixed(0) + ' KM/H' : 'SPEED --', 1508, 57, 8,
                 freshSpeed() ? state.speed <= 1 ? C.green : C.amber : C.dim, { align: 'center', font: 'bold' });
-            addButton(cv, 1120, 41, 146, 24, state.page === 'studio' ? 'BMW PALETTE' : 'COLOUR STUDIO', 'view', { accent: C.violet, size: 8 });
+            addButton(cv, 900, 41, 94, 24, 'STUDIO', 'studioPage', { primary: state.page === 'studio', accent: C.violet, size: 8 });
+            addButton(cv, 1001, 41, 94, 24, 'BMW', 'bmwPage', { primary: state.page === 'bmw', accent: C.violet, size: 8 });
+            addButton(cv, 1102, 41, 94, 24, 'OEM', 'oemPage', { primary: state.page === 'oem', accent: C.cyan, size: 9 });
             cv.fillRect(24, 66, 1552, 1, '#28313E');
-            if (state.page === 'studio') drawStudio(cv, t); else drawBmwPage(cv, t);
+            if (state.page === 'studio') drawStudio(cv, t);
+            else if (state.page === 'bmw') drawBmwPage(cv, t);
+            else drawOemPage(cv, t);
             return ui.image('MAIN_GFX', cv);
         }
         function hitTest(x, y) {
@@ -496,6 +727,11 @@ mgu.run({
                 const b = hitboxes[i]; if (x < b.x || x > b.x + b.w || y < b.y || y > b.y + b.h) continue;
                 if (b.key === 'quick') { settings.set('hue', b.hue); settings.set('saturation', b.sat); queueRender(); return; }
                 if (b.key === 'slot') { state.slot = b.slot; return setFactorySlot(b.slot); }
+                if (b.key === 'oemColor') return selectOemColor(b.color);
+                if (b.key === 'oemBrightness') {
+                    const value = clamp(Math.round((10 + (x - b.x) / b.w * 90) / 10) * 10, 10, 100);
+                    return adjustOemBrightness(b.zone, value);
+                }
                 if (b.key === 'brightnessTrack') {
                     settings.set('brightness', clamp(Math.round((x - (740 + 116)) / 332 * 100 / 10) * 10, 10, 100));
                     queueRender(); return;
@@ -521,8 +757,12 @@ mgu.run({
         try { state.diag = await new Diag(ctx.signals, log).init(); state.diag.quiet = true; state.diag.busyLog = false; }
         catch (e) { log.warn('TASU setup: ' + shortError(e)); }
         if (ui.isVisible('MAIN')) render().catch((e) => log.warn('first render: ' + shortError(e)));
+        autoScanTimer = setTimeout(() => {
+            autoScanTimer = null;
+            if (!stopped) scanModules().catch((e) => log.warn('automatic ambient scan: ' + shortError(e)));
+        }, 250);
         ctx.app.on('shutdown', () => {
-            stopped = true; clearTimeout(state.renewTimer); clearTimeout(renderTimer);
+            stopped = true; clearTimeout(state.renewTimer); clearTimeout(renderTimer); clearTimeout(autoScanTimer);
             ctx._moreAmbientWatches.forEach((sub) => { try { if (sub && sub.shutdown) Promise.resolve(sub.shutdown()).catch(() => {}); } catch (e) {} });
             if (state.activeCustom && state.diag && state.diag.available) {
                 (async () => {
