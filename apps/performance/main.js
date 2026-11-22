@@ -1226,6 +1226,10 @@ mgu.run({
             const s = current(demo);
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
+            // Keep the shared page header at the same screen y on pages whose content does not
+            // reach the bottom. The renderer otherwise vertically centres those pages, moving
+            // their x=24, y=44 red-and-grey rule below Engine Data.
+            G.pageBottom(cv);
             if (page === 0) {
                 const comfortMode = /COMFORT/i.test(modeName(drivingMode) || '');
                 drawEngine(cv, t, s, comfortMode);
