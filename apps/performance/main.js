@@ -1231,11 +1231,16 @@ mgu.run({
             // their x=24, y=44 red-and-grey rule below Engine Data.
             G.pageBottom(cv);
             if (page === 0) {
-                const comfortMode = /COMFORT/i.test(modeName(drivingMode) || '');
+                const activeMode = modeName(drivingMode) || '';
+                const comfortMode = /COMFORT/i.test(activeMode);
+                const modeBadge = activeMode.toUpperCase().replace(/\+/g, ' PLUS');
                 drawEngine(cv, t, s, comfortMode);
                 G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 0, demo
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
-                    : [{ text: comfortMode ? 'COMFORT · BLUE DISPLAY' : 'LIVE DATA', color: comfortMode ? '#55a9ff' : 'dim' }]);
+                    : comfortMode ? [{ text: modeBadge, color: '#55a9ff' }]
+                    : /^SPORT(?:\b| PLUS| INDIVIDUAL)/i.test(modeBadge)
+                        ? [{ text: modeBadge, color: '#f32635' }]
+                        : [{ text: 'LIVE DATA', color: 'dim' }]);
             } else if (page === 1) {
                 FlapUi.draw(cv, G, t, currentValveView(), Object.assign({}, valveActions, burbleActions),
                     selectedCarVisual(t), Date.now(), engineConfigView, sectionActions);
