@@ -207,9 +207,14 @@ mgu.run({
             return render();
         }
 
-        function clearDynoDisplay() {
+        function clearDynoRuns() {
+            dynoRuns = [];
+            dynoBaselineAt = null;
             dynoDisplayCleared = true;
             dynoSelectedAt = null;
+            dynoRecorder.reset();
+            lastDynoGate = null;
+            saveDynoRuns();
             updateDynoActionLabel();
             queueRender();
             return render();
@@ -1092,14 +1097,16 @@ mgu.run({
             const x = 1110, y = G.TOP, w = 466;
             const readingColor = comfortMode ? '#55a9ff' : '#f32635';
             G.panel(cv, t, x, y, w, 160, 'DYNO RUN');
-            const run = s.demo ? null : dynoRuns[0];
+            const run = s.demo || dynoDisplayCleared ? null : dynoRuns[0];
             const runDate = run && finite(run.at) ? new Date(run.at) : null;
             const dateText = runDate && finite(runDate.getTime())
                 ? String(runDate.getDate()).padStart(2, '0') + '.' + String(runDate.getMonth() + 1).padStart(2, '0') + '.' + runDate.getFullYear()
                 : '--';
-            const titleWidth = cv.textWidth('DYNO RUN', 26, { font: 'bold' });
-            cv.text('(LAST RUN - ' + dateText + ')', x + 18 + titleWidth + 10, y + 42, 15, t.dim,
-                { font: 'bold', spacing: 0.5, literal: true });
+            if (run) {
+                const titleWidth = cv.textWidth('DYNO RUN', 26, { font: 'bold' });
+                cv.text('(LAST RUN - ' + dateText + ')', x + 18 + titleWidth + 10, y + 42, 15, t.dim,
+                    { font: 'bold', spacing: 0.5, literal: true });
+            }
 
             if (!run) {
                 const split = x + Math.round(w / 2);
@@ -1244,7 +1251,7 @@ mgu.run({
                     graphMaxRpm: settings.get('dynoGraphMaxRpm') || 0,
                 }, selectedCarSideVisual(t), {
                     toggleView: toggleDynoView, toggleBaseline: toggleDynoBaseline,
-                    clear: clearDynoDisplay, nextRun: nextDynoRun, select: selectDynoRun,
+                    clear: clearDynoRuns, nextRun: nextDynoRun, select: selectDynoRun,
                 });
             } else {
                 const now = Date.now(), demoMode = settings.get('demo') === 'on';

@@ -296,7 +296,7 @@ function draw(cv, G, t, s, car, actions) {
         drawButton(cv, G, t, 798, 104, 92, 28,
             baseline && current && baseline.at === current.at ? 'BASELINE ON' : 'SET BASE', current ? actions.toggleBaseline : null,
             !!(baseline && current && baseline.at === current.at));
-        drawButton(cv, G, t, 898, 104, 84, 28, 'RESET', actions.clear, false);
+        drawButton(cv, G, t, 898, 104, 110, 28, 'CLEAR RUNS', actions.clear, false);
     }
     return cv;
 }

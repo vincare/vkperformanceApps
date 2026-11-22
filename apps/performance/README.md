@@ -1,9 +1,10 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.23 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.24 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
-area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear, and **TURBO BOOST**. The dyno card
-always selects the latest valid saved run. The two gauge limits can be changed
+area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
+and **TURBO BOOST**. The dyno card shows the latest valid saved run until the
+saved-run history is cleared. The two gauge limits can be changed
 separately in Settings; the defaults are 300 hp and 800 Nm.
 Each scale now labels its configured endpoint explicitly, including values
 that do not fall on a regular tick interval.
@@ -150,8 +151,9 @@ the same full-throttle, one-gear pull recorder and road-load calculation
 described above. The DYNO sheet shows a dual-scale power and torque graph, live estimated
 power during a pull, peak values, crank-versus-wheel power, and an optional ECU
 torque overlay. **Saved Runs** keeps up to 20 PERFORMANCE pulls, lets you pick
-one to inspect, pin or clear a baseline, and reset the current display without
-deleting saved runs. The history remains in PERFORMANCE's own app data; it does
+one to inspect or pin a baseline. **CLEAR RUNS** deletes the saved road-dyno
+history and baseline from PERFORMANCE's app data; the Engine Data card then
+shows no last-run result, including after restarting the app. The history does
 not import or copy the separate DYNO application or its data.
 
 The page displays a side-view image paired to the selected **Car Model** in
