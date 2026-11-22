@@ -248,7 +248,7 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 1, [
         v.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
     ]);
-    G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, RED);
+    G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || RED);
     if (view === 'sections') drawSectionMenu(cv, G, t, car, sectionActions);
     else if (view === 'burbles') drawBurbles(cv, G, t, v, act);
     else {

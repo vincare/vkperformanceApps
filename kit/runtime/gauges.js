@@ -145,22 +145,21 @@ function drawPanel(cv, t, x, y, w, h, title) {
     // light blue, dark blue, red; the last part with an angled end), then a thin white line;
     // large white title in normal case
     cv.fillRect(x, y, w, h, withAlpha('#b4bccc', 0.07));
-    const st = t.stripes || [t.accent], BW = 78, gap = 3, sw = (BW - gap * (st.length - 1)) / st.length;
-    st.forEach((c, i) => {
-        const sx = x + i * (sw + gap), last = i === st.length - 1;
-        if (last) cv.quad([[sx, y], [sx + sw, y], [sx + sw - 8, y + 5], [sx, y + 5]], c);
-        else cv.fillRect(sx, y, sw, 5, c);
-    });
-    cv.fillRect(x + BW + 2, y + 2, w - BW - 2, 1.5, withAlpha('#ffffff', 0.9));
+    sectionRule(cv, t, x, y, w, t.stripes || [t.accent]);
     if (title) cv.text(String(title), x + 18, y + 42, 26, t.text, { font: 'bold' });
 }
 
-/** A page-level section rule: red lead-in followed by a thin grey continuation. */
+/** A page-level section rule: the panel's themed lead-in and thin grey continuation. */
 function sectionRule(cv, t, x, y, w, accent) {
-    const lead = Math.min(78, w);
-    cv.fillRect(x + lead + 2, y + 2, Math.max(0, w - lead - 2), 1.5,
-        withAlpha('#c7cbd1', 0.82));
-    cv.fillRect(x, y, lead, 4, accent || '#f32635');
+    const lead = Math.min(78, w), colors = Array.isArray(accent) && accent.length
+        ? accent : [accent || '#f32635'];
+    const gap = 3, stripeWidth = (lead - gap * (colors.length - 1)) / colors.length;
+    colors.forEach((color, index) => {
+        const sx = x + index * (stripeWidth + gap), last = index === colors.length - 1;
+        if (last) cv.quad([[sx, y], [sx + stripeWidth, y], [sx + stripeWidth - 8, y + 5], [sx, y + 5]], color);
+        else cv.fillRect(sx, y, stripeWidth, 5, color);
+    });
+    cv.fillRect(x + 80, y + 2, Math.max(0, w - 80), 1.5, withAlpha('#ffffff', 0.9));
 }
 
 /* ---------------- radial dial ---------------- */

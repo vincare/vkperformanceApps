@@ -254,7 +254,7 @@ function draw(cv, G, t, s, car, actions) {
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 2, [
         s.demo && { text: 'DEMO · TIMING DISABLED', color: 'crit' },
     ]);
-    G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, RED);
+    G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || RED);
     button(cv, G, t, 24, 50, 174, 34, s.view === 'history' ? 'LIVE RUN' : 'RUN HISTORY', actions.toggleView, s.view === 'history',
         s.view !== 'history' || (s.runs && s.runs.length > 0));
     if (s.view === 'history') drawHistory(cv, G, t, s, car, actions);
