@@ -1,0 +1,125 @@
+{
+  "id": "navisport",
+  "title": "NaviSport",
+  "description": "CarPlay map preview with live BMW power, torque and M SOUND MODE",
+  "version": "0.1.0",
+  "vendor": "VKPERFORMANCE",
+  "loggingId": "OAA7",
+  "iconGlyph": "dyno",
+  "mguHmi": ["ID7"],
+  "maxDiskUsage": 16777216,
+  "requires": {
+    "idrive7-renderd": "2.1.18",
+    "mgu-inputgate": "1.1.0"
+  },
+  "signals": {
+    "de.bmw.infotainment.vehicle.CDS": {
+      "statusEngineSpeed2": "rs"
+    },
+    "de.bmw.infotainment.vehicle.Vehicle2": {
+      "statusCarSpeed2": "rs"
+    },
+    "de.bmw.infrastructure.VehicleInformation": {
+      "statusGearboxDrive": "s"
+    },
+    "de.bmw.infotainment.drivingexcitement.FES": {
+      "statusActualValueTorque2": "rs",
+      "statusVehicleDynamicEngine": "rs"
+    },
+    "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
+      "_instances": "SystemFunctionsInternalTasuInst1",
+      "_methods": ["sendTasuRequest"],
+      "_broadcasts": ["sendTasuResponse"]
+    }
+  },
+  "settings": [
+    {
+      "key": "carModel",
+      "label": "Car Model",
+      "type": "choice",
+      "default": "M340i_Blue",
+      "options": [
+        ["M340i_Blue", "M340i G20 BLUE"],
+        ["M340i_Red", "M340i G20 RED"],
+        ["M340i_Black", "M340i G20 BLACK"],
+        ["M440i_Blue", "M440i G22 BLUE"],
+        ["M440i_Red", "M440i G22 RED"],
+        ["M440i_Black", "M440i G22 BLACK"]
+      ]
+    },
+    {
+      "key": "powerSource",
+      "label": "Power source",
+      "type": "choice",
+      "default": "sport",
+      "options": [
+        ["sport", "BMW Sport Display"],
+        ["calc", "Torque x RPM estimate"]
+      ]
+    },
+    {
+      "key": "powerUnit",
+      "label": "Power unit",
+      "type": "choice",
+      "default": "hp",
+      "options": [
+        ["hp", "hp"],
+        ["kw", "kW"],
+        ["ps", "PS"]
+      ]
+    },
+    {
+      "key": "maxPower",
+      "label": "Maximum power used by BMW Sport Display",
+      "type": "number",
+      "unit": "kW",
+      "default": 215,
+      "steps": [100, 120, 140, 160, 180, 200, 215, 230, 250, 275, 300, 320, 350, 400, 450, 500, 550]
+    },
+    {
+      "key": "valveControl",
+      "label": "Exhaust valve control",
+      "type": "choice",
+      "default": "on",
+      "reset": 1,
+      "options": [
+        ["off", "Disarmed · no car commands"],
+        ["on", "Armed · matched DME only"]
+      ]
+    },
+    {
+      "key": "platform",
+      "label": "DME platform",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        ["auto", "Detect automatically"],
+        ["bm3", "Bootmod3"],
+        ["mhd", "MHD"]
+      ]
+    }
+  ],
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "NaviSport",
+      "buttons": [
+        ["BTN_M_SOUND", "M SOUND MODE"],
+        ["BTN_SETTINGS", "Settings"]
+      ]
+    }
+  ],
+  "config": {
+    "comment": "Live BMW signal conversions reused from PERFORMANCE. Power is an estimate based on Sport Display percentage and the configured max, or a torque x RPM estimate. Valve control uses PERFORMANCE's per-DME safety adapters.",
+    "scaling": {
+      "rpm": {"factor": 0.25, "offset": 0, "invalid": 65535},
+      "speed": {"factor": 0.015625, "offset": 0, "invalid": 65535},
+      "torque": {"factor": 0.5, "offset": -1023.5, "invalid": 65535, "invalidFrom": 4095},
+      "sportPct": {"factor": 1, "offset": 0, "invalid": 255}
+    },
+    "dme": {
+      "ecu": 18
+    }
+  }
+}
