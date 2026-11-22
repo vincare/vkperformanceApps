@@ -38,7 +38,7 @@ class Controller {
         };
         // the tune's own controls (Map, Max cooling, Burbles, ASD): what was asked and whether the DME
         // took it ('read' = read back from the DME at the unlock check)
-        this.tune = { map: null, mapAccepted: null, cooling: null, coolingAccepted: null, burbles: null, burblesAccepted: null,
+        this.tune = { map: null, mapAccepted: null, cooling: null, coolingAccepted: null, burbles: null, burblesEnabled: null, burblesAccepted: null,
             asd: null, asdAccepted: null, busy: false, error: null };
         this._oemQueued = false;    // OEM pressed while a command was in flight: sent right after it
         this._flight = null;        // the flap command in flight (with the OEM queued behind it)
@@ -100,6 +100,7 @@ class Controller {
         try { this.tune.map = (await this.link.bm3.currentMap()) + 1; this.tune.mapAccepted = 'read'; } catch (e) { this.log.warn('BM3 map read: ' + e.message); }
         try {
             const b = await this.link.bm3.readBurbles();
+            this.tune.burblesEnabled = b.enabled;
             if (!b.enabled || b.aggression !== null) { this.tune.burbles = b.enabled ? b.aggression : null; this.tune.burblesAccepted = 'read'; }
         } catch (e) { this.log.warn('BM3 burbles read: ' + e.message); }
     }
@@ -176,6 +177,7 @@ class Controller {
      * the flash it needs detected; MHD's echo or BM3's memory read-back is the acceptance.
      */
     async setTune(kind, value) {
+        if (kind === 'burbles' && value !== null && (!Number.isInteger(value * 2) || value < 0 || value > 12)) return this.tune;
         if (kind === 'map' && !(value >= 1 && value <= 4)) return this.tune;
         this.tune[kind] = value;
         this.tune[kind + 'Accepted'] = null;
@@ -200,6 +202,7 @@ class Controller {
                 : await this._bm3(kind, value);
             this.tune[kind + 'Accepted'] = r.accepted;
             if (!r.accepted) this.tune.error = r.detail;
+            else if (kind === 'burbles') this.tune.burblesEnabled = value !== null;
             this.log.info(kind + ' ' + value + ' -> accepted=' + r.accepted + ' (' + r.detail + ')');
         } catch (e) {
             this.tune[kind + 'Accepted'] = false;

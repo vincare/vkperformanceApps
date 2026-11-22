@@ -28,7 +28,7 @@ const scaling = {
 };
 
 equal(app.id, 'performance', 'app id');
-equal(app.version, '0.6.3', 'app version');
+equal(app.version, '0.6.23', 'app version');
 equal(app.settings.find((setting) => setting.key === 'demo').default, 'off', 'demo defaults off');
 equal(app.settings.find((setting) => setting.key === 'powerGaugeMax').default, 223.7, 'power scale defaults to 300 hp');
 equal(app.settings.find((setting) => setting.key === 'torqueGaugeMax').default, 800, 'torque scale default');

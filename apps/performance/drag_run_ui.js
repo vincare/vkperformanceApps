@@ -255,7 +255,7 @@ function DragRunBestKey(key, unit, rollout) { return DragRun.bestKey(key, unit, 
 function DragRunSeconds(value) { return DragRun.seconds(value); }
 
 function draw(cv, G, t, s, car, actions) {
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE', 'DRAG RUN'], 3, [
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 2, [
         s.demo && { text: 'DEMO · TIMING DISABLED', color: 'crit' },
     ]);
     button(cv, G, t, 24, 50, 174, 34, s.view === 'history' ? 'LIVE RUN' : 'RUN HISTORY', actions.toggleView, s.view === 'history',

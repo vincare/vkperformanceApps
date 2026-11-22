@@ -49,10 +49,8 @@ function drawCar(cv, G, t, valve, car, bounds, now, effects) {
     drawValveFlaps(cv, G, t, car, imageRect, valveMode, now);
 }
 
-function drawSectionMenu(cv, G, t, car, onOpen) {
-    // Keep the section picker deliberately compact: a single exhaust icon and
-    // the named button make it clear that no car graphic is drawn on this page.
-    const x = 54, y = (G.TOP || 44) + 34, w = 320, h = 310;
+function drawSectionMenu(cv, G, t, car, actions) {
+    const x = 54, y = (G.TOP || 44) + 28, w = 320, h = 390;
     cv.roundRect(x, y, w, h, 8, G.withAlpha('#ffffff', 0.035));
     cv.strokeRoundRect(x, y, w, h, 8, 1.5, G.withAlpha('#ffffff', 0.18));
     cv.fillRect(x + 1, y + 26, 4, 62, t.accent);
@@ -74,8 +72,49 @@ function drawSectionMenu(cv, G, t, car, onOpen) {
     cv.line(ix + 65, iy + 36, ix + 65, iy + 27, 2, G.withAlpha(t.accent, 0.78));
     cv.line(ix + 83, iy + 38, ix + 88, iy + 30, 2, G.withAlpha('#c7cbd1', 0.62));
 
-    drawActionButton(cv, G, t, x + 42, y + 208, w - 84, 66,
-        'EXHAUST SYSTEM', onOpen, { key: 'performance_exhaust_section', color: t.accent, primary: true });
+    drawActionButton(cv, G, t, x + 28, y + 202, w - 56, 60,
+        'EXHAUST SYSTEM', actions && actions.open, { key: 'performance_exhaust_section', color: t.accent, primary: true });
+    drawActionButton(cv, G, t, x + 28, y + 278, w - 56, 60,
+        'ENGINE BURBLES', actions && actions.burbles, { key: 'performance_engine_burbles', color: t.accent });
+}
+
+function drawBurbles(cv, G, t, valve, actions) {
+    const y = G.TOP || 44, bottom = G.pageBottom(cv) - (cv.own ? G.MARGIN : 0);
+    G.panel(cv, t, 24, y, W - 48, bottom - y, 'BMW ENGINE BURBLES · BM3');
+    const tune = valve.tune || {};
+    const active = tune.burblesEnabled === true;
+    const current = active ? (typeof tune.burbles === 'number' ? tune.burbles.toFixed(1) : 'CUSTOM')
+        : tune.burblesEnabled === false ? 'OFF' : 'UNKNOWN';
+    const stateColor = active ? (t.accent2 || '#81c4ff') : current === 'OFF' ? t.text : (t.warn || '#d29922');
+    cv.text('ENGINE BURBLES', W / 2, y + 102, 17, t.dim, { align: 'center', font: 'bold', spacing: 2 });
+    cv.text(current, W / 2, y + 190, 68, stateColor, { align: 'center', font: 'bold', spacing: 2.4 });
+    cv.text('TARGET AGGRESSION', W / 2, y + 225, 13, t.dim, { align: 'center', font: 'bold', spacing: 1.8 });
+    cv.text(Number(valve.burbleTarget || 0).toFixed(1), W / 2, y + 274, 32, t.text, { align: 'center', font: 'num' });
+
+    let status;
+    if (!valve.ready) status = 'WAITING FOR DIAGNOSTIC LINK';
+    else if (!valve.armed) status = 'CONTROL DISARMED · NO CHANGE CAN BE SENT';
+    else if (!valve.bm3Rom) status = 'BM3 ROM NOT IDENTIFIED · NO BURBLE CHANGE SENT';
+    else if (valve.commandStatus && /BURBLES/.test(valve.commandStatus)) status = valve.commandStatus;
+    else status = 'BM3 ROM ' + valve.bm3Rom + ' · CHANGES REQUIRE A MANUAL APPLY';
+    cv.text(status, W / 2, y + 311, 13, valve.bm3Rom ? t.dim : (t.warn || '#d29922'),
+        { align: 'center', font: 'bold', spacing: 0.5, literal: true });
+    if (!valve.bm3Rom && valve.bm3Error) {
+        const err = String(valve.bm3Error).slice(0, 72).toUpperCase();
+        cv.text(err, W / 2, y + 338, 11, t.dim, { align: 'center', font: 'label', literal: true });
+    }
+
+    const labels = [
+        ['−', actions && actions.down], ['+', actions && actions.up],
+        ['APPLY VALUE', actions && actions.apply], ['BURBLES OFF', actions && actions.off], ['BACK', actions && actions.back],
+    ];
+    const bw = 184, gap = 14, bh = 58, total = labels.length * bw + (labels.length - 1) * gap;
+    let bx = (W - total) / 2;
+    labels.forEach(([label, run], i) => {
+        drawActionButton(cv, G, t, bx, bottom - bh - 14, bw, bh, label, run,
+            { key: 'performance_burbles_' + i, primary: i === 2 });
+        bx += bw + gap;
+    });
 }
 
 function drawSidebar(cv, G, t, valve, car, actions, now) {
@@ -194,10 +233,11 @@ function drawActionButton(cv, G, t, x, y, w, h, label, run, opts) {
 
 function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     cv.clear(t.bg);
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE', 'DRAG RUN'], v.page || 0, [
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 1, [
         v.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
     ]);
-    if (view !== 'exhaust') drawSectionMenu(cv, G, t, car, sectionActions && sectionActions.open);
+    if (view === 'sections') drawSectionMenu(cv, G, t, car, sectionActions);
+    else if (view === 'burbles') drawBurbles(cv, G, t, v, act);
     else {
         drawSidebar(cv, G, t, v, car, act, now);
         drawStatus(cv, G, t, v);
@@ -205,4 +245,4 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     return cv;
 }
 
-module.exports = { W, H, draw, drawCar, drawSectionMenu, drawSidebar, drawSmoke, drawValveFlaps, contain };
+module.exports = { W, H, draw, drawCar, drawSectionMenu, drawBurbles, drawSidebar, drawSmoke, drawValveFlaps, contain };

@@ -414,7 +414,8 @@ function segBar(cv, t, x, y, w, h, g) {
     const sc = g.scale || {};
     for (let a = min; a <= max + 1e-9; a += step) {
         const xx = X(a), lab = sc.every && Math.abs((a - min) / sc.every - Math.round((a - min) / sc.every)) < 1e-6;
-        cv.fillRect(xx - (lab ? 1.5 : 1), y1 + 8, lab ? 3 : 2, lab ? (sc.tick || 12) : 7, lab ? (hot && a >= lim ? t.crit : t.text) : t.tick);
+        const tickColor = sc.tickColor ? (t[sc.tickColor] || sc.tickColor) : lab ? (hot && a >= lim ? t.crit : t.text) : t.tick;
+        cv.fillRect(xx - (lab ? 1.5 : 1), y1 + 8, lab ? 3 : 2, lab ? (sc.tick || 12) : 7, tickColor);
         if (lab) cv.text(fmt(a / (sc.div || 1), sc.decimals || 0), xx, y1 + (sc.labelY || 42), sc.size || 24, hot && a >= lim ? t.crit : sc.labelColor ? t[sc.labelColor] || sc.labelColor : t.dim, { align: 'center', font: 'bold' });
     }
 }

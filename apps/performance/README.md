@@ -1,12 +1,15 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.22 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.23 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear, and **TURBO BOOST**. The dyno card
 always selects the latest valid saved run. The two gauge limits can be changed
 separately in Settings; the defaults are 300 hp and 800 Nm.
 Each scale now labels its configured endpoint explicitly, including values
 that do not fall on a regular tick interval.
+In Comfort, the Engine Data readings, scales, and live bars turn blue. The
+dedicated DYNO RUN graph keeps its power, torque, and ECU torque traces in red
+shades for a consistent dyno palette.
 
 ## Live engine readings
 
@@ -37,8 +40,9 @@ that do not fall on a regular tick interval.
 ## ENGINE CONFIG page
 
 The second page opens on a compact section picker with a square exhaust icon
-and a single **EXHAUST SYSTEM** button. Selecting it opens the BMW exhaust
-controls; the picker has no car image and sits at the left for future sections.
+and **EXHAUST SYSTEM** and **ENGINE BURBLES** buttons. Selecting the exhaust
+section opens the BMW exhaust
+controls; the picker stays at the left with room for more controls.
 The controls page has matching tall sidebars that start level with Engine Data
 and extend to the content bottom, headed **SELECT MODE** and **EXHAUST MODE**, with
 **BMW EXHAUST SYSTEM** above the centered car. The right card shows **CURRENT
@@ -139,11 +143,11 @@ folder. MGU gives each app its own data folder, so existing saved runs inside
 the separate DYNO app are not imported. A new pull recorded after installing
 this version will appear here.
 
-## DYNO MODE page
+## DYNO RUN page
 
-The third page adds a dedicated road-dyno view in PERFORMANCE. It uses the
-same full-throttle, one-gear pull recorder and road-load calculation described
-above. The DYNO sheet shows a dual-scale power and torque graph, live estimated
+From **RACE MODES**, **DYNO RUN** opens the dedicated road-dyno view. It uses
+the same full-throttle, one-gear pull recorder and road-load calculation
+described above. The DYNO sheet shows a dual-scale power and torque graph, live estimated
 power during a pull, peak values, crank-versus-wheel power, and an optional ECU
 torque overlay. **Saved Runs** keeps up to 20 PERFORMANCE pulls, lets you pick
 one to inspect, pin or clear a baseline, and reset the current display without
@@ -159,6 +163,24 @@ the read-only ECU torque curve, and set the graph's RPM ceiling or Auto.
 The side-view files are paired by chassis and paint color with the rear-view
 images. The corrected blue M340i side view from the latest supplied archive is
 used for `M340i G20 BLUE`.
+
+**RACE MODES** is the third top-level page. It presents two large sections:
+**DYNO RUN** opens the road-dyno sheet and **DRAG RUN** opens the acceleration
+timer. These pages remain available through the shared navigation tabs.
+
+### ENGINE BURBLES
+
+The Engine Config section includes a BM3 burble page. It reads the DME's BM3
+marker and exposes the aggression control only when that ROM matches a known
+layout in the bundled BM3 Live profile table. Startup detection reads the
+marker through a temporary diagnostic ID (or direct memory read where needed);
+it does not write tune data. A user must explicitly choose a
+value and press **APPLY VALUE**, or choose **BURBLES OFF**. After a change, the
+app reads the enable byte and timing table back from the DME before reporting
+confirmation. Unknown ROMs, unsupported profiles, disarmed vehicle control, or
+an unavailable diagnostic link prevent a write. BM3 support is limited to the
+ROMs in that profile table; successful readback does not certify the tune's
+sound or mechanical result.
 
 ## DRAG RUN page
 

@@ -1,8 +1,8 @@
 {
   "id": "performance",
   "title": "PERFORMANCE",
-  "description": "Live engine monitor, DYNO MODE road estimates, DRAG RUN timers, and guarded BMW exhaust-flap controls",
-  "version": "0.6.22",
+  "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
+  "version": "0.6.23",
   "maxDiskUsage": 33554432,
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
@@ -298,6 +298,7 @@
   ],
   "config": {
     "comment": "The RPM, torque, Sport Display percentage, FES boost and DME boost candidates use the same conversions and candidate order as M Vitals (MIT).",
+    "bm3MarkerAddress": "807FFE50",
     "scaling": {
       "rpm": {"factor": 0.25, "offset": 0, "invalid": 65535},
       "speed": {"factor": 0.015625, "offset": 0, "invalid": 65535},

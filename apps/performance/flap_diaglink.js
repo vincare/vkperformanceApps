@@ -11,6 +11,8 @@
  * Nothing here actuates the flap. Actuation lives in adapters.js and is gated there.
  */
 const { Diag, hex, NRC, replyTo } = require('./kit/diag');
+const { Bm3Protocol } = require('./bm3_protocol');
+const bm3Profiles = require('./bm3_profiles');
 
 const DME = 0x12;                 // DME engine (BMW diagnostic address)
 const DME2 = 0x13;                // a V8's second engine unit (bank 2): its own exhaust flap
@@ -33,13 +35,17 @@ const DID_ASW_GER_EL_AGK = [0x63, 0x1E];
 function bytesToHex(b) { return (b || []).map((x) => hex(x)).join(' '); }
 
 class DiagLink {
-    constructor(signals, log) {
+    constructor(signals, log, config) {
         this.signals = signals;
         this.log = log;
+        this.config = config || {};
         this.diag = null;
+        this.bm3 = null;
         this.available = false;
         this.dme = DME;
         this._onAvailable = [];
+        this._bm3ScanAt = 0;
+        this._bm3Scan = { flashed: false, rom: null, error: 'not scanned' };
     }
 
     /** fn(on) when the diagnostic link comes up or goes away (apps start at boot, often before it). */
@@ -48,6 +54,7 @@ class DiagLink {
     async init() {
         this.diag = await new Diag(this.signals, this.log).init();
         this.available = !!this.diag.available;
+        this.bm3 = new Bm3Protocol(this.diag, bm3Profiles, this.config);
         this.diag.on('available', (on) => {
             this.available = !!on;
             this._onAvailable.forEach((fn) => { try { fn(this.available); } catch (e) { this.log.error(e); } });
@@ -76,7 +83,7 @@ class DiagLink {
      * The capability scan intentionally does not request the VIN or software IDs.
      * `present` is true only when the DME answered the SGBD index or flap probes.
      */
-    async identifyDme() {
+    async identifyDme(platform) {
         const ident = { present: false, address: this.dme, sgbdIndex: null };
         if (!this.available) return ident;
         const sg = await this.readDid(DID_SGBD_INDEX);
@@ -101,6 +108,22 @@ class DiagLink {
             positionRaw: asg.ok ? bytesToHex(asg.data) : null,
             units: units.map((u) => hex(u.addr) + (u.el ? ' el' : '') + (u.ger ? ' ger' : '')),
         };
+        // BM3 burble controls require an exact supported ROM profile. Probe its marker
+        // with a bounded diagnostic marker read, at most once per minute while rescan runs.
+        const now = Date.now();
+        if (this.bm3 && (platform === 'bm3' || platform === 'auto' || !platform) &&
+            (!this._bm3ScanAt || now - this._bm3ScanAt >= 60000)) {
+            this._bm3ScanAt = now;
+            try {
+                const found = await this.bm3.identify();
+                this._bm3Scan = { flashed: true, rom: found.rom, error: null };
+            } catch (e) {
+                this._bm3Scan = { flashed: false, rom: null, error: String(e && e.message || e) };
+                this.bm3.profile = null;
+                this.bm3.rom = null;
+            }
+        }
+        ident.bm3 = Object.assign({}, this._bm3Scan);
         this.log.info('DME ident: ' + JSON.stringify(ident));
         return ident;
     }

@@ -3,9 +3,9 @@
 const W = 1600, H = 520;
 const RED = '#f32635';
 // Cool, restrained chart colours inspired by the cleaner Virtual Dyno sheet.
-const POWER = '#43D2FF';
-const TORQUE = '#A7BFFF';
-const ECU_TORQUE = '#E2EAF4';
+const POWER = '#f32635';
+const TORQUE = '#ff737d';
+const ECU_TORQUE = '#ffd0d4';
 
 function nice(value, step) { return Math.max(step, Math.ceil(value / step) * step); }
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
@@ -285,7 +285,7 @@ function drawRuns(cv, G, t, s, car, current, baseline, actions) {
 }
 
 function draw(cv, G, t, s, car, actions) {
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE', 'DRAG RUN'], 2, [
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 2, [
         s.demo && { text: 'DEMO · NO ROAD DATA', color: 'crit' },
     ]);
     drawButton(cv, G, t, 24, 50, 174, 34, s.view === 'runs' ? 'DYNO SHEET' : 'SAVED RUNS', actions.toggleView, s.view === 'runs');

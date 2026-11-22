@@ -20,6 +20,7 @@ const FlapUi = require('./flap_ui');
 const CarImages = require('./car_images');
 const DynoUi = require('./dyno_ui');
 const DragRunUi = require('./drag_run_ui');
+const RaceModesUi = require('./race_modes_ui');
 const { Controller: FlapController } = require('./flap_controller');
 const { AutoFlap, flapFor, modeName } = require('./flap_auto');
 const fs = require('fs');
@@ -126,10 +127,11 @@ mgu.run({
         let lastDynoGate = null;
         let vehicleGear = null, vehicleGearAt = 0;
         let page = 0, engineConfigView = 'sections', valveReady = false, drivingMode = null;
+        let burbleTarget = 1.5, burbleCommandActive = false;
         let driveModeLoading = false, driveModePollStarting = false, driveModePollSub = null, driveModePollTimer = null;
         let valveTick = null, valveRescanTimer = null, smokeTick = null;
         let valveNoticeTimer = null, valveActionNotice = '', valveActionNoticeUntil = 0;
-        let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0;
+        let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0, bm3ScanRetryCount = 0;
         let carVisual = null, carVisualKey = '', carSideVisual = null, carSideVisualKey = '';
         let mSoundEnabled = false;
         let mSoundBusy = false;
@@ -222,10 +224,10 @@ mgu.run({
 
         function updateDynoActionLabel() {
             const run = displayedDynoRun();
-            const label = page !== 2 ? 'Open DYNO MODE' : dynoView === 'runs' ? 'Next saved run'
+            const label = page !== 3 ? 'Open DYNO RUN' : dynoView === 'runs' ? 'Next saved run'
                 : run && dynoBaselineAt === run.at ? 'Clear baseline' : 'Set baseline';
             if (ui.text) ui.text('BTN_DYNO_ACTION', label);
-            if (ui.text) ui.text('BTN_DYNO_VIEW', page !== 2 ? 'Saved runs' : dynoView === 'runs' ? 'DYNO sheet' : 'Saved runs');
+            if (ui.text) ui.text('BTN_DYNO_VIEW', page !== 3 ? 'Saved runs' : dynoView === 'runs' ? 'DYNO sheet' : 'Saved runs');
         }
 
         function saveDragRuns() {
@@ -266,7 +268,7 @@ mgu.run({
                     dragClearUntil = 0;
                     saveDragRuns();
                     log.info('drag run saved ' + JSON.stringify(run.result));
-                    if (page === 3) queueRender();
+                    if (page === 4) queueRender();
                 },
             });
             lastDragState = dragTimer.state;
@@ -279,7 +281,7 @@ mgu.run({
             dragTimer.feed(at, speed);
             if (previous !== dragTimer.state) {
                 lastDragState = dragTimer.state;
-                if (page === 3) queueRender();
+                if (page === 4) queueRender();
             }
         }
 
@@ -395,7 +397,7 @@ mgu.run({
             if (!event) return;
             if (event.type === 'short') {
                 log.info('virtual dyno: pull too short to record');
-                if (page === 2) queueRender();
+                if (page === 3) queueRender();
                 return;
             }
             if (event.type !== 'run') return;
@@ -413,7 +415,7 @@ mgu.run({
                 torqueNm: event.run.peakT, torqueRpm: event.run.peakTrpm,
                 weightKg: event.run.weight, lossPercent: event.run.loss, body: event.run.body,
             });
-            if (page === 2) queueRender();
+            if (page === 3) queueRender();
         }
 
         function freshWithin(m, now, maxAge) {
@@ -674,6 +676,8 @@ mgu.run({
             else if (control.accepted === true) commandStatus = 'DME ACCEPTED · POSITION UNKNOWN';
             else commandStatus = 'READY FOR COMMAND';
             if (valveActionNotice && Date.now() < valveActionNoticeUntil) commandStatus = valveActionNotice;
+            const tune = control.tune || {};
+            if (typeof tune.burbles === 'number' && tune.burbles <= 12) burbleTarget = tune.burbles;
             return Object.assign({}, control, {
                 ready: valveReady, armed, matched, status, lines, visualState, commandStatus,
                 // The exhaust art follows the requested mode as a visual cue only;
@@ -685,6 +689,9 @@ mgu.run({
                 page, selected: valveAuto.selected(),
                 requested: valveAuto.desired,
                 note: note && note.text,
+                bm3Rom: control.bm3 && control.bm3.rom,
+                bm3Error: control.bm3 && control.bm3.error,
+                burbleTarget,
             });
         }
 
@@ -763,7 +770,8 @@ mgu.run({
                     matched: !!(valveController.ident && valveController.ident.elAgk && valveController.ident.elAgk.supported) });
                 return null;
             }
-            if (valveController.state.busy && mode !== 'OEM') {
+            if (valveScanBusy || valveController.tune.busy || burbleCommandActive ||
+                (valveController.state.busy && mode !== 'OEM')) {
                 showValveNotice(mode + ' NOT SENT · COMMAND IN PROGRESS');
                 return null;
             }
@@ -795,6 +803,48 @@ mgu.run({
             close() { resetMSound(); return valvePress('CLOSED')(); },
             oem() { resetMSound(); return valvePress('OEM')(); },
             drive() { resetMSound(); return valvePress('DRIVE')(); },
+        };
+        function burbleBlockReason() {
+            if (!valveReady) return 'DIAGNOSTIC LINK STARTING';
+            if (!valveController.armedSetting) return 'CONTROL DISARMED';
+            if (!valveController.link || !valveController.link.available) return 'DIAGNOSTIC LINK UNAVAILABLE';
+            if (!valveController.bm3Rom) return 'NO SUPPORTED BM3 ROM PROFILE';
+            if (valveScanBusy || valveController.tune.busy || valveController.state.busy || valveCommandActive || burbleCommandActive || state.dmeBusy) return 'DIAGNOSTIC LINK BUSY';
+            return '';
+        }
+        async function sendBurbles(value) {
+            const blocked = burbleBlockReason();
+            if (blocked) {
+                showValveNotice('BURBLES NOT SENT · ' + blocked);
+                return null;
+            }
+            burbleCommandActive = true;
+            queueRender();
+            try {
+                const result = await valveController.setTune('burbles', value);
+                if (result && result.burblesAccepted === false) {
+                    showValveNotice('BURBLES NOT CONFIRMED · ' + (result.error || 'CHECK DME'));
+                } else if (result && result.burblesAccepted === true) {
+                    showValveNotice(value === null ? 'BURBLES OFF · CONFIRMED BY DME' : 'BURBLES ' + value.toFixed(1) + ' · CONFIRMED BY DME');
+                } else {
+                    showValveNotice('BURBLES NOT CONFIRMED · CHECK DME');
+                }
+                return result;
+            } catch (e) {
+                showValveNotice('BURBLES NOT CONFIRMED · ' + shortError(e));
+                return null;
+            } finally {
+                burbleCommandActive = false;
+                valvePriorityUntil = Date.now() + 1200;
+                queueRender();
+            }
+        }
+        const burbleActions = {
+            back() { engineConfigView = 'sections'; queueRender(); return render(); },
+            down() { burbleTarget = Math.max(0, Math.round((burbleTarget - 0.5) * 2) / 2); queueRender(); return render(); },
+            up() { burbleTarget = Math.min(12, Math.round((burbleTarget + 0.5) * 2) / 2); queueRender(); return render(); },
+            apply() { return sendBurbles(burbleTarget); },
+            off() { return sendBurbles(null); },
         };
         function toggleMSoundMode() {
             if (mSoundBusy) {
@@ -836,6 +886,10 @@ mgu.run({
             open() {
                 engineConfigView = 'exhaust';
                 if (!smokeTick) smokeTick = setInterval(queueRender, 180);
+                queueRender();
+            },
+            burbles() {
+                engineConfigView = 'burbles';
                 queueRender();
             },
         };
@@ -883,8 +937,8 @@ mgu.run({
         async function pollDme() {
             const now = Date.now();
             if (state.stopped || state.dmeBusy || settings.get('demo') === 'on' ||
-                settings.get('readDmeCandidates') !== true || valveCommandActive ||
-                valveController.state.busy || now < valvePriorityUntil) return;
+                settings.get('readDmeCandidates') !== true || valveCommandActive || burbleCommandActive || valveScanBusy ||
+                valveController.state.busy || valveController.tune.busy || now < valvePriorityUntil) return;
             if (!fresh(state.rpm, now) || state.rpm.value < 500 || now - lastDmeCycle < DME_POLL_MS) return;
             const boostSource = settings.get('boostSource') || 'auto';
             const needsDmeBoost = boostSource === 'dme' ||
@@ -1016,7 +1070,7 @@ mgu.run({
             };
         }
 
-        function drawDynoCurve(cv, t, run, x, y, w, h) {
+        function drawDynoCurve(cv, t, run, x, y, w, h, comfortMode) {
             if (!run || !Array.isArray(run.curve) || run.curve.length < 2) return;
             const r0 = run.curve[0].rpm, r1 = run.curve[run.curve.length - 1].rpm;
             const pMax = Math.max(1, ...run.curve.map((point) => point.powerW));
@@ -1028,14 +1082,15 @@ mgu.run({
                 torqueLine.push([px, y + h - point.torqueNm / tMax * h]);
             });
             cv.fillRect(x, y + h, w, 1, G.withAlpha(t.tick, 0.45));
-            cv.polyline(powerLine, 3, t.accent);
-            cv.polyline(torqueLine, 2, t.accent2);
+            cv.polyline(powerLine, 3, comfortMode ? '#55a9ff' : t.accent);
+            cv.polyline(torqueLine, 2, comfortMode ? '#8bc6ff' : t.accent2);
             const peakX = x + (run.peakPrpm - r0) / Math.max(1, r1 - r0) * w;
-            cv.circle(peakX, y + h - run.peakP / pMax * h, 4, t.accent);
+            cv.circle(peakX, y + h - run.peakP / pMax * h, 4, comfortMode ? '#55a9ff' : t.accent);
         }
 
-        function drawDynoPanel(cv, t, s) {
+        function drawDynoPanel(cv, t, s, comfortMode) {
             const x = 1110, y = G.TOP, w = 466;
+            const readingColor = comfortMode ? '#55a9ff' : '#f32635';
             G.panel(cv, t, x, y, w, 160, 'DYNO RUN');
             const run = s.demo ? null : dynoRuns[0];
             const runDate = run && finite(run.at) ? new Date(run.at) : null;
@@ -1051,10 +1106,10 @@ mgu.run({
                 cv.fillRect(split, y + 76, 1, 54, G.withAlpha(t.tick, 0.65));
                 cv.text('HORSE POWER', x + 24, y + 88, 15, t.dim, { font: 'bold', spacing: 1.5 });
                 cv.text('TORQUE', split + 20, y + 88, 15, t.dim, { font: 'bold', spacing: 1.5 });
-                cv.text('0', x + 24, y + 121, 36, '#f32635', { font: 'num' });
+                cv.text('0', x + 24, y + 121, 36, readingColor, { font: 'num' });
                 const zeroWidth = cv.textWidth('0', 36, { font: 'num' });
                 cv.text(Calc.powerUnit(s.powerUnit), x + 27 + zeroWidth, y + 121, 18, t.dim);
-                cv.text('0', split + 20, y + 121, 36, '#f32635', { font: 'num' });
+                cv.text('0', split + 20, y + 121, 36, readingColor, { font: 'num' });
                 cv.text('Nm', split + 23 + zeroWidth, y + 121, 18, t.dim);
                 return;
             }
@@ -1069,13 +1124,13 @@ mgu.run({
             const torqueText = formatNumber(run.peakT, 0);
             const powerWidth = cv.textWidth(powerText, 36, { font: 'num' });
             const torqueWidth = cv.textWidth(torqueText, 36, { font: 'num' });
-            cv.text(powerText, x + 24, y + 116, 36, '#f32635', { font: 'num' });
+            cv.text(powerText, x + 24, y + 116, 36, readingColor, { font: 'num' });
             cv.text(Calc.powerUnit(powerUnit), x + 27 + powerWidth, y + 116, 18, t.dim);
-            cv.text(torqueText, split + 20, y + 116, 36, '#f32635', { font: 'num' });
+            cv.text(torqueText, split + 20, y + 116, 36, readingColor, { font: 'num' });
             cv.text('Nm', split + 23 + torqueWidth, y + 116, 18, t.dim);
             cv.text('@ ' + formatNumber(run.peakPrpm, 0) + ' rpm', x + 24, y + 136, 13, t.dim);
             cv.text('@ ' + formatNumber(run.peakTrpm, 0) + ' rpm', split + 20, y + 136, 13, t.dim);
-            drawDynoCurve(cv, t, run, x + 24, y + 143, w - 48, 11);
+            drawDynoCurve(cv, t, run, x + 24, y + 143, w - 48, 11, comfortMode);
         }
 
         function drawMSoundButton(cv, t, enabled, active, run) {
@@ -1091,9 +1146,10 @@ mgu.run({
             if (cv.own && run) cv.target(x, y, w, h, run, 'performance_m_sound_mode');
         }
 
-        function drawEngine(cv, t, s) {
+        function drawEngine(cv, t, s, comfortMode) {
             const room = G.pageBottom(cv) - G.BOTTOM;
             const half = Math.round(room / 2);
+            const gaugeColor = comfortMode ? '#55a9ff' : '#f32635';
             const powerGaugeKw = settings.get('powerGaugeMax');
             const powerMax = Calc.powerValue(finite(powerGaugeKw) && powerGaugeKw > 0 ? powerGaugeKw : 223.7, s.powerUnit);
             const torqueGaugeMax = settings.get('torqueGaugeMax');
@@ -1102,42 +1158,49 @@ mgu.run({
             const torqueText = s.torque === null ? '0' : formatNumber(s.torque, 0);
 
             G.segBar(cv, t, 24, G.TOP, 1062, 226 + half, {
-                label: 'HORSE POWER', value: s.power ? s.power.value : 0, valueText: powerText, valueColor: '#f32635',
+                label: 'HORSE POWER', value: s.power ? s.power.value : 0, valueText: powerText, valueColor: gaugeColor,
                 unit: Calc.powerUnit(s.powerUnit), decimals: 0,
                 min: 0, max: powerMax, step: powerMax / 20,
-                scale: { every: powerMax / 4, div: 1 },
-                ramp: 'hot', peak: s.peaks.power,
+                scale: { every: powerMax / 4, div: 1, labelColor: comfortMode ? gaugeColor : null, tickColor: comfortMode ? gaugeColor : null },
+                color: comfortMode ? gaugeColor : undefined, hang: comfortMode ? gaugeColor : undefined,
+                ramp: comfortMode ? undefined : 'hot', peak: s.peaks.power,
             });
             G.segBar(cv, t, 24, G.TOP + 242 + half, 1062, 226 - half, {
-                label: 'TORQUE', value: s.torque === null ? 0 : s.torque, valueText: torqueText, valueColor: '#f32635', unit: 'Nm', decimals: 0,
+                label: 'TORQUE', value: s.torque === null ? 0 : s.torque, valueText: torqueText, valueColor: gaugeColor, unit: 'Nm', decimals: 0,
                 min: 0, max: torqueMax, step: torqueMax / 20,
-                scale: { every: torqueMax / 4, div: 1 },
-                ramp: 'hot', peak: s.peaks.torque,
+                scale: { every: torqueMax / 4, div: 1, labelColor: comfortMode ? gaugeColor : null, tickColor: comfortMode ? gaugeColor : null },
+                color: comfortMode ? gaugeColor : undefined, hang: comfortMode ? gaugeColor : undefined,
+                ramp: comfortMode ? undefined : 'hot', peak: s.peaks.torque,
             });
 
-            drawDynoPanel(cv, t, s);
+            drawDynoPanel(cv, t, s, comfortMode);
 
             const speedX = 1110, speedY = G.TOP + 172, speedW = 466;
             const speedTicks = [0, 60, 120, 210, 270, 330];
             G.bar(cv, t, speedX, speedY, speedW, 96, {
                 label: 'VEHICLE SPEED', value: s.speed, text: s.speed === null ? '--' : formatNumber(s.speed, 0), unit: 'km/h',
                 min: 0, max: 330, step: 30, ticks: speedTicks,
-                labels: [0, 120, 210, 330].map((value) => ({ value, text: String(value), align: value === 0 ? 'left' : value === 330 ? 'right' : 'center' })),
-                decimals: 0, ramp: 'hot',
+                labels: [0, 120, 210, 330].map((value) => ({ value, text: String(value), align: value === 0 ? 'left' : value === 330 ? 'right' : 'center', color: comfortMode ? gaugeColor : undefined })),
+                decimals: 0, valueColor: comfortMode ? gaugeColor : undefined,
+                color: comfortMode ? gaugeColor : undefined, hang: comfortMode ? gaugeColor : undefined, ramp: comfortMode ? undefined : 'hot',
             });
             const speedScaleX = speedX + 18;
             [60, 270].forEach((value) => cv.text(String(value), speedScaleX + value / 330 * (speedW - 18),
                 speedY + 92, 14, t.dim, { align: 'center', font: 'bold' }));
             const gear = s.gear || '--';
             const gearX = speedX + cv.textWidth('VEHICLE SPEED', 22, { font: 'bold', spacing: 2 }) + 18;
-            cv.text('GEAR ' + gear, gearX, speedY + 26, 16, t.accent, { font: 'bold', spacing: 1, literal: true });
+            cv.text('GEAR ' + gear, gearX, speedY + 26, 16, comfortMode ? gaugeColor : t.accent, { font: 'bold', spacing: 1, literal: true });
             const boostLabel = 'Turbo Boost';
             const boostTicks = Calc.scaleTicks(BOOST_MAX_BAR, 5);
             G.bar(cv, t, 1110, G.TOP + 280, 466, 96, {
                 label: boostLabel, value: s.boost ? s.boost.value : null,
                 text: s.boost ? formatNumber(s.boost.value, 2) : '--', unit: 'bar',
                 min: 0, max: BOOST_MAX_BAR, step: Calc.scaleStep(BOOST_MAX_BAR, 5), ticks: boostTicks,
-                decimals: 2, scaleDecimals: 1, peak: s.peaks.boost, peakText: true, ramp: 'hot',
+                decimals: 2, scaleDecimals: 1, peak: s.peaks.boost, peakText: true,
+                valueColor: comfortMode ? gaugeColor : undefined, color: comfortMode ? gaugeColor : undefined,
+                hang: comfortMode ? gaugeColor : undefined,
+                labels: boostTicks.map((value) => ({ value, text: formatNumber(value, 1), color: comfortMode ? gaugeColor : undefined })),
+                ramp: comfortMode ? undefined : 'hot',
             });
             if (mSoundEnabled && !valveCanActuate()) resetMSound();
             const mSoundReady = valveCanActuate() && !valveController.state.busy && !mSoundBusy;
@@ -1151,14 +1214,20 @@ mgu.run({
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
             if (page === 0) {
-                drawEngine(cv, t, s);
-                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'DYNO MODE', 'DRAG RUN'], page, demo
+                const comfortMode = /COMFORT/i.test(modeName(drivingMode) || '');
+                drawEngine(cv, t, s, comfortMode);
+                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 0, demo
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
-                    : [{ text: 'LIVE DATA', color: 'dim' }]);
+                    : [{ text: comfortMode ? 'COMFORT · BLUE DISPLAY' : 'LIVE DATA', color: comfortMode ? '#55a9ff' : 'dim' }]);
             } else if (page === 1) {
-                FlapUi.draw(cv, G, t, currentValveView(), valveActions,
+                FlapUi.draw(cv, G, t, currentValveView(), Object.assign({}, valveActions, burbleActions),
                     selectedCarVisual(t), Date.now(), engineConfigView, sectionActions);
             } else if (page === 2) {
+                RaceModesUi.draw(cv, G, t, {
+                    dyno() { dynoView = 'sheet'; dynoDisplayCleared = false; return setPage(3); },
+                    drag() { dragView = 'live'; return setPage(4); },
+                });
+            } else if (page === 3) {
                 const now = Date.now();
                 const recording = dynoRecorder.snapshot(now);
                 DynoUi.draw(cv, G, t, {
@@ -1258,6 +1327,7 @@ mgu.run({
             const valveSetting = { valveControl: 'arm', valveHold: 'hold', valveCloseLimit: 'closeLimit' }[key];
             if (valveSetting === 'arm') {
                 valveReady = false;
+                valveScanBusy = true;
                 queueRender();
                 const disarmFirst = settings.get('valveControl') !== 'on'
                     ? valveAuto.settingsChanged('arm') : Promise.resolve();
@@ -1269,7 +1339,8 @@ mgu.run({
                         return valveAuto.linkUp();
                     }
                     return valveAuto.settingsChanged('arm');
-                }).then(queueRender).catch((e) => log.warn('exhaust setting: ' + shortError(e)));
+                }).then(() => { valveScanBusy = false; queueRender(); })
+                    .catch((e) => { valveScanBusy = false; log.warn('exhaust setting: ' + shortError(e)); queueRender(); });
             } else if (valveSetting) {
                 Promise.resolve(valveAuto.settingsChanged(valveSetting)).then(queueRender)
                     .catch((e) => log.warn('exhaust setting: ' + shortError(e)));
@@ -1283,8 +1354,8 @@ mgu.run({
             dragTimer.idle(Date.now());
             if (previous !== dragTimer.state || lastDragState !== dragTimer.state) {
                 lastDragState = dragTimer.state;
-                if (page === 3) queueRender();
-            } else if (page === 3 && dragView === 'live' && dragTimer.state === 'run') {
+                if (page === 4) queueRender();
+            } else if (page === 4 && dragView === 'live' && dragTimer.state === 'run') {
                 queueRender();
             }
         }, 100);
@@ -1300,7 +1371,7 @@ mgu.run({
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, DME_POLL_MS);
 
         function setPage(next) {
-            page = ((next % 4) + 4) % 4;
+            page = Math.max(0, Math.min(4, Math.trunc(next)));
             if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             if (page === 1) {
                 engineConfigView = 'sections';
@@ -1309,50 +1380,61 @@ mgu.run({
             queueRender();
             return render();
         }
-        ui.onClick('BTN_PAGE', () => setPage(page + 1));
-        ui.onClick('BTN_PREV', () => setPage(page - 1));
+        function topPageStep(direction) {
+            const pages = [0, 1, 2];
+            let index = pages.indexOf(page);
+            if (index < 0) index = 2;
+            return setPage(pages[(index + direction + pages.length) % pages.length]);
+        }
+        ui.onClick('BTN_PAGE', () => topPageStep(1));
+        ui.onClick('BTN_PREV', () => topPageStep(-1));
         ui.onClick('BTN_OPEN', valveActions.open);
         ui.onClick('BTN_CLOSE', valveActions.close);
         ui.onClick('BTN_OEM', valveActions.oem);
         ui.onClick('BTN_DRIVE', valveActions.drive);
         ui.onClick('BTN_DYNO_ACTION', () => {
-            if (page !== 2) {
+            if (page !== 3) {
                 dynoView = 'sheet';
                 dynoDisplayCleared = false;
                 updateDynoActionLabel();
-                return setPage(2);
+                return setPage(3);
             }
             return dynoView === 'runs' ? nextDynoRun() : toggleDynoBaseline();
         });
         ui.onClick('BTN_DYNO_VIEW', () => {
-            if (page === 2) return toggleDynoView();
+            if (page === 3) return toggleDynoView();
             dynoView = 'runs';
             dynoDisplayCleared = false;
             updateDynoActionLabel();
-            return setPage(2);
+            return setPage(3);
         });
         ui.onClick('BTN_DRAG_ACTION', () => {
-            if (page !== 3) return setPage(3);
+            if (page !== 4) return setPage(4);
             return dragView === 'history' ? clearDragHistory() : resetDragTimer();
         });
         ui.onClick('BTN_DRAG_VIEW', () => {
-            if (page !== 3) { dragView = 'history'; return setPage(3); }
+            if (page !== 4) { dragView = 'history'; return setPage(4); }
             return toggleDragView();
         });
         ['BTN_DYNO_ACTION', 'BTN_DYNO_VIEW', 'BTN_DRAG_ACTION', 'BTN_DRAG_VIEW'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
         ['BTN_OPEN', 'BTN_CLOSE', 'BTN_OEM', 'BTN_DRIVE'].forEach((button) => ctx.hideButton && ctx.hideButton(button));
         updateDynoActionLabel();
         if (ctx.onTab) ctx.onTab((index) => {
-            if (index >= 0 && index <= 3) return setPage(index);
+            if (index >= 0 && index <= 2) return setPage(index);
             return null;
         });
 
+        valveScanBusy = true;
         valveController.start().then(() => {
+            valveScanBusy = false;
             if (state.stopped) return;
             valveReady = true;
             if (valveController.link) valveController.link.onAvailable((available) => {
+                if (available) bm3ScanRetryCount = 0;
+                valveScanBusy = true;
                 valveController.refresh().then(() => available ? valveAuto.linkUp() : null)
-                    .then(queueRender).catch((e) => log.warn('exhaust link: ' + shortError(e)));
+                    .then(() => { valveScanBusy = false; queueRender(); })
+                    .catch((e) => { valveScanBusy = false; log.warn('exhaust link: ' + shortError(e)); queueRender(); });
             });
             if (drivingMode !== null) {
                 if (valveCanActuate() && valveAuto.linkOn) {
@@ -1361,7 +1443,7 @@ mgu.run({
                 } else valveAuto.drive = drivingMode;
             }
             valveTick = setInterval(() => {
-                if (!valveCanActuate()) return;
+                if (!valveCanActuate() || valveScanBusy || valveController.tune.busy || burbleCommandActive) return;
                 valveAuto.tick().catch((e) => log.warn('exhaust rpm guard: ' + shortError(e)));
             }, 250);
             // Like Engine Config, retry read-only DME detection while the engine is
@@ -1369,13 +1451,24 @@ mgu.run({
             valveRescanTimer = setInterval(() => {
                 const ident = valveController.ident || {};
                 const matched = !!(ident.elAgk && ident.elAgk.supported);
-                if (matched) { valveScanTries = 0; return; }
+                const bm3 = ident.bm3 || {};
+                const platform = valveController.platform;
+                const bm3RetryNeeded = (platform === 'auto' || platform === 'bm3') && !bm3.flashed &&
+                    /timeout|did not answer|transport unavailable|tasu/i.test(String(bm3.error || ''));
                 const now = Date.now();
                 const engineRunning = fresh(state.rpm, now) && state.rpm.value > 400;
+                if (matched && !bm3RetryNeeded) { valveScanTries = 0; return; }
                 if (!valveReady || !valveController.armedSetting || !engineRunning ||
-                    !valveController.link || !valveController.link.available || valveScanBusy) return;
-                if (valveScanTries >= 4 && now - valveScanAt < 60000) return;
-                valveScanBusy = true; valveScanTries++; valveScanAt = now;
+                    !valveController.link || !valveController.link.available || valveScanBusy ||
+                    valveController.state.busy || valveController.tune.busy || valveCommandActive || burbleCommandActive) return;
+                if (matched && bm3RetryNeeded) {
+                    if (bm3ScanRetryCount >= 2 || now - (valveController.link._bm3ScanAt || 0) < 60000) return;
+                    bm3ScanRetryCount++;
+                }
+                if (!matched && valveScanTries >= 4 && now - valveScanAt < 60000) return;
+                valveScanBusy = true;
+                if (!matched) valveScanTries++;
+                valveScanAt = now;
                 valveController.refresh().then(() => {
                     if (valveCanActuate() && valveAuto.linkOn && drivingMode !== null) {
                         valveAuto.drive = drivingMode;
@@ -1387,6 +1480,7 @@ mgu.run({
             }, 15000);
             queueRender();
         }).catch((e) => {
+            valveScanBusy = false;
             valveReady = false;
             log.warn('exhaust controller start: ' + shortError(e));
             queueRender();
