@@ -2528,6 +2528,27 @@ mgu.run({
             if (index === 4) return setPage(6);
             return null;
         });
+        if (ctx.display) {
+            ctx.display.customBackBtn = true;
+            ctx.display.onBack = () => {
+                // Step back one subpage level; on a top-level tab, return false so the app closes.
+                if (page === 1 && engineConfigView !== 'sections') {
+                    engineConfigView = 'sections'; queueRender(); render(); return true;
+                }
+                if (page === 3) {
+                    if (dynoView !== 'sheet') { dynoView = 'sheet'; queueRender(); render(); return true; }
+                    setPage(2); return true;
+                }
+                if (page === 4) {
+                    if (dragView !== 'live') { dragBack(); return true; }
+                    setPage(2); return true;
+                }
+                if (page === 5 && carDataView !== 'menu') {
+                    carDataView = 'menu'; queueRender(); render(); return true;
+                }
+                return false;
+            };
+        }
 
         valveScanBusy = true;
         valveController.start().then(() => {

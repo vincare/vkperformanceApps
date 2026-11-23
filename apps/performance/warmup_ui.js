@@ -119,9 +119,9 @@ function draw(cv, G, t, s, actions) {
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
 
     // title tag (top-level page: no back chip)
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'WARM UP', 20, 196, 1.4), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'WARM UP', 23, 196, 1.4), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('WARM UP', tagX + (tagW - tagSlant) / 2, tagY + 32, 20, '#ffffff',
+    cv.text('WARM UP', tagX + (tagW - tagSlant) / 2, tagY + 34, 23, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.4, literal: true });
 
     // ---- slab content

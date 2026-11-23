@@ -290,8 +290,11 @@ class Display {
         const over = tgts.filter((p) => p.tgt.y + p.tgt.h <= top);
         return tabs.concat(over, scroll, tgts.filter((p) => over.indexOf(p) < 0), this.buttons().map((b) => ({ k: 'bar:' + b.id, bar: b.id })));
     }
-    /** HMI back (the controller pushed left): the app's screen closes as with the HMI's back arrow. */
+    /** HMI back (the controller pushed left): if the app handles in-page back (onBack() returns true), stay in the app; else close. */
     _back() {
+        if (this.onBack) {
+            try { if (this.onBack()) return; } catch (e) { this.log.error('onBack', e); }
+        }
         this.log.info('display: back (controller pushed left)');
         Promise.resolve(this.ui.close(this.screen.name)).catch((e) => this.log.warn('back: ' + e));
     }
@@ -493,6 +496,12 @@ class Display {
         if (this.own()) {
             const pl = this.place, sx = x * pl.scale + pl.ox, sy = y * pl.scale + pl.oy;
             const bar = sy >= pl.h - this.barH() ? this.buttons().find((b) => sx >= b.x - this.barOff - pl.x && sx < b.x - this.barOff - pl.x + b.w) : null;
+            const backBtn = !bar && this.customBackBtn && sx >= 0 && sx < 140 && sy >= this.headH() && sy < HMI.colEnd - pl.y;
+            if (backBtn) {
+                if (phase === 1) this.ownDown = 'backBtn';
+                else if (phase === 3 && this.ownDown === 'backBtn') { this.ownDown = null; this._back(); }
+                return;
+            }
             // the header's tabs (Settings among them) work over a sheet too
             const tab = !bar && (this.tabs || []).find(inside);
             const tgt = !bar && !tab && !this.sheet ? (this.pageTargets || []).find(inside) : null;
@@ -555,8 +564,10 @@ class Display {
         // app's area: the whole row is the app's, as a tap there must not count as the HMI's (mgu-render closes)
         const he = HMI.status.h ? this.headEnd : W;
         if (this.own()) {
-            // header (tabs), page and the slim bar: the back column and the status corner stay the HMI's
-            this.gpu.claim([{ x: hx, y: 0, w: he - hx, h: this.headH() }, { x: hx, y: this.headH(), w: W - hx, h: pl.h - this.headH() }].map(logical));
+            // header (tabs), page and the slim bar: the back column and the status corner stay the HMI's (unless customBackBtn claims the back area below the home cell)
+            const rects = [{ x: hx, y: 0, w: he - hx, h: this.headH() }, { x: hx, y: this.headH(), w: W - hx, h: pl.h - this.headH() }];
+            if (this.customBackBtn && hx > 0) rects.push({ x: 0, y: this.headH(), w: hx, h: HMI.colEnd - pl.y - this.headH() });
+            this.gpu.claim(rects.map(logical));
             return;
         }
         if (!this.onTab || this.tabs.length < 2) { this.gpu.claim([]); return; }
@@ -918,7 +929,22 @@ class Display {
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
         // mark the HMI draws above it when its bar is wider than the screen (eDrive's "Reset drive totals")
         c.clip(sx, 0, W - sx, HMI.status.h).clear(0).noclip();
-        if (hx > 0) c.clip(0, 0, hx, HMI.colEnd - pl.y).clear(0).noclip();
+        if (hx > 0) {
+            if (this.customBackBtn) {
+                // Keep only the top-left home cell see-through; draw a bold framed back button in the back column
+                c.clip(0, 0, hx, FULL.headH).clear(0).noclip();
+                c.fillRect(0, FULL.headH, hx, HMI.colEnd - pl.y - FULL.headH, '#000000');
+                const bx = (this.spec && this.spec.backBtnX) || 40, by0 = 372 - pl.y, bw = 56, bh = 66;
+                c.roundRect(bx - 2, by0 - 2, bw + 4, bh + 4, 12, G.withAlpha('#ffffff', 0.14));
+                c.roundRect(bx, by0, bw, bh, 10, '#232730');
+                c.strokeRoundRect(bx, by0, bw, bh, 10, 2, G.withAlpha('#d8e2f4', 0.65));
+                const cx = bx + bw / 2 + 3, cy = by0 + bh / 2;
+                c.line(cx + 6, cy - 14, cx - 8, cy, 4.2, '#ffffff');
+                c.line(cx - 8, cy, cx + 6, cy + 14, 4.2, '#ffffff');
+            } else {
+                c.clip(0, 0, hx, HMI.colEnd - pl.y).clear(0).noclip();
+            }
+        }
         drawCredit(c, W - 18, FULL.headH + 17);
         r.xf(1, 0, 0).append(c).xf();
     }

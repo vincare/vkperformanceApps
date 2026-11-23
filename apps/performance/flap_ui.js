@@ -220,7 +220,7 @@ function drawChip(cv, G, x, y, w, label, opts) {
     opts = opts || {};
     const lines = Array.isArray(opts.lines) && opts.lines.length ? opts.lines : [label];
     const spacing = 1.4;
-    const iconSpace = opts.icon === 'fwd' || opts.icon === 'reset' || opts.icon === 'back' ? 48 : 28;
+    const iconSpace = opts.icon === 'fwd' || opts.icon === 'reset' ? 48 : 28;
     const labelW = lines.reduce((max, line) => Math.max(max,
         cv.textWidth(line, 15, { font: 'bold', spacing, literal: true })), 0);
     w = Math.max(w, Math.ceil(labelW + iconSpace));
@@ -235,9 +235,6 @@ function drawChip(cv, G, x, y, w, label, opts) {
         const a = 30 * Math.PI / 180, tx = cx0 + Math.sin(a) * 7, ty = cy0 - Math.cos(a) * 7;
         cv.line(tx, ty, tx - 2.2, ty - 4.3, 2.4, '#ffffff');
         cv.line(tx, ty, tx - 4.8, ty + 0.3, 2.4, '#ffffff');
-    } else if (opts.icon === 'back') {
-        cv.line(x + 22, y + 10, x + 14, y + bkH / 2, 2.4, '#ffffff');
-        cv.line(x + 14, y + bkH / 2, x + 22, y + bkH - 10, 2.4, '#ffffff');
     }
     const lineHeight = 19;
     const firstY = y + bkH / 2 + 6 - (lines.length - 1) * lineHeight / 2;
@@ -246,7 +243,7 @@ function drawChip(cv, G, x, y, w, label, opts) {
         if (opts.icon === 'fwd') {
             cv.text(line, x + (w - 16) / 2, textY, 15, '#ffffff',
                 { align: 'center', font: 'bold', spacing, literal: true });
-        } else if (opts.icon === 'reset' || opts.icon === 'back') {
+        } else if (opts.icon === 'reset') {
             cv.text(line, x + w / 2 + 7, textY, 15, '#ffffff',
                 { align: 'center', font: 'bold', spacing, literal: true });
         } else {
@@ -262,11 +259,6 @@ function titleTagWidth(cv, label, size, minWidth, spacing, font) {
         font: font || 'num', spacing: spacing === undefined ? 1.6 : spacing, literal: true,
     });
     return Math.max(minWidth || 0, Math.ceil(width + 42));
-}
-
-function drawBackChip(cv, G, tagX, tagY, tagH, actions, targetKey, dy) {
-    drawChip(cv, G, tagX, tagY + tagH + 14 + (dy || 0), 118, 'BACK',
-        { icon: 'back', run: actions && actions.back, key: targetKey });
 }
 
 function drawBurbles(cv, G, t, valve, car, actions, now) {
@@ -291,12 +283,11 @@ function drawBurbles(cv, G, t, valve, car, actions, now) {
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
     drawCar(cv, G, t, valve, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, 'flames');
 
-    // 3. Title tag + back chip
-    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST BURBLES', 24, 300), tagH = 46, tagSlant = 15;
+    // 3. Title tag
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST BURBLES', 27, 300), tagH = 46, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('EXHAUST BURBLES', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
+    cv.text('EXHAUST BURBLES', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
-    drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_burbles_4');
 
     // 4. Smooth diagonal panel on the right (same ribbon as EXHAUST SYSTEM)
     const ribX = 1128;
@@ -516,11 +507,10 @@ function drawExhaustSheet(cv, G, t, valve, car, actions, now) {
     // 3. Car centered on the slab
     drawCar(cv, G, t, valve, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, true);
 
-    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST SYSTEM', 24, 264), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST SYSTEM', 27, 264), tagH = 46, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('EXHAUST SYSTEM', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
+    cv.text('EXHAUST SYSTEM', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
-    drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_flap_back');
 
     // 3. Smooth diagonal panel on the right (no banding segments or decorative outlines)
     const ribX = 1128;
@@ -635,4 +625,4 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     return cv;
 }
 
-module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, drawBackChip, titleTagWidth };
+module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, titleTagWidth };

@@ -135,19 +135,6 @@ function ribbonRows(cv, G, s, actions, ribX, y0, xAt, rows) {
     });
 }
 
-function tagChips(cv, G, y0, tagText, tagW, backAction, backKey, extra) {
-    const tagX = 40, tagY = y0 + 24, tagH = 46, tagSlant = 15;
-    tagW = Sheet.titleTagWidth(cv, tagText, 24, tagW);
-    Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text(tagText, tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH, { back: backAction }, backKey);
-    (extra || []).forEach(([label, opt, dy]) => {
-        Sheet.drawChip(cv, G, tagX, tagY + tagH + (dy || 14), opt && opt.w || 196, label, opt);
-    });
-    return tagY + tagH;
-}
-
 function drawCar(cv, t, car, rect) {
     if (!car || !car.imageId || !(car.width > 0) || !(car.height > 0)) {
         cv.text('SIDE VIEW UNAVAILABLE', rect.x + rect.w / 2, rect.y + rect.h / 2, 14, t.dim,
@@ -257,15 +244,14 @@ function drawSheet(cv, G, t, s, car, actions) {
     traceChart(cv, G, t, s, isRun ? s.trace : (current && current.trace), { x: 338, y: y0 + 106, w: 560, h: 270 });
     drawCar(cv, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
 
-    // 3. Title tag + chips (all-runs, back, reset)
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUN', 24, 196), tagH = 46, tagSlant = 15;
+    // 3. Title tag and actions
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUN', 27, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUN', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
+    cv.text('DRAG RUN', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'DRAG HISTORY',
         { icon: 'fwd', run: actions && actions.toggleView, key: 'performance_drag_runs' });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_drag_back', 54);
-    Sheet.drawChip(cv, G, tagX, tagY + tagH + 122, 118, 'RESET',
+    Sheet.drawChip(cv, G, tagX, tagY + tagH + 68, 118, 'RESET',
         { icon: 'reset', run: actions && actions.reset, key: 'performance_drag_reset' });
 
     // 4. Right ribbon — same diagonal bands as DYNO RUN
@@ -397,16 +383,14 @@ function drawSections(cv, G, t, s, actions) {
         }
     });
 
-    // Tag + CLEAR HISTORY above BACK
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 24, 216), tagH = 46, tagSlant = 15;
+    // Title tag and clear-history action
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 27, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
+    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196,
         s.clearArmed ? 'CONFIRM CLEAR' : 'CLEAR HISTORY',
         { icon: 'reset', run: actions && actions.clear, key: 'performance_dragsecs_clear' });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH,
-        { back: actions && actions.toggleView }, 'performance_dragsecs_back', 54);
 
     // Right ribbon — the five best results
     const ribX = ribbon(cv, G, y0, y1);
@@ -535,18 +519,16 @@ function drawRuns(cv, G, t, s, actions) {
             G.withAlpha('#e8c8ce', 0.5), { align: 'right', font: 'bold', spacing: 0.8, literal: true });
     }
 
-    // Tag + CLEAR <SECTION> HISTORY above BACK
+    // Title tag and clear-section action
     const shortName = sec.label.replace(/ KM\/H| MPH/g, '');
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 24, 216), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 27, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
+    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
     const clearLines = s.clearArmed ? ['CONFIRM CLEAR'] : ['CLEAR ' + shortName, 'HISTORY'];
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 242,
         clearLines.join(' '),
         { icon: 'reset', run: actions && actions.clearSection, key: 'performance_dragruns_clear', lines: clearLines });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH,
-        { back: actions && actions.up }, 'performance_dragruns_back', s.clearArmed ? 54 : 60);
 
     // Right ribbon — TOP 3 RUNS leaderboard (crown on #1)
     const ribX = ribbon(cv, G, y0, y1);
@@ -675,15 +657,13 @@ function drawReport(cv, G, t, s, actions) {
         cv.text(val, tx + 18, ty + 72, 32, '#ffffff', { font: 'num', spacing: 0.5, literal: true });
     });
 
-    // Left tag + NEXT RUN above BACK
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'REPORT', 24, 196), tagH = 46, tagSlant = 15;
+    // Left title tag and next-run action
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'REPORT', 27, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('REPORT', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
+    cv.text('REPORT', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 156, 'NEXT RUN',
         { icon: 'fwd', run: actions && actions.nextRun, key: 'performance_dragreport_next' });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH,
-        { back: actions && actions.up }, 'performance_dragreport_back', 54);
 
     // Right ribbon — VALID/INVALID stamp sticker + 2-column sub-split breakdown
     const ribX = ribbon(cv, G, y0, y1);

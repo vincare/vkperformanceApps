@@ -200,14 +200,13 @@ function drawSheet(cv, G, t, s, car, current, actions) {
     chart(cv, G, t, s, current, { x: 338, y: y0 + 106, w: 560, h: 270 });
     drawCar(cv, G, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
 
-    // 3. Title tag + back chip
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DYNO RUN', 24, 196), tagH = 46, tagSlant = 15;
+    // 3. Title tag and saved-runs action
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DYNO RUN', 27, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DYNO RUN', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
+    cv.text('DYNO RUN', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'ALL DYNO RUNS',
         { icon: 'fwd', run: actions && actions.toggleView, key: 'performance_dyno_runs' });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_dyno_back', 54);
 
     // 4. Smooth diagonal panel on the right (same ribbon as EXHAUST SYSTEM)
     const ribX = 1128;
@@ -318,13 +317,11 @@ function drawRuns(cv, G, t, s, actions) {
         }
     });
 
-    // Tag + back chip (back returns to the dyno sheet)
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'SAVED RUNS', 24, 216), tagH = 46, tagSlant = 15;
+    // Title tag
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'SAVED RUNS', 27, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('SAVED RUNS', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
+    cv.text('SAVED RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH,
-        { back: actions && actions.toggleView }, 'performance_dynoruns_back');
 
     // Right ribbon — control rows, same style as the mode rows
     const ribX = 1128;

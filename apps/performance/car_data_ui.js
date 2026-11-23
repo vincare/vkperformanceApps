@@ -123,12 +123,11 @@ function drawSheet(cv, G, t, s, car, actions) {
     }
 
 
-    // 3. Title tag + back chip (same as DYNO RUN)
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, def.title, 20, 196, 1.4), tagH = 46, tagSlant = 15;
+    // 3. Enlarged section title tag
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, def.title, 23, 196, 1.4), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text(def.title, tagX + (tagW - tagSlant) / 2, tagY + 32, 20, '#ffffff',
+    cv.text(def.title, tagX + (tagW - tagSlant) / 2, tagY + 34, 23, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.4, literal: true });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_cardata_back');
 
     // 4. Smooth diagonal panel on the right (same ribbon as DYNO RUN)
     const ribX = 1128;
