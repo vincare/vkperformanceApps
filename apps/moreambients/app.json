@@ -2,7 +2,7 @@
   "id": "moreambients",
   "title": "MoreAmbients",
   "description": "BMW-style OEM ambience page with instant named colours, automatic module discovery, zone brightness and the original palette",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "vendor": "VKPERFORMANCE",
   "loggingId": "OAA7",
   "iconGlyph": "ambient",
@@ -53,8 +53,7 @@
         ["BTN_FAV_LOAD", "Apply saved look"],
         ["BTN_STUDIO", "Colour Studio page"],
         ["BTN_BMW", "BMW factory palette page"],
-        ["BTN_OEM", "OEM ambience page"],
-        ["BTN_SETTINGS", "Settings"]
+        ["BTN_OEM", "OEM ambience page"]
       ]
     }
   ]

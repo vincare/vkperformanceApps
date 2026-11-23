@@ -3,6 +3,8 @@
 /** MoreAmbients: BMW's reversible interior-colour selection plus discovered-module RGB control. */
 const mgu = require('./kit/mgu');
 const G = require('./kit/gauges');
+const Sheet = require('./sheet_ui');
+const BgArt = require('./bg_art');
 const { Diag } = require('./kit/diag');
 const fs = require('fs');
 const path = require('path');
@@ -102,6 +104,40 @@ function factoryRequest(n, brightness) {
 }
 function shortError(e) { return String(e && e.message || e || 'unknown').replace(/[\r\n]+/g, ' '); }
 
+/** The Colour panel's 24 named colours. */
+const PALETTE = [
+    ['Ice', '#DCEEFF'], ['Ivory', '#FFF0D6'], ['Champagne', '#EBC99C'], ['Citrine', '#FFD054'],
+    ['Honey', '#F5AA24'], ['Ember', '#FF8A3D'], ['Copper', '#CC632E'], ['Coral', '#FF6F70'],
+    ['Ruby', '#F53D57'], ['Crimson', '#B91F43'], ['Flamingo', '#FF65AD'], ['Fuchsia', '#E728B9'],
+    ['Orchid', '#DE72F3'], ['Lavender', '#C5ACFF'], ['Amethyst', '#A378FF'], ['Indigo', '#6145D8'],
+    ['Sapphire', '#4775FF'], ['Azure', '#45A9FF'], ['Glacier', '#19D3F2'], ['Lagoon', '#22C9AF'],
+    ['Mint', '#9DF2CD'], ['Jade', '#65D88F'], ['Emerald', '#19A85D'], ['Lime', '#B7EA42'],
+].map(([name, c1]) => ({ name, c1 }));
+
+/** The Combos panel's 20 two-colour combinations: c1 = dash (upper zone), c2 = footwells (lower zone). */
+const COMBOS = [
+    ['Glacier Ember', '#19D3F2', '#FF8A3D'], ['Midnight Ice', '#4775FF', '#DCEEFF'],
+    ['Polar Night', '#DCEEFF', '#6145D8'], ['Ocean Drive', '#45A9FF', '#22C9AF'],
+    ['Neon Circuit', '#19D3F2', '#B7EA42'], ['Aurora', '#19A85D', '#A378FF'],
+    ['Violet Coast', '#A378FF', '#45A9FF'], ['Ultraviolet', '#6145D8', '#E728B9'],
+    ['Miami', '#FF65AD', '#19D3F2'], ['Soft Dusk', '#C5ACFF', '#FF6F70'],
+    ['Orchid Pearl', '#DE72F3', '#FFF0D6'], ['Ruby Line', '#F53D57', '#B91F43'],
+    ['Velvet Night', '#B91F43', '#C5ACFF'], ['Sunset', '#FF6F70', '#F5AA24'],
+    ['Golden Hour', '#EBC99C', '#FFD054'], ['Copper Lounge', '#CC632E', '#FFF0D6'],
+    ['Blue Hour', '#4775FF', '#EBC99C'], ['Mint Frost', '#9DF2CD', '#DCEEFF'],
+    ['Jade Coast', '#65D88F', '#22C9AF'], ['Emerald Gold', '#19A85D', '#FFD054'],
+].map(([name, c1, c2]) => ({ name, c1, c2 }));
+
+function hexToRgbScaled(h) {
+    return [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) * 254 / 255);
+}
+
+/** The Zones page: pick which zone the colour controls target. */
+const ZONE_ROWS = [
+    { name: 'All zones', zone: 'all' }, { name: 'Dashboard (upper)', zone: 'upper' },
+    { name: 'Footwells (lower)', zone: 'lower' },
+];
+
 mgu.run({
     async start(ctx) {
         const { ui, settings, log } = ctx;
@@ -111,12 +147,20 @@ mgu.run({
             busy: false, notice: 'Module scan starts automatically when the app opens.', noticeColor: C.muted,
             scanBusy: false, applyBusy: false, activeCustom: false, renewTimer: null,
             oemPaletteOpen: false, oemSelected: null, oemBackground: 62, oemAccent: 76,
-            oemNight: false, oemEnabled: true, oemWantApply: false,
+            oemNight: false, oemEnabled: true, oemDynamic: true, oemFocus: 0, oemWantApply: false,
+            oemPendingTarget: null, oemPendingAt: 0, oemToggleBusy: false,
+            blackoutOverride: false, blackoutApplying: false, blackoutLastAttemptAt: 0,
+            oemScroll: 0, oemScrollMax: 0,
+            detail: null, detailScroll: 0, detailScrollMax: 0, selColour: -1, selCombo: -1, previewChoice: null,
+            detailFocus: -1, look: null, pendingLook: false, oemLockBusy: false,
             favorites: [], favorite: 0, upperRead: null, lowerRead: null, customUpper: null, customLower: null, customOther: null,
         };
         let stopped = false, renderTimer = null, autoScanTimer = null, renderQueued = false;
-        let lastAction = Object.create(null), hitboxes = [];
+        let lastAction = Object.create(null), hitboxes = [], wheelGeom = null;
+        let lastHudGeom = null, lastDetGeom = null, lastFocusKey = null, focusPoll = null;
+        let lastOemLockAt = 0;
         const favFile = path.join(ctx.dataDir, 'moreambients_favourites.json');
+        const lookFile = path.join(ctx.dataDir, 'moreambients_look.json');
         const freshSpeed = () => !!(state.speedAt && Date.now() - state.speedAt < 8000 && isFiniteNumber(state.speed));
         const hueValue = () => isFiniteNumber(settings.get('hue')) ? settings.get('hue') : 205;
         const saturationValue = () => isFiniteNumber(settings.get('saturation')) ? settings.get('saturation') : 86;
@@ -133,6 +177,37 @@ mgu.run({
                 ? { rgb: x.rgb.map((n) => clamp(Number(n) || 0, 0, 255)), brightness: clamp(isFinite(Number(x.brightness)) ? Number(x.brightness) : 76, 10, 100), hue: clamp(isFinite(Number(x.hue)) ? Number(x.hue) : 205, 0, 359), saturation: clamp(isFinite(Number(x.saturation)) ? Number(x.saturation) : 86, 0, 100) }
                 : null);
         } catch (e) { state.favorites = []; }
+
+        try {
+            const saved = JSON.parse(fs.readFileSync(lookFile, 'utf8'));
+            if (saved && typeof saved === 'object') {
+                state.look = saved.look && typeof saved.look === 'object' ? saved.look : null;
+                if (saved.oemSelected && saved.oemSelected.rgb) {
+                    const match = OEM_COLORS.find((c) => c.name === saved.oemSelected.name);
+                    state.oemSelected = match || saved.oemSelected;
+                }
+                state.selColour = isFiniteNumber(saved.selColour) ? saved.selColour : -1;
+                state.selCombo = isFiniteNumber(saved.selCombo) ? saved.selCombo : -1;
+                state.previewChoice = saved.previewChoice || null;
+                if (saved.zone === 'all' || saved.zone === 'upper' || saved.zone === 'lower') state.zone = saved.zone;
+                if (saved.oemEnabled === false) state.oemEnabled = false;
+                if (isFiniteNumber(saved.oemBackground)) state.oemBackground = clamp(saved.oemBackground, 10, 100);
+                if (isFiniteNumber(saved.oemAccent)) state.oemAccent = clamp(saved.oemAccent, 10, 100);
+                state.oemNight = !!saved.oemNight;
+                state.oemDynamic = saved.oemDynamic !== false;
+            }
+        } catch (e) { /* first run · keep defaults */ }
+        function saveLook() {
+            try {
+                fs.writeFileSync(lookFile, JSON.stringify({
+                    look: state.look, selColour: state.selColour, selCombo: state.selCombo,
+                    oemSelected: state.oemSelected && state.oemSelected.name ? { name: state.oemSelected.name } : null,
+                    previewChoice: state.previewChoice, zone: state.zone, oemEnabled: state.oemEnabled,
+                    oemBackground: state.oemBackground, oemAccent: state.oemAccent,
+                    oemNight: state.oemNight, oemDynamic: state.oemDynamic,
+                }));
+            } catch (e) { log.warn('look persist: ' + shortError(e)); }
+        }
 
         function setNotice(text, color) { state.notice = text; state.noticeColor = color || C.muted; queueRender(); }
         function queueRender() {
@@ -152,9 +227,32 @@ mgu.run({
             try {
                 const watch = await ctx.signals.watch(LIGHT, '1', {
                     statusAmbientLightInteriorColour: (v) => {
-                        state.liveSlot = readSlot(v);
+                        const slot = readSlot(v);
+                        const slotChanged = slot !== null && slot !== state.liveSlot;
+                        state.liveSlot = slot;
                         const brightness = v && v.statusBrightnessValueBrightnessOffsetAmbientePanoramicRoofInteriorLighting;
-                        if (isFiniteNumber(brightness)) state.oemEnabled = brightness !== 0;
+                        if (isFiniteNumber(brightness)) {
+                            const reportedOn = brightness !== 0;
+                            if (state.blackoutOverride) {
+                                state.oemEnabled = false;
+                            } else if (state.oemPendingTarget !== null && reportedOn !== state.oemPendingTarget
+                                && Date.now() - state.oemPendingAt < 12000) {
+                                // Keep the requested state while the polled BMW status catches up.
+                            } else {
+                                if (state.oemPendingTarget !== null && reportedOn !== state.oemPendingTarget) {
+                                    setNotice('BMW DID NOT CONFIRM THE AMBIENT LIGHT SETTING', C.amber);
+                                }
+                                state.oemPendingTarget = null;
+                                state.oemEnabled = reportedOn;
+                            }
+                        }
+                        // OEM menu colour pick (slot changed) while our LIN look is applied
+                        // + Ambient lighting ON → overwrite it back. OFF toggle lets OEM through.
+                        if (slotChanged && state.oemEnabled && state.look && state.activeCustom && !state.oemLockBusy
+                            && Date.now() - lastOemLockAt > 4000) {
+                            lastOemLockAt = Date.now(); state.oemLockBusy = true;
+                            reapplyLook('OEM MENU CHANGE OVERRIDDEN · APP COLOUR KEPT').finally(() => { state.oemLockBusy = false; });
+                        }
                         queueRender();
                     },
                 }, log, { pollMs: 5000 });
@@ -168,6 +266,14 @@ mgu.run({
                         const speed = isFiniteNumber(raw) && raw !== 65535 ? raw * 0.015625 : null;
                         if (speed !== null && speed >= 0 && speed <= 400) { state.speed = speed; state.speedAt = Date.now(); }
                         else { state.speed = null; state.speedAt = 0; }
+                        if (state.pendingLook && state.oemEnabled && freshSpeed() && state.modules.length) {
+                            state.pendingLook = false;
+                            reapplyLook('LAST AMBIENT LOOK RESTORED');
+                        }
+                        if (!state.oemEnabled && state.modules.length && !state.blackoutOverride && !state.blackoutApplying
+                            && Date.now() - state.blackoutLastAttemptAt > 10000 && freshSpeed()) {
+                            applyBlackoutOverride();
+                        }
                         queueRender();
                     },
                 }, log, { pollMs: 2000 });
@@ -179,7 +285,7 @@ mgu.run({
 
         async function scanModules() {
             if (state.scanBusy || state.applyBusy || state.busy || stopped) return;
-            if (state.activeCustom) await restoreBmw();
+            if (state.activeCustom || state.blackoutOverride) await restoreBmw();
             state.scanBusy = true; state.scan = 'scanning'; state.modules = [];
             setNotice('READING THE TWO BMW BODY-CONTROLLER LIGHT BUSES…', C.cyan);
             const found = [];
@@ -206,7 +312,9 @@ mgu.run({
                 log.warn('ambient module scan: ' + shortError(e));
             } finally {
                 state.scanBusy = false; queueRender();
-                if (state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
+                if (!state.oemEnabled && state.modules.length && !state.blackoutOverride) {
+                    setTimeout(() => applyBlackoutOverride(), 0);
+                } else if (state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
             }
         }
         function average(list) {
@@ -239,7 +347,8 @@ mgu.run({
         }
         async function applyCustom(isRenewal, requestedColour, requestedZones) {
             if (stopped || state.applyBusy || state.scanBusy || state.busy) return;
-            if (!canChangeColor()) {
+            const renewingBlackout = isRenewal && state.blackoutOverride;
+            if (!renewingBlackout && !canChangeColor()) {
                 if (isRenewal) {
                     state.activeCustom = false; state.customUpper = null; state.customLower = null; state.customOther = null; state.renewTimer = null;
                     setNotice('CUSTOM COLOUR WILL RETURN TO BMW WHEN ITS SHORT HOLD EXPIRES', C.amber);
@@ -281,17 +390,38 @@ mgu.run({
                     state.renewTimer = setTimeout(() => applyCustom(true), RENEW_MS);
                 } else {
                     state.customUpper = null; state.customLower = null; state.customOther = null; state.activeCustom = false;
+                    if (state.blackoutOverride) state.blackoutOverride = false;
                     if (!isRenewal) setNotice('BDC DID NOT ACCEPT THE COLOUR · BMW LIGHTING IS UNCHANGED', C.red);
                 }
             } catch (e) {
                 state.activeCustom = false; state.customUpper = null; state.customLower = null; state.customOther = null;
+                if (state.blackoutOverride) state.blackoutOverride = false;
                 if (!isRenewal) setNotice('COLOUR COMMAND FAILED · ' + shortError(e).slice(0, 70), C.red);
                 log.warn('ambient write: ' + shortError(e));
             } finally { state.applyBusy = false; queueRender(); }
         }
+        async function applyBlackoutOverride() {
+            if (state.blackoutApplying || stopped || state.oemEnabled) return false;
+            if (!freshSpeed()) return false;
+            state.blackoutApplying = true;
+            state.blackoutLastAttemptAt = Date.now();
+            const black = { byZone: {
+                upper: { rgb: [0, 0, 0], brightness: 0 },
+                lower: { rgb: [0, 0, 0], brightness: 0 },
+                other: { rgb: [0, 0, 0], brightness: 0 },
+            } };
+            try {
+                await applyCustom(false, black, ['upper', 'lower', 'other']);
+                const applied = [state.customUpper, state.customLower, state.customOther].some((c) =>
+                    c && c.brightness === 0 && c.rgb && c.rgb.every((n) => n === 0));
+                state.blackoutOverride = !!(applied && state.activeCustom);
+                queueRender();
+                return state.blackoutOverride;
+            } finally { state.blackoutApplying = false; }
+        }
         async function restoreBmw() {
             if (state.applyBusy || state.scanBusy || state.busy) return;
-            clearTimeout(state.renewTimer); state.renewTimer = null; state.activeCustom = false;
+            clearTimeout(state.renewTimer); state.renewTimer = null; state.activeCustom = false; state.blackoutOverride = false;
             if (!state.modules.length || !state.diag || !state.diag.available) {
                 state.upperRead = null; state.lowerRead = null; state.customUpper = null; state.customLower = null; state.customOther = null;
                 setNotice('RESTORE LINK UNAVAILABLE · THE SHORT BMW OVERRIDE WILL EXPIRE BY ITSELF', C.amber);
@@ -322,19 +452,47 @@ mgu.run({
             return request;
         }
         async function setOemLightingEnabled(enabled) {
-            if (!canChangeColor()) return false;
-            if (!state.proxy) { setNotice('BMW AMBIENT LIGHT CONTROL IS NOT AVAILABLE', C.amber); return false; }
+            const previewOnly = !!ctx.preview && !state.proxy;
+            if (!previewOnly && !canChangeColor()) return false;
+            const canBlackoutWithModules = !enabled && state.modules.length && state.diag && state.diag.available;
+            if (!state.proxy && !previewOnly && !canBlackoutWithModules) {
+                setNotice('BMW AMBIENT LIGHT CONTROL IS NOT AVAILABLE', C.amber); return false;
+            }
+            if (state.oemToggleBusy) return false;
+            state.oemToggleBusy = true;
+            const previousEnabled = state.oemEnabled;
             try {
-                if (!enabled && state.activeCustom) await restoreBmw();
-                await ctx.signals.set(state.proxy, 'ambientLightInteriorColour', brightnessRequest(enabled ? 255 : 0));
+                if (state.activeCustom || state.blackoutOverride) await restoreBmw();
+                let bmwAccepted = false;
+                let bmwError = null;
+                if (state.proxy) {
+                    try {
+                        await ctx.signals.set(state.proxy, 'ambientLightInteriorColour', brightnessRequest(enabled ? 255 : 0));
+                        bmwAccepted = true;
+                    } catch (e) { bmwError = e; }
+                }
                 state.oemEnabled = !!enabled;
-                setNotice(enabled ? 'AMBIENT LIGHTING ON' : 'AMBIENT LIGHTING OFF', C.green);
+                state.oemPendingTarget = bmwAccepted ? !!enabled : null;
+                state.oemPendingAt = bmwAccepted ? Date.now() : 0;
+                let moduleBlackout = false;
+                if (!enabled && !previewOnly && state.modules.length && state.diag && state.diag.available) {
+                    moduleBlackout = await applyBlackoutOverride();
+                }
+                if (!previewOnly && !bmwAccepted && !moduleBlackout) {
+                    state.oemEnabled = previousEnabled; state.oemPendingTarget = null; state.oemPendingAt = 0;
+                    throw bmwError || new Error('BMW ambient control is unavailable');
+                }
+                setNotice(enabled ? 'AMBIENT LIGHTING ON' : moduleBlackout
+                    ? 'AMBIENT LIGHTING OFF · BMW REQUEST ' + (bmwAccepted ? 'ACCEPTED' : 'UNAVAILABLE') + ' · MODULES HELD DARK'
+                    : 'AMBIENT LIGHTING OFF · BMW REQUEST ACCEPTED', bmwAccepted ? C.green : C.amber);
+                saveLook();
+                queueRender();
                 return true;
             } catch (e) {
                 setNotice('AMBIENT LIGHT REQUEST FAILED · ' + shortError(e).slice(0, 64), C.red);
                 log.warn('ambient on/off: ' + shortError(e));
                 return false;
-            }
+            } finally { state.oemToggleBusy = false; }
         }
         function effectiveOemBrightness(value) {
             return clamp(Math.round(value * (state.oemNight ? 0.45 : 1)), 10, 100);
@@ -361,6 +519,63 @@ mgu.run({
                 },
             };
             await applyCustom(false, color, ['upper', 'lower', 'other']);
+        }
+        /** Shared apply payloads so a pick, a persisted restore and the OEM lock all write the same look. */
+        const comboPayload = (c) => ({ byZone: {
+            upper: { rgb: hexToRgbScaled(c.c1), brightness: effectiveOemBrightness(state.oemAccent) },
+            lower: { rgb: hexToRgbScaled(c.c2), brightness: effectiveOemBrightness(state.oemBackground) },
+            other: { rgb: hexToRgbScaled(c.c2), brightness: effectiveOemBrightness(Math.round((state.oemAccent + state.oemBackground) / 2)) },
+        } });
+        const colourPayload = (c) => { const rgb = hexToRgbScaled(c.c1); return { byZone: {
+            upper: { rgb, brightness: effectiveOemBrightness(state.oemAccent) },
+            lower: { rgb, brightness: effectiveOemBrightness(state.oemBackground) },
+            other: { rgb, brightness: effectiveOemBrightness(Math.round((state.oemAccent + state.oemBackground) / 2)) },
+        } }; };
+        async function applyComboLook(c, note) {
+            if (!state.oemEnabled) { const on = await setOemLightingEnabled(true); if (!on) return; }
+            if (note) setNotice(note, C.cyan);
+            await applyCustom(false, comboPayload(c), ['upper', 'lower', 'other']);
+        }
+        async function applyColourLook(c, note) {
+            if (!state.oemEnabled) { const on = await setOemLightingEnabled(true); if (!on) return; }
+            if (note) setNotice(note, C.cyan);
+            await applyCustom(false, colourPayload(c), ['upper', 'lower', 'other']);
+        }
+        /** Re-writes the last picked look — used for start-up restore and the OEM-menu override lock. */
+        async function reapplyLook(note) {
+            const lk = state.look;
+            if (!lk) return;
+            if (lk.type === 'combo' && COMBOS[lk.index]) return applyComboLook(COMBOS[lk.index], note || ('COMBO ' + COMBOS[lk.index].name.toUpperCase() + ' · REAPPLYING…'));
+            if (lk.type === 'colour' && PALETTE[lk.index]) return applyColourLook(PALETTE[lk.index], note || (PALETTE[lk.index].name.toUpperCase() + ' · REAPPLYING…'));
+            if (lk.type === 'oem' && state.oemSelected) {
+                if (note) setNotice(note, C.cyan);
+                return applyOemSelection();
+            }
+        }
+        /** A tap on the open right panel: a combo applies both zones, a colour applies it to all zones. */
+        async function pickDetailItem(i) {
+            if (state.detail === 'zones') {
+                const z = ZONE_ROWS[i]; if (!z) return;
+                state.zone = z.zone; saveLook(); queueRender(); return;
+            }
+            if (state.detail === 'combos') {
+                const c = COMBOS[i]; if (!c) return;
+                state.selCombo = i; state.previewChoice = 'combo'; state.look = { type: 'combo', index: i }; state.pendingLook = false;
+                saveLook(); queueRender();
+                await applyComboLook(c, 'COMBO ' + c.name.toUpperCase() + ' · APPLYING BOTH ZONES…');
+                return;
+            }
+            if (state.detail === 'colours' && i === 0) {
+                // First Color row is the "Combos" entry → open the separate Combos page
+                state.detail = 'combos'; state.detailScroll = 0;
+                state.detailFocus = state.selCombo >= 0 ? state.selCombo : 0;
+                if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; }
+                queueRender(); return;
+            }
+            const c = PALETTE[i - 1]; if (!c) return;
+            state.selColour = i - 1; state.previewChoice = 'colour'; state.look = { type: 'colour', index: i - 1 }; state.pendingLook = false;
+            saveLook(); queueRender();
+            await applyColourLook(c, 'COLOUR ' + c.name.toUpperCase() + ' · APPLYING TO ALL ZONES…');
         }
         async function applyOemBrightness() {
             if (state.oemSelected) return applyOemSelection();
@@ -389,13 +604,14 @@ mgu.run({
         async function adjustOemBrightness(zone, value) {
             if (zone === 'background') state.oemBackground = clamp(value, 10, 100);
             else state.oemAccent = clamp(value, 10, 100);
-            queueRender();
+            saveLook(); queueRender();
             return applyOemBrightness();
         }
         async function selectOemColor(color) {
             state.oemSelected = color;
             state.oemPaletteOpen = true;
-            queueRender();
+            state.look = { type: 'oem', name: color.name }; state.pendingLook = false;
+            saveLook(); queueRender();
             if (!state.oemEnabled && !await setOemLightingEnabled(true)) return;
             if (state.scanBusy) { state.oemWantApply = true; setNotice('COLOUR READY · APPLYING WHEN MODULE SCAN FINISHES', C.cyan); return; }
             await applyOemSelection();
@@ -419,18 +635,39 @@ mgu.run({
             queueRender(); setNotice('LOOK ' + (state.favorite + 1) + ' LOADED · PRESS APPLY TO CHANGE THE CAR', C.cyan);
         }
         function chooseFavorite(step) { state.favorite = (state.favorite + step + FAVOURITES) % FAVOURITES; queueRender(); }
-        function changeZone() { state.zone = state.zone === 'all' ? 'upper' : state.zone === 'upper' ? 'lower' : 'all'; queueRender(); }
+        function changeZone() { state.zone = state.zone === 'all' ? 'upper' : state.zone === 'upper' ? 'lower' : 'all'; saveLook(); queueRender(); }
         function setPage(page) { state.page = page; queueRender(); }
         function toggleView() { state.page = state.page === 'studio' ? 'bmw' : 'studio'; queueRender(); }
         const actions = {
             view: toggleView, zone: changeZone,
             studioPage: () => setPage('studio'), bmwPage: () => setPage('bmw'), oemPage: () => setPage('oem'),
             oemColorPanel: () => { state.oemPaletteOpen = !state.oemPaletteOpen; queueRender(); },
-            oemLight: async () => {
-                const enabled = await setOemLightingEnabled(!state.oemEnabled);
-                if (enabled && state.oemSelected) await applyOemSelection();
+            panelColour: () => { state.detail = 'colours'; state.detailScroll = 0; state.detailFocus = state.selColour >= 0 ? state.selColour + 1 : 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; } queueRender(); },
+            panelCombos: () => { state.detail = 'combos'; state.detailScroll = 0; state.detailFocus = state.selCombo >= 0 ? state.selCombo : 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; } queueRender(); },
+            panelZones: () => { state.detail = 'zones'; state.detailScroll = 0; state.detailFocus = Math.max(0, ZONE_ROWS.findIndex((z) => z.zone === state.zone)); if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; } queueRender(); },
+            detailBack: () => {
+                const prev = state.detail;
+                // Combos lives inside the Color page: back returns to Color, then to the main list
+                if (prev === 'combos') {
+                    state.detail = 'colours'; state.detailScroll = 0;
+                    state.detailFocus = state.selColour >= 0 ? state.selColour + 1 : 0;
+                    if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; }
+                    queueRender(); return;
+                }
+                state.detail = null; state.detailScroll = 0; state.detailFocus = -1;
+                const returnRow = prev === 'colours' ? 1 : prev === 'zones' ? 2 : 0;
+                state.oemFocus = returnRow;
+                if (ctx.display) { ctx.display.focusKey = 'tgt:row' + returnRow; lastFocusKey = 'tgt:row' + returnRow; }
+                queueRender();
             },
-            oemNight: async () => { state.oemNight = !state.oemNight; queueRender(); await applyOemBrightness(); },
+            oemLight: async () => {
+                const target = !state.oemEnabled;
+                const ok = await setOemLightingEnabled(target);
+                // turning the ambient back on restores OUR look, not the OEM colour
+                if (ok && target) { if (state.look) await reapplyLook(); else if (state.oemSelected) await applyOemSelection(); }
+            },
+            oemNight: async () => { state.oemNight = !state.oemNight; saveLook(); queueRender(); await applyOemBrightness(); },
+            oemDynamic: () => { state.oemDynamic = !state.oemDynamic; saveLook(); queueRender(); },
             backgroundDown: () => adjustOemBrightness('background', state.oemBackground - 10),
             backgroundUp: () => adjustOemBrightness('background', state.oemBackground + 10),
             accentDown: () => adjustOemBrightness('accent', state.oemAccent - 10),
@@ -461,265 +698,285 @@ mgu.run({
             if (ctx.hideButton) ctx.hideButton(button);
         });
 
-        function addButton(cv, x, y, w, h, label, key, options) {
-            const o = options || {}, accent = o.accent || C.cyan;
-            cv.roundRect(x, y, w, h, 8, o.primary ? '#1C2B39' : '#151A23');
-            cv.strokeRoundRect(x, y, w, h, 8, 1.2, o.primary ? accent : C.edge);
-            if (o.primary) cv.fillRect(x + 10, y + 7, 3, h - 14, accent);
-            cv.text(label, x + w / 2, y + h / 2 + 5, o.size || 12, o.primary ? C.white : C.muted,
-                { align: 'center', font: 'bold', spacing: 0.65 });
-            if (key) hitboxes.push({ x, y, w, h, key });
+        /** PERFORMANCE-style slanted chip button: pale para, red edge when primary. */
+        function chipBtn(cv, x, y, w, h, label, key, opts) {
+            const o = opts || {};
+            const col = o.color || Sheet.RED;
+            Sheet.para(cv, x, y, w, y + h, 10,
+                o.active ? G.withAlpha(col, 0.9) : G.withAlpha('#ffffff', o.primary ? 0.15 : 0.08));
+            if (o.primary) Sheet.para(cv, x, y, 5, y + h, 10, col);
+            cv.text(label, x + w / 2 + (o.primary ? 2 : 0), y + h / 2 + 5, o.size || 12,
+                o.primary || o.active ? '#ffffff' : G.withAlpha('#e8c8ce', 0.8),
+                { align: 'center', font: 'bold', spacing: 0.8, literal: true });
+            hitboxes.push({ x, y, w, h, key });
+            if (cv.own && key && actions[key]) cv.target(x - 4, y - 4, w + 8, h + 8, actions[key], key, 10);
+        }
+        /** Small −/+ chip on the right edge of a ribbon value row. */
+        function pmChip(cv, x, y, label, key) {
+            Sheet.para(cv, x, y, 56, y + 30, 8, G.withAlpha('#ffffff', 0.10));
+            cv.text(label, x + 28, y + 22, 17, '#ffffff', { align: 'center', font: 'bold' });
+            hitboxes.push({ x, y, w: 56, h: 30, key });
+            if (cv.own && actions[key]) cv.target(x - 4, y - 4, 64, 38, actions[key], key, 10);
+        }
+        function modulesText() {
+            return state.scanBusy ? 'SCANNING MODULES' :
+                state.modules.length ? state.modules.length + ' MODULES READY' : 'NO MODULES — TAP SCAN';
+        }
+        /** Status + notice at the ribbon foot (same block style as EXHAUST SYSTEM). */
+        function ribbonStatus(cv, rib, y0, y1, statusLine) {
+            const sy = y1 - 66, sx = rib.xAt(rib.ribX + 12, sy);
+            cv.text(statusLine || modulesText(), sx, sy + 14, 13, '#ff8595',
+                { font: 'bold', spacing: 0.8, literal: true });
+            if (state.notice)
+                cv.text(state.notice.slice(0, 36), sx, sy + 38, 10.5,
+                    state.noticeColor || G.withAlpha('#e8c8ce', 0.55),
+                    { font: 'bold', spacing: 0.6, literal: true });
         }
         function drawWheel(cv, selected) {
-            const cx = 265, cy = 290, inner = 86, outer = 139;
+            const cx = 484, cy = (G.TOP || 44) + 8 + 200, inner = 86, outer = 139;
             for (let i = 0; i < 72; i++) cv.arc(cx, cy, inner, outer, i * 5, (i + 1) * 5 + 0.7,
                 hex(hsvToRgb(i * 5, 1, 1)));
-            cv.circle(cx, cy, inner - 9, '#111722');
+            cv.circle(cx, cy, inner - 9, '#07090D');
             cv.circle(cx, cy, inner - 10, selected);
-            cv.strokeRoundRect(cx - 74, cy - 28, 148, 56, 18, 1.5, '#FFFFFF');
-            cv.text(hex(rgb()), cx, cy + 4, 17, '#FFFFFF', { align: 'center', font: 'bold', spacing: 0.6 });
+            cv.text(hex(rgb()), cx, cy + 6, 18, '#FFFFFF', { align: 'center', font: 'bold', spacing: 0.6 });
             const angle = hueValue() - 90, radius = (inner + outer) / 2;
             const px = cx + Math.cos(angle * Math.PI / 180) * radius, py = cy + Math.sin(angle * Math.PI / 180) * radius;
             cv.circle(px, py, 11, '#FFFFFF'); cv.circle(px, py, 7, selected);
-            cv.text('TAP RING  ·  HUE + SATURATION', cx, 457, 10, C.muted, { align: 'center', font: 'bold', spacing: 1 });
-            return { cx, cy, inner, outer };
+            cv.text('TAP RING · HUE + SATURATION', cx, cy + 168, 10, G.withAlpha('#e8c8ce', 0.4),
+                { align: 'center', font: 'bold', spacing: 1, literal: true });
+            wheelGeom = { cx, cy, inner, outer };
         }
-        function drawCabin(cv) {
-            const x = 795, y = 137, w = 410, h = 108;
+        /** Cabin light-strip preview; upper/lower given as hex or null for unlit. */
+        function drawCabin(cv, x, y, w, h, upperC, lowerC) {
+            const r = Math.min(30, h * 0.35);
+            cv.roundRect(x, y, w, h, r, '#0A0D13');
+            cv.strokeRoundRect(x, y, w, h, r, 2, '#596476');
+            cv.roundRect(x + w * 0.22, y + h * 0.12, w * 0.56, h * 0.76, h * 0.2, '#121824');
+            cv.strokeRoundRect(x + w * 0.22, y + h * 0.12, w * 0.56, h * 0.76, h * 0.2, 1.2, C.edge);
+            const bar = Math.max(4, h * 0.07), side = Math.max(5, w * 0.014);
+            cv.roundRect(x + w * 0.05, y + h * 0.24, w * 0.90, bar, 3, upperC);
+            cv.roundRect(x + w * 0.05, y + h * 0.38, side, h * 0.40, 3, upperC);
+            cv.roundRect(x + w * 0.95 - side, y + h * 0.38, side, h * 0.40, 3, upperC);
+            cv.roundRect(x + w * 0.11, y + h * 0.70, w * 0.20, bar, 3, lowerC);
+            cv.roundRect(x + w * 0.69, y + h * 0.70, w * 0.20, bar, 3, lowerC);
+        }
+        /** A ribbon row: tick bar + label + value + two-seg bars, tap zone and ± chips. */
+        function valueRow(cv, rib, ry, row) {
+            const rx = Sheet.ribbonRow(cv, G, rib.xAt, rib.ribX, ry, {
+                label: row.label, value: row.value, lit: !!row.lit, color: row.color,
+                font: row.font || 21, run: row.key ? actions[row.key] : null, key: row.key });
+            if (row.key) hitboxes.push({ x: rx - 18, y: ry - 12, w: 348, h: 74, key: row.key });
+            if (row.minus) { pmChip(cv, rx + 228, ry + 4, '-', row.minus); pmChip(cv, rx + 290, ry + 4, '+', row.plus); }
+        }
+        function drawStudio(cv, t) {
+            const y0 = (G.TOP || 44) + 8, y1 = H - 8;
+            const sl = Sheet.slab(cv, G, y0, y1), rib = Sheet.ribbon(cv, y0, y1);
+            Sheet.titleTag(cv, G, 40, y0 + 24, 232, 46, 'COLOUR STUDIO', 20);
+            const dim = G.withAlpha('#e8c8ce', 0.5);
+            const col = rgb(), swatch = hex(previewRgb());
+
+            drawWheel(cv, swatch);
+
+            // Active swatch + quick hues down the slab's right side
+            const sx = 690;
+            cv.text('ACTIVE COLOUR', sx, y0 + 72, 11, dim, { font: 'bold', spacing: 1.2, literal: true });
+            cv.roundRect(sx, y0 + 86, 168, 62, 6, swatch);
+            cv.strokeRoundRect(sx, y0 + 86, 168, 62, 6, 1.4,
+                state.activeCustom ? Sheet.GO : G.withAlpha('#ffffff', 0.18));
+            cv.text(hex(col), sx + 84, y0 + 124, 15, '#ffffff', { align: 'center', font: 'bold' });
+            cv.text(zoneName() + (state.activeCustom ? ' · LIVE' : ''), sx + 84, y0 + 168, 10,
+                state.activeCustom ? Sheet.GO : dim,
+                { align: 'center', font: 'bold', spacing: 1, literal: true });
+            cv.text('QUICK HUES', sx, y0 + 190, 11, dim, { font: 'bold', spacing: 1.2, literal: true });
+            const quick = [0, 28, 52, 115, 175, 205, 240, 280, 325, 0];
+            const quickSat = [100, 100, 100, 88, 88, 88, 82, 78, 76, 0];
+            quick.forEach((hue, i) => {
+                const qx = sx + (i % 5) * 36, qy = y0 + 204 + Math.floor(i / 5) * 38;
+                cv.roundRect(qx, qy, 30, 30, 5, hex(hsvToRgb(hue, quickSat[i] / 100, 1)));
+                if (Math.abs(hueValue() - hue) < 4 && Math.abs(saturationValue() - quickSat[i]) < 4)
+                    cv.strokeRoundRect(qx - 1.5, qy - 1.5, 33, 33, 6, 2, '#ffffff');
+                hitboxes.push({ x: qx, y: qy, w: 30, h: 30, key: 'quick', hue, sat: quickSat[i] });
+                if (cv.own) cv.target(qx - 3, qy - 3, 36, 36,
+                    () => { settings.set('hue', hue); settings.set('saturation', quickSat[i]); queueRender(); },
+                    'quick_' + i, 10);
+            });
+
+            // Cabin preview strip across the slab foot; status line just above it
             const upper = state.customUpper ? dimmedRgb(state.customUpper)
                 : state.upperRead || (state.zone === 'all' || state.zone === 'upper' ? previewRgb() : null);
             const lower = state.customLower ? dimmedRgb(state.customLower)
                 : state.lowerRead || (state.zone === 'all' || state.zone === 'lower' ? previewRgb() : null);
-            cv.roundRect(x, y, w, h, 34, '#0A0D13');
-            cv.strokeRoundRect(x, y, w, h, 34, 2, '#596476');
-            cv.roundRect(x + 96, y + 12, w - 192, h - 24, 27, '#121824');
-            cv.strokeRoundRect(x + 96, y + 12, w - 192, h - 24, 27, 1.2, C.edge);
-            cv.fillRect(x + 139, y + 43, 132, 2, C.edge);
-            cv.fillRect(x + 200, y + 30, 2, 47, C.edge);
-            const upperC = upper ? hex(upper) : '#384352', lowerC = lower ? hex(lower) : '#384352';
-            cv.roundRect(x + 21, y + 23, w - 42, 7, 3, upperC);
-            cv.roundRect(x + 21, y + 40, 7, 50, 3, upperC); cv.roundRect(x + w - 28, y + 40, 7, 50, 3, upperC);
-            cv.roundRect(x + 45, y + 72, 82, 6, 3, lowerC); cv.roundRect(x + w - 127, y + 72, 82, 6, 3, lowerC);
-            cv.circle(x + 52, y + 83, 3, lowerC); cv.circle(x + w - 52, y + 83, 3, lowerC);
-            cv.text('UPPER', x + 6, y + 18, 8, upperC, { font: 'bold', spacing: 0.7 });
-            cv.text('LOWER', x + 6, y + h - 1, 8, lowerC, { font: 'bold', spacing: 0.7 });
-            cv.text(state.modules.length ? String(state.modules.filter((m) => !m.fault).length) + ' READY' : 'WAITING FOR SCAN',
-                x + w + 36, y + 40, 11, state.modules.length ? C.green : C.dim, { font: 'bold', spacing: 0.6 });
-            cv.text(state.scan.toUpperCase(), x + w + 36, y + 62, 9, C.muted, { font: 'bold', spacing: 0.5 });
-            cv.text(freshSpeed() ? state.speed.toFixed(0) + ' KM/H' : 'SPEED --', x + w + 36, y + 88, 9,
-                freshSpeed() ? state.speed <= 1 ? C.green : C.amber : C.dim, { font: 'bold', spacing: 0.7 });
-        }
-        function drawStudio(cv, t) {
-            const col = rgb(), swatch = hex(previewRgb());
-            G.panel(cv, t, 24, 67, 675, 427, 'COLOUR STUDIO');
-            G.panel(cv, t, 715, 67, 861, 195, 'CABIN PREVIEW');
-            G.panel(cv, t, 715, 276, 861, 218, 'LIGHTING CONTROLS');
-            drawWheel(cv, swatch);
+            const msg = modulesText() + (state.notice ? '  ·  ' + state.notice.slice(0, 24) : '');
+            cv.text(msg, 587, y0 + 394, 10.5,
+                state.notice ? (state.noticeColor || dim) : G.withAlpha('#8c94a0', 0.5),
+                { align: 'center', font: 'bold', spacing: 0.8, literal: true });
+            drawCabin(cv, 344, y0 + 408, 486, 52,
+                upper ? hex(upper) : '#384352', lower ? hex(lower) : '#384352');
 
-            cv.text('ACTIVE COLOUR', 458, 126, 10, C.muted, { font: 'bold', spacing: 1.2 });
-            cv.roundRect(458, 144, 207, 62, 13, '#0A0D13');
-            cv.strokeRoundRect(458, 144, 207, 62, 13, 1, C.edge);
-            cv.roundRect(472, 158, 39, 34, 8, swatch);
-            cv.text('RGB  ' + col.join(' / '), 522, 170, 12, C.white, { font: 'bold' });
-            cv.text(zoneName(), 522, 189, 9, C.muted, { font: 'bold', spacing: 0.6 });
-            cv.text('QUICK HUES', 458, 239, 10, C.muted, { font: 'bold', spacing: 1.1 });
-            const quick = [0, 28, 52, 115, 175, 205, 240, 280, 325, 0];
-            const quickSat = [100, 100, 100, 88, 88, 88, 82, 78, 76, 0];
-            quick.forEach((h, i) => {
-                const x = 458 + (i % 5) * 42, y = 254 + Math.floor(i / 5) * 39;
-                const color = hex(hsvToRgb(h, quickSat[i] / 100, 1));
-                cv.roundRect(x, y, 32, 28, 8, color);
-                cv.strokeRoundRect(x, y, 32, 28, 8, 1, '#606D80');
-                hitboxes.push({ x, y, w: 32, h: 28, key: 'quick', hue: h, sat: quickSat[i] });
-            });
-            cv.text('Preview a colour, then apply it to the car.', 458, 364, 9, C.dim, { font: 'bold' });
-            cv.text(state.activeCustom ? 'CUSTOM COLOUR ACTIVE' : 'BMW COLOUR STAYS ACTIVE UNTIL APPLY', 458, 390, 8,
-                state.activeCustom ? C.green : C.dim, { font: 'bold', spacing: 0.55 });
+            // Ribbon: zone + the three channels, then the action chips
+            [
+                { label: 'ZONE', value: zoneName(), lit: state.zone !== 'all', key: 'zone' },
+                { label: 'HUE', value: hueValue() + '°', minus: 'hueMinus', plus: 'huePlus' },
+                { label: 'SATURATION', value: saturationValue() + '%', minus: 'satMinus', plus: 'satPlus' },
+                { label: 'BRIGHTNESS', value: brightnessValue() + '%', minus: 'brightnessMinus', plus: 'brightnessPlus' },
+            ].forEach((row, i) => valueRow(cv, rib, y0 + 30 + i * 70, row));
 
-            drawCabin(cv);
-            cv.text('STATIC RGB', 1248, 145, 9, C.cyan, { font: 'bold', spacing: 0.8 });
-            cv.text('NO FLASHING', 1248, 166, 9, C.dim, { font: 'bold', spacing: 0.8 });
-
-            const left = 740;
-            addButton(cv, left, 311, 150, 38, 'ZONE  ' + (state.zone === 'all' ? 'ALL' : state.zone.toUpperCase()), 'zone', { primary: true, accent: C.violet, size: 10 });
-            addButton(cv, left + 164, 311, 74, 38, 'HUE −', 'hueMinus');
-            cv.text(String(hueValue()) + '°', left + 286, 335, 16, C.white, { align: 'center', font: 'bold' });
-            addButton(cv, left + 334, 311, 74, 38, 'HUE +', 'huePlus');
-            addButton(cv, left + 427, 311, 74, 38, 'SAT −', 'satMinus');
-            cv.text(String(saturationValue()) + '%', left + 548, 335, 14, C.white, { align: 'center', font: 'bold' });
-            addButton(cv, left + 596, 311, 74, 38, 'SAT +', 'satPlus');
-
-            cv.text('BRIGHTNESS', left, 384, 9, C.muted, { font: 'bold', spacing: 1.1 });
-            cv.roundRect(left + 116, 369, 332, 12, 6, '#222B37');
-            cv.roundRect(left + 116, 369, Math.round(332 * (brightnessValue() / 100)), 12, 6, C.cyan);
-            cv.circle(left + 116 + Math.round(332 * (brightnessValue() / 100)), 375, 10, C.white);
-            cv.text(String(brightnessValue()) + '%', left + 485, 384, 11, C.white, { font: 'bold' });
-            addButton(cv, left + 542, 359, 58, 34, '−', 'brightnessMinus', { accent: C.violet, size: 18 });
-            addButton(cv, left + 609, 359, 58, 34, '+', 'brightnessPlus', { accent: C.violet, size: 18 });
-            hitboxes.push({ x: left + 115, y: 357, w: 335, h: 34, key: 'brightnessTrack' });
-
-            addButton(cv, left, 419, 152, 42, state.scanBusy ? 'SCANNING…' : 'SCAN MODULES', 'scan', { accent: C.blue });
-            addButton(cv, left + 164, 419, 204, 42, state.applyBusy ? 'SENDING…' : 'APPLY TO CAR', 'apply', { primary: true, accent: C.cyan, size: 12 });
-            addButton(cv, left + 380, 419, 164, 42, 'BMW ORIGINAL', 'restore', { accent: C.amber });
-            addButton(cv, left + 556, 419, 105, 42, 'SAVE LOOK', 'favSave', { accent: C.violet, size: 9 });
-            cv.text('FAV ' + (state.favorite + 1) + '/' + FAVOURITES + (state.favorites[state.favorite] ? '  ·  SAVED' : '  ·  EMPTY'),
-                left, 480, 9, C.dim, { font: 'bold', spacing: 0.6 });
-            addButton(cv, left + 152, 466, 76, 24, '◀', 'favPrev', { accent: C.violet, size: 11 });
-            addButton(cv, left + 236, 466, 76, 24, 'LOAD', 'favLoad', { accent: C.violet, size: 9 });
-            addButton(cv, left + 320, 466, 76, 24, '▶', 'favNext', { accent: C.violet, size: 11 });
-            cv.text(state.notice, 1553, 480, 8, state.noticeColor, { align: 'right', font: 'bold', spacing: 0.4 });
+            const cy0 = y0 + 314, bx = rib.xAt(rib.ribX + 26, cy0);
+            chipBtn(cv, bx, cy0, 132, 40, state.scanBusy ? 'SCANNING' : 'SCAN', 'scan');
+            chipBtn(cv, bx + 144, cy0, 132, 40, state.applyBusy ? 'SENDING' : 'APPLY', 'apply', { primary: true });
+            chipBtn(cv, bx, cy0 + 50, 132, 40, 'BMW ORIG', 'restore');
+            chipBtn(cv, bx + 144, cy0 + 50, 132, 40, 'SAVE LOOK', 'favSave', { size: 10 });
+            cv.text('FAV ' + (state.favorite + 1) + '/' + FAVOURITES +
+                (state.favorites[state.favorite] ? ' · SAVED' : ' · EMPTY'), bx + 2, cy0 + 116, 11,
+                G.withAlpha('#e8c8ce', 0.6), { font: 'bold', spacing: 1, literal: true });
+            chipBtn(cv, bx + 148, cy0 + 100, 36, 40, '<', 'favPrev');
+            chipBtn(cv, bx + 192, cy0 + 100, 72, 40, 'LOAD', 'favLoad', { size: 10 });
+            chipBtn(cv, bx + 272, cy0 + 100, 36, 40, '>', 'favNext');
         }
         function drawBmwPage(cv, t) {
-            G.panel(cv, t, 24, 67, 1552, 427, 'BMW FACTORY COLOURS');
-            cv.text('These are BMW colour slots. Their visible colours depend on the vehicle configuration.', 58, 111, 12, C.muted, { font: 'bold' });
-            cv.text('SELECTED SLOT', 1377, 110, 9, C.dim, { align: 'right', font: 'bold', spacing: 1 });
-            cv.text(String(state.slot).padStart(2, '0'), 1522, 113, 21, C.cyan, { align: 'right', font: 'bold' });
-            const x0 = 58, y0 = 149, cw = 350, ch = 73, gapX = 22, gapY = 18;
+            const y0 = (G.TOP || 44) + 8, y1 = H - 8;
+            const sl = Sheet.slab(cv, G, y0, y1), rib = Sheet.ribbon(cv, y0, y1);
+            Sheet.titleTag(cv, G, 40, y0 + 24, 232, 46, 'BMW PALETTE', 20);
+            cv.text('SAME 12 COLOURS AS', 40, y0 + 100, 11, G.withAlpha('#e8c8ce', 0.5),
+                { font: 'bold', spacing: 1, literal: true });
+            cv.text('THE ORIGINAL CAR MENU', 40, y0 + 118, 11, G.withAlpha('#e8c8ce', 0.5),
+                { font: 'bold', spacing: 1, literal: true });
+
+            const cw = 156, ch = 92, gx = 14, gy = 14;
             for (let n = 1; n <= 12; n++) {
-                const col = (n - 1) % 4, row = Math.floor((n - 1) / 4);
-                const x = x0 + col * (cw + gapX), y = y0 + row * (ch + gapY), active = n === state.slot || n === state.liveSlot;
-                cv.roundRect(x, y, cw, ch, 11, active ? '#17293A' : '#121720');
-                cv.strokeRoundRect(x, y, cw, ch, 11, active ? 1.8 : 1, active ? C.cyan : C.edge);
-                cv.roundRect(x + 16, y + 17, 40, 39, 9, active ? C.cyan : '#263244');
-                cv.text('BMW COLOUR SLOT  ' + String(n).padStart(2, '0'), x + 75, y + 34, 13, C.white, { font: 'bold', spacing: 0.7 });
-                cv.text(n === state.liveSlot ? 'CURRENTLY REPORTED BY VEHICLE' : 'TAP TO REQUEST THIS FACTORY COLOUR',
-                    x + 75, y + 54, 8, n === state.liveSlot ? C.green : C.dim, { font: 'bold', spacing: 0.45 });
-                hitboxes.push({ x, y, w: cw, h: ch, key: 'slot', slot: n });
+                const cx = sl.ix + ((n - 1) % 3) * (cw + gx), cy = y0 + 28 + Math.floor((n - 1) / 3) * (ch + gy);
+                const live = n === state.liveSlot, sel = n === state.slot;
+                Sheet.para(cv, cx, cy, cw, cy + ch, 8,
+                    live ? G.withAlpha(Sheet.RED, 0.16) : G.withAlpha('#ffffff', 0.05));
+                if (live || sel) Sheet.para(cv, cx, cy, 5, cy + ch, 8,
+                    live ? Sheet.RED : G.withAlpha('#c8ced8', 0.5));
+                cv.text('SLOT ' + String(n).padStart(2, '0'), cx + cw / 2 + 2, cy + 38, 17,
+                    live ? '#ffffff' : G.withAlpha('#ffffff', sel ? 0.85 : 0.55),
+                    { align: 'center', font: 'bold', spacing: 1, literal: true });
+                cv.text(live ? '· VEHICLE ·' : sel ? 'SELECTED' : '', cx + cw / 2 + 2, cy + 64, 10,
+                    live ? Sheet.RED : G.withAlpha('#8c94a0', 0.6),
+                    { align: 'center', font: 'bold', spacing: 1, literal: true });
+                hitboxes.push({ x: cx, y: cy, w: cw, h: ch, key: 'slot', slot: n });
+                if (cv.own) cv.target(cx - 4, cy - 4, cw + 8, ch + 8,
+                    () => { state.slot = n; setFactorySlot(n); }, 'slot_' + n, 10);
             }
-            addButton(cv, 58, 441, 224, 38, '← CUSTOM COLOUR STUDIO', 'view', { accent: C.violet, size: 10 });
-            addButton(cv, 1297, 441, 95, 38, 'PREVIOUS', 'factoryPrev', { size: 9 });
-            addButton(cv, 1401, 441, 75, 38, 'APPLY', 'factoryApply', { primary: true, size: 9 });
-            addButton(cv, 1485, 441, 75, 38, 'NEXT', 'factoryNext', { size: 9 });
-            cv.text(state.notice, 58, 486, 9, state.noticeColor, { font: 'bold', spacing: 0.5 });
+
+            Sheet.ribbonRow(cv, G, rib.xAt, rib.ribX, y0 + 32, {
+                label: 'SELECTED SLOT', value: String(state.slot).padStart(2, '0'), lit: true, font: 30 });
+            const cy0 = y0 + 148, bx = rib.xAt(rib.ribX + 26, cy0);
+            chipBtn(cv, bx, cy0, 132, 40, 'PREV', 'factoryPrev');
+            chipBtn(cv, bx + 144, cy0, 132, 40, 'NEXT', 'factoryNext');
+            chipBtn(cv, bx, cy0 + 54, 276, 44, 'APPLY SLOT ' + state.slot, 'factoryApply', { primary: true });
+            chipBtn(cv, bx, cy0 + 112, 132, 40, 'STUDIO', 'studioPage');
+            chipBtn(cv, bx + 144, cy0 + 112, 132, 40, 'OEM', 'oemPage');
+            ribbonStatus(cv, rib, y0, y1,
+                state.liveSlot ? 'VEHICLE REPORTS SLOT ' + state.liveSlot : 'VEHICLE SLOT UNKNOWN');
         }
         function drawOemPage(cv, t) {
-            G.panel(cv, t, 24, 72, 384, 422, 'AMBIENCE');
-            G.panel(cv, t, 424, 72, 696, 422, state.oemPaletteOpen ? 'COLOR' : 'OEM CONTROLS');
-            G.panel(cv, t, 1136, 72, 440, 422, 'CABIN PREVIEW');
-
-            cv.text('Ambient lighting', 48, 126, 14, C.white, { font: 'bold' });
-            cv.text(state.oemEnabled ? 'ON' : 'OFF', 48, 145, 8, state.oemEnabled ? C.green : C.dim, { font: 'bold', spacing: 1 });
-            addButton(cv, 294, 108, 90, 39, state.oemEnabled ? 'ON' : 'OFF', 'oemLight', {
-                primary: state.oemEnabled, accent: state.oemEnabled ? C.green : C.red, size: 10,
-            });
-            cv.fillRect(44, 157, 344, 1, C.edge);
-
-            const colorY = 168;
-            cv.roundRect(42, colorY, 348, 50, 9, state.oemPaletteOpen ? '#1B2837' : '#151A23');
-            cv.strokeRoundRect(42, colorY, 348, 50, 9, state.oemPaletteOpen ? 1.5 : 1, state.oemPaletteOpen ? C.cyan : C.edge);
-            cv.text('COLOR', 57, colorY + 22, 11, C.white, { font: 'bold', spacing: 0.7 });
-            cv.text(state.oemSelected ? state.oemSelected.name : 'CHOOSE A COLOUR', 57, colorY + 39, 8, C.muted, { font: 'bold', spacing: 0.45 });
-            cv.roundRect(319, colorY + 13, 54, 24, 5, state.oemSelected ? state.oemSelected.color : '#273142');
-            cv.text(state.oemPaletteOpen ? 'CLOSE' : '›', 365, colorY + 31, 12, C.white, { align: 'right', font: 'bold' });
-            hitboxes.push({ x: 42, y: colorY, w: 348, h: 50, key: 'oemColorPanel' });
-
-            function slider(label, value, y, zone, downKey, upKey, trackKey) {
-                cv.text(label, 48, y, 10, C.white, { font: 'bold', spacing: 0.75 });
-                cv.text(String(value) + '%', 375, y, 10, C.cyan, { align: 'right', font: 'bold' });
-                addButton(cv, 47, y + 12, 30, 26, '−', downKey, { size: 16 });
-                const tx = 87, ty = y + 21, tw = 253;
-                cv.roundRect(tx, ty, tw, 8, 4, '#28303C');
-                const active = Math.max(1, Math.round(tw * value / 100));
-                cv.roundRect(tx, ty, active, 8, 4, state.oemSelected ? state.oemSelected.color : C.cyan);
-                for (let i = 1; i < 10; i++) cv.fillRect(tx + Math.round(tw * i / 10), ty - 2, 1, 12, '#778292');
-                addButton(cv, 350, y + 12, 30, 26, '+', upKey, { size: 16 });
-                hitboxes.push({ x: tx, y: y + 10, w: tw, h: 30, key: trackKey, zone });
-            }
-            slider('BACKGROUND LIGHT', state.oemBackground, 235, 'background', 'backgroundDown', 'backgroundUp', 'oemBrightness');
-            slider('ACCENT LIGHTING', state.oemAccent, 316, 'accent', 'accentDown', 'accentUp', 'oemBrightness');
-
-            cv.fillRect(44, 385, 344, 1, C.edge);
-            cv.text('REDUCED FOR NIGHT DRIVING', 48, 411, 9, C.white, { font: 'bold', spacing: 0.65 });
-            cv.text(state.oemNight ? 'DIMMED' : 'STANDARD', 48, 431, 8, state.oemNight ? C.cyan : C.dim, { font: 'bold', spacing: 0.65 });
-            addButton(cv, 294, 396, 90, 38, state.oemNight ? 'ON' : 'OFF', 'oemNight', {
-                primary: state.oemNight, accent: C.blue, size: 10,
-            });
-            cv.text(state.notice, 48, 481, 8, state.noticeColor, { font: 'bold', spacing: 0.35 });
+            const y0 = (G.TOP || 44) + 8, y1 = H - 8;
+            const sl = Sheet.slab(cv, G, y0, y1), rib = Sheet.ribbon(cv, y0, y1);
+            Sheet.titleTag(cv, G, 40, y0 + 24, 232, 46, 'OEM AMBIENCE', 20);
+            const sel = state.oemSelected;
+            const dim = G.withAlpha('#e8c8ce', 0.5);
 
             if (state.oemPaletteOpen) {
-                cv.text('36 NAMED COLOURS · TAP TO APPLY', 446, 105, 8, C.muted, { font: 'bold', spacing: 0.9 });
-                addButton(cv, 1025, 88, 74, 22, 'DONE', 'oemColorPanel', { accent: C.violet, size: 8 });
-                const x0 = 442, y0 = 125, cw = 104, ch = 46, gx = 7, gy = 7;
+                cv.text('CHOOSE A COLOUR', sl.ix, y0 + 36, 14, '#ffffff',
+                    { font: 'bold', spacing: 1.2, literal: true });
+                chipBtn(cv, sl.ix + sl.iw - 110, y0 + 20, 110, 34, 'DONE', 'oemColorPanel', { primary: true, size: 10 });
                 OEM_COLORS.forEach((color, i) => {
-                    const col = i % 6, row = Math.floor(i / 6), x = x0 + col * (cw + gx), y = y0 + row * (ch + gy);
-                    const selected = state.oemSelected && state.oemSelected.name === color.name;
-                    cv.roundRect(x, y, cw, ch, 7, selected ? '#1B2938' : '#111722');
-                    cv.strokeRoundRect(x, y, cw, ch, 7, selected ? 1.5 : 0.8, selected ? C.cyan : C.edge);
-                    cv.roundRect(x + 7, y + 9, 4, ch - 18, 2, color.color);
-                    cv.text(color.name, x + 17, y + 27, 8, C.white, { font: 'bold', spacing: 0.35 });
-                    hitboxes.push({ x, y, w: cw, h: ch, key: 'oemColor', color });
+                    const cx = sl.ix + (i % 6) * 84, cy = y0 + 52 + Math.floor(i / 6) * 54;
+                    const live = state.liveSlot === i + 1, picked = sel && sel.name === color.name;
+                    cv.roundRect(cx, cy, 78, 48, 5, color.color);
+                    cv.text(color.name, cx + 39, cy + 29, 7.5,
+                        color.rgb.reduce((a, b) => a + b, 0) / 3 > 145 ? '#10141B' : 'rgba(255,255,255,0.85)',
+                        { align: 'center', font: 'bold', spacing: 0.2, literal: true });
+                    if (picked) cv.strokeRoundRect(cx - 1.5, cy - 1.5, 81, 51, 6, 2.2, '#ffffff');
+                    if (live) cv.strokeRoundRect(cx + 2.5, cy + 2.5, 73, 43, 4, 1.2, Sheet.RED);
+                    hitboxes.push({ x: cx, y: cy, w: 78, h: 48, key: 'oemColor', color });
+                    if (cv.own) cv.target(cx - 3, cy - 3, 84, 54, () => selectOemColor(color), 'oem_' + i, 10);
                 });
-                cv.text(state.scanBusy ? 'SCANNING MODULES AUTOMATICALLY…' : state.modules.length ?
-                    state.modules.filter((m) => !m.fault).length + ' HEALTHY MODULES · COLOUR IS SENT ON SELECTION' :
-                    'WAITING FOR AUTOMATIC MODULE SCAN', 442, 475, 8, state.modules.length ? C.green : C.dim,
-                { font: 'bold', spacing: 0.45 });
+                cv.text('THE CAR SHOWS THE PICK WITHIN A SECOND', sl.ix, y1 - 22, 10, dim,
+                    { font: 'bold', spacing: 0.8, literal: true });
             } else {
-                cv.text('Tap COLOR to open the palette.', 458, 150, 16, C.white, { font: 'bold' });
-                cv.text('Every named colour is sent as soon as you select it.', 458, 178, 10, C.muted, { font: 'bold' });
-                cv.roundRect(458, 212, 222, 102, 12, state.oemSelected ? state.oemSelected.color : '#151D29');
-                cv.strokeRoundRect(458, 212, 222, 102, 12, 1, C.edge);
-                const selectedInk = state.oemSelected && state.oemSelected.rgb.reduce((sum, channel) => sum + channel, 0) / 3 > 145 ? '#10141B' : C.white;
-                cv.text(state.oemSelected ? state.oemSelected.name : 'BMW OEM LIGHTING', 479, 265, 15,
-                    state.oemSelected ? selectedInk : C.white, { font: 'bold', spacing: 0.8 });
-                cv.text(state.scanBusy ? 'AUTOMATIC SCAN IN PROGRESS' : state.scan.toUpperCase(), 458, 355, 9,
-                    state.modules.length ? C.green : C.muted, { font: 'bold', spacing: 0.7 });
-                cv.text(state.modules.length ? String(state.modules.filter((m) => !m.fault).length) + ' HEALTHY LIGHT MODULES' :
-                    'Module scan starts automatically when the app opens.', 458, 379, 9, C.dim, { font: 'bold' });
-                if (!state.modules.length && !state.scanBusy) addButton(cv, 458, 411, 172, 34, 'RETRY SCAN', 'scan', { accent: C.blue, size: 9 });
-                cv.text('The car must be stationary before a colour can be changed.', 458, 475, 8, C.dim, { font: 'bold' });
+                const cabinC = sel ? sel.color : '#384352';
+                drawCabin(cv, sl.ix + 20, y0 + 120, 468, 190, cabinC, cabinC);
+                cv.text(sel ? sel.name.toUpperCase() : 'BMW FACTORY COLOUR', sl.ix + 254, y0 + 350, 17,
+                    '#ffffff', { align: 'center', font: 'bold', spacing: 1.2, literal: true });
+                cv.text(sel ? hex(sel.rgb) + ' · TAP COLOUR FOR PALETTE' : 'TAP THE COLOUR ROW FOR THE PALETTE',
+                    sl.ix + 254, y0 + 378, 10, dim, { align: 'center', font: 'bold', spacing: 0.8, literal: true });
+                if (!state.modules.length && !state.scanBusy)
+                    chipBtn(cv, sl.ix + 180, y0 + 412, 150, 40, 'RETRY SCAN', 'scan');
             }
 
-            const px = 1158, py = 122, pw = 396, ph = 218;
-            const upper = state.oemSelected ? state.oemSelected.color : '#263244';
-            const lower = state.oemSelected ? state.oemSelected.color : '#263244';
-            cv.roundRect(px, py, pw, ph, 24, '#0A0E14');
-            cv.strokeRoundRect(px, py, pw, ph, 24, 1.5, '#3A4658');
-            cv.roundRect(px + 25, py + 25, pw - 50, ph - 50, 20, '#111824');
-            cv.strokeRoundRect(px + 25, py + 25, pw - 50, ph - 50, 20, '#263243');
-            cv.roundRect(px + 50, py + 44, pw - 100, 7, 4, upper);
-            cv.roundRect(px + 50, py + 61, 7, 91, 4, upper);
-            cv.roundRect(px + pw - 57, py + 61, 7, 91, 4, upper);
-            cv.roundRect(px + 83, py + 143, 85, 6, 3, lower);
-            cv.roundRect(px + pw - 168, py + 143, 85, 6, 3, lower);
-            cv.roundRect(px + 174, py + 73, 48, 82, 12, '#0A0E14');
-            cv.strokeRoundRect(px + 174, py + 73, 48, 82, 12, 1, '#344154');
-            cv.roundRect(px + 91, py + 86, 52, 46, 14, '#1A2330');
-            cv.roundRect(px + pw - 143, py + 86, 52, 46, 14, '#1A2330');
-            cv.circle(px + 66, py + 177, 3, lower); cv.circle(px + pw - 66, py + 177, 3, lower);
-
-            cv.text(state.oemSelected ? state.oemSelected.name : 'BMW FACTORY COLOUR', 1158, 374, 12, C.white, { font: 'bold', spacing: 0.8 });
-            cv.text(state.oemSelected ? hex(state.oemSelected.rgb) : 'SELECT A COLOUR', 1554, 374, 10, C.cyan, { align: 'right', font: 'bold' });
-            cv.text('BACKGROUND', 1158, 411, 8, C.dim, { font: 'bold', spacing: 0.8 });
-            cv.text(String(effectiveOemBrightness(state.oemBackground)) + '%', 1554, 411, 9, C.white, { align: 'right', font: 'bold' });
-            cv.text('ACCENT', 1158, 435, 8, C.dim, { font: 'bold', spacing: 0.8 });
-            cv.text(String(effectiveOemBrightness(state.oemAccent)) + '%', 1554, 435, 9, C.white, { align: 'right', font: 'bold' });
-            cv.roundRect(1158, 457, 396, 23, 11, state.scanBusy ? '#302718' : state.modules.length ? '#123025' : '#1B2029');
-            cv.text(state.scanBusy ? 'SCANNING BMW LIGHT MODULES' : state.modules.length ?
-                'AUTO SCAN  ·  ' + state.modules.filter((m) => !m.fault).length + ' READY' : 'AUTO SCAN  ·  ' + state.scan.toUpperCase(),
-            1356, 473, 8, state.scanBusy ? C.amber : state.modules.length ? C.green : C.muted, { align: 'center', font: 'bold', spacing: 0.45 });
+            [
+                { label: 'AMBIENT LIGHTING', value: state.oemEnabled ? 'ON' : 'OFF', lit: state.oemEnabled, key: 'oemLight' },
+                { label: 'COLOUR', value: sel ? sel.name.toUpperCase() : 'FACTORY', lit: !!sel,
+                    font: sel && sel.name.length > 9 ? 15 : 18, key: 'oemColorPanel' },
+                { label: 'BACKGROUND', value: effectiveOemBrightness(state.oemBackground) + '%',
+                    minus: 'backgroundDown', plus: 'backgroundUp' },
+                { label: 'ACCENT', value: effectiveOemBrightness(state.oemAccent) + '%',
+                    minus: 'accentDown', plus: 'accentUp' },
+                { label: 'NIGHT MODE', value: state.oemNight ? 'DIMMED' : 'OFF', lit: state.oemNight, key: 'oemNight' },
+            ].forEach((row, i) => valueRow(cv, rib, y0 + 30 + i * 70, row));
+            ribbonStatus(cv, rib, y0, y1);
         }
         async function render() {
-            if (stopped || !ui.isVisible('MAIN')) return;
+            // Black screen with the blurred G20 ghost behind it; pages stay in the code, undrawn.
+            if (stopped || (!ui.isVisible('MAIN') && !ctx.preview)) return;
             hitboxes = [];
-            const t = ctx.theme(), cv = ctx.canvas(W, H).clear(C.bg);
-            G.frame(cv, t, ['MoreAmbients'], 0, [{ text: state.activeCustom ? 'CUSTOM RGB' : 'BMW LIGHTING', color: state.activeCustom ? 'good' : 'dim' }]);
-            cv.text('MORE AMBIENTS', 28, 60, 16, C.white, { font: 'bold', spacing: 1.5 });
-            cv.text(state.page === 'oem' ? 'OEM AMBIENCE' : state.page === 'bmw' ? 'BMW FACTORY PALETTE' : 'CABIN LIGHTING STUDIO',
-                194, 59, 8, C.dim, { font: 'bold', spacing: 1.2 });
-            cv.roundRect(1284, 41, 146, 24, 12, state.activeCustom ? '#143629' : '#171C26');
-            cv.circle(1301, 53, 4, state.activeCustom ? C.green : C.dim);
-            cv.text(state.activeCustom ? 'CUSTOM ACTIVE' : 'BMW CONTROL', 1313, 57, 8, state.activeCustom ? C.green : C.muted,
-                { font: 'bold', spacing: 0.7 });
-            cv.roundRect(1441, 41, 133, 24, 12, freshSpeed() ? state.speed <= 1 ? '#143629' : '#3B2D19' : '#1D2028');
-            cv.text(freshSpeed() ? state.speed.toFixed(0) + ' KM/H' : 'SPEED --', 1508, 57, 8,
-                freshSpeed() ? state.speed <= 1 ? C.green : C.amber : C.dim, { align: 'center', font: 'bold' });
-            addButton(cv, 900, 41, 94, 24, 'STUDIO', 'studioPage', { primary: state.page === 'studio', accent: C.violet, size: 8 });
-            addButton(cv, 1001, 41, 94, 24, 'BMW', 'bmwPage', { primary: state.page === 'bmw', accent: C.violet, size: 8 });
-            addButton(cv, 1102, 41, 94, 24, 'OEM', 'oemPage', { primary: state.page === 'oem', accent: C.cyan, size: 9 });
-            cv.fillRect(24, 66, 1552, 1, '#28313E');
-            if (state.page === 'studio') drawStudio(cv, t);
-            else if (state.page === 'bmw') drawBmwPage(cv, t);
-            else drawOemPage(cv, t);
+            const cv = ctx.canvas(W, H).clear('#000000');
+            try {
+                BgArt.load();
+                const colour = state.oemEnabled && state.previewChoice === 'colour' && state.selColour >= 0 ? PALETTE[state.selColour] : null;
+                const combo = state.oemEnabled && state.previewChoice === 'combo' && state.selCombo >= 0 ? COMBOS[state.selCombo] : null;
+                BgArt.setColors(combo ? combo.c1 : colour && colour.c1, combo ? combo.c2 : colour && colour.c1, state.oemEnabled);
+                BgArt.draw(cv, W, H);
+            } catch (e) { log.warn('background art: ' + shortError(e)); }
+            let scr = null;
+            if (state.detail) {
+                // Full page replaces the panel: back arrow returns to INTERIOR LIGHTING
+                const det = Sheet.drawDetailPanel(cv, G, {
+                    title: 'INTERIOR LIGHTING',
+                    items: state.detail === 'combos' ? COMBOS : state.detail === 'zones' ? ZONE_ROWS
+                        : [{ name: 'Combos', nav: true }].concat(PALETTE),
+                    sel: state.detail === 'combos' ? state.selCombo : state.detail === 'zones' ? ZONE_ROWS.findIndex((z) => z.zone === state.zone)
+                        : (state.selColour >= 0 ? state.selColour + 1 : -1),
+                    focus: state.detailFocus,
+                    image: state.detail === 'zones' ? BgArt.zones() : null,
+                    scroll: state.detailScroll, extra: cv.extra || 0,
+                });
+                state.detailScrollMax = det.scroll.max;
+                if (state.detailScroll > det.scroll.max) state.detailScroll = det.scroll.max;
+                scr = det.scroll;
+                lastDetGeom = { offsets: det.offsets, rowHs: det.rowHs, avail: det.avail };
+                if (det.back) hitboxes.push({ x: det.back.x, y: det.back.y, w: det.back.w, h: det.back.h, key: 'detailBack' });
+                det.rows.forEach((r) => hitboxes.push({ x: r.x, y: r.y, w: r.w, h: r.h, key: 'detailItem', i: r.i }));
+                if (cv.own) {
+                    if (det.back) cv.target(det.back.x, det.back.y, det.back.w, det.back.h, actions.detailBack, 'back', 0);
+                    (det.targets || det.rows).forEach((r) => cv.target(r.x, r.y, r.w, r.h, () => pickDetailItem(r.i), 'drow' + r.i, 0));
+                }
+            } else {
+                const hud = Sheet.drawInteriorLighting(cv, G, {
+                    enabled: state.oemEnabled, color: state.selColour >= 0 ? PALETTE[state.selColour].c1 : (state.oemSelected ? state.oemSelected.color : '#18d8ff'),
+                    combo: state.previewChoice === 'combo' && state.selCombo >= 0 ? COMBOS[state.selCombo] : null,
+                    brightness: state.oemAccent, bgBrightness: state.oemBackground, night: state.oemNight, dynamic: state.oemDynamic, focus: state.oemFocus,
+                    zone: state.zone, zoneColor: state.oemSelected ? state.oemSelected.color : '#18d8ff',
+                    zonesImg: BgArt.zones(), scroll: state.oemScroll, extra: cv.extra || 0,
+                });
+                state.oemScrollMax = hud.scroll.max;
+                if (state.oemScroll > state.oemScrollMax) state.oemScroll = state.oemScrollMax;
+                scr = hud.scroll;
+                lastHudGeom = { offsets: hud.offsets, rowHs: hud.rowHs, avail: hud.box.h - hud.pinH, pinH: hud.pinH };
+                hud.rows.forEach((r) => hitboxes.push({ x: r.x, y: r.y, w: r.w, h: r.h, key: 'hudRow', row: r.i, act: r.key }));
+                if (cv.own) (hud.targets || hud.rows).forEach((r) => cv.target(r.x, r.y, r.w, r.h,
+                    () => { state.oemFocus = r.i; queueRender(); if (r.key && actions[r.key]) return actions[r.key](); }, 'row' + r.i, 0));
+                hitboxes.push({ x: hud.bgMinus.x, y: hud.bgMinus.y, w: hud.bgMinus.w, h: hud.bgMinus.h, key: 'bgDown' });
+                hitboxes.push({ x: hud.bgPlus.x, y: hud.bgPlus.y, w: hud.bgPlus.w, h: hud.bgPlus.h, key: 'bgUp' });
+                hitboxes.push({ x: hud.minus.x, y: hud.minus.y, w: hud.minus.w, h: hud.minus.h, key: 'accentDown' });
+                hitboxes.push({ x: hud.plus.x, y: hud.plus.y, w: hud.plus.w, h: hud.plus.h, key: 'accentUp' });
+                hitboxes.push({ x: hud.bar.x, y: hud.bar.y, w: hud.bar.w, h: hud.bar.h, key: 'oemBrightness', zone: 'accent' });
+            }
+            if (scr && scr.max > 0) cv.scroll = { y: scr.y, bar: scr.bar };
             return ui.image('MAIN_GFX', cv);
         }
         function hitTest(x, y) {
@@ -728,30 +985,45 @@ mgu.run({
                 if (b.key === 'quick') { settings.set('hue', b.hue); settings.set('saturation', b.sat); queueRender(); return; }
                 if (b.key === 'slot') { state.slot = b.slot; return setFactorySlot(b.slot); }
                 if (b.key === 'oemColor') return selectOemColor(b.color);
-                if (b.key === 'oemBrightness') {
-                    const value = clamp(Math.round((10 + (x - b.x) / b.w * 90) / 10) * 10, 10, 100);
-                    return adjustOemBrightness(b.zone, value);
-                }
-                if (b.key === 'brightnessTrack') {
-                    settings.set('brightness', clamp(Math.round((x - (740 + 116)) / 332 * 100 / 10) * 10, 10, 100));
-                    queueRender(); return;
-                }
+                if (b.key === 'hudRow') { if (b.act && actions[b.act]) return actions[b.act](); return; }
+                if (b.key === 'detailItem') return pickDetailItem(b.i);
                 if (b.key && actions[b.key]) return actions[b.key]();
             }
-            if (state.page === 'studio') {
-                const dx = x - 265, dy = y - 290, r = Math.sqrt(dx * dx + dy * dy);
-                if (r >= 80 && r <= 148) {
+            if (state.page === 'studio' && wheelGeom) {
+                const dx = x - wheelGeom.cx, dy = y - wheelGeom.cy, r = Math.sqrt(dx * dx + dy * dy);
+                if (r >= wheelGeom.inner - 6 && r <= wheelGeom.outer + 9) {
                     let hue = Math.round((Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360);
                     hue = Math.round(hue / 15) * 15 % 360;
                     settings.set('hue', hue);
-                    settings.set('saturation', clamp(Math.round(((r - 80) / 68 * 100) / 10) * 10, 0, 100));
+                    settings.set('saturation',
+                        clamp(Math.round(((r - (wheelGeom.inner - 6)) / (wheelGeom.outer + 9 - wheelGeom.inner + 6) * 100) / 10) * 10, 0, 100));
                     queueRender();
                 }
             }
         }
         ctx.onTap((x, y) => { try { hitTest(x, y); } catch (e) { setNotice('CONTROL FAILED · ' + shortError(e), C.red); } });
+        if (ctx.onScroll) ctx.onScroll((dy) => {
+            const useDetail = state.detail && state.detailScrollMax > 0;
+            const max = useDetail ? state.detailScrollMax : (state.oemScrollMax || 0);
+            if (!max) return false;
+            const key = useDetail ? 'detailScroll' : 'oemScroll';
+            const y = Math.max(0, Math.min(max, state[key] + dy));
+            if (y === state[key]) return false;
+            state[key] = y; queueRender(); return true;
+        });
+        if (ctx.onTab) ctx.onTab((index) => {
+            if (index === 0) setPage('studio'); else if (index === 1) setPage('bmw'); else if (index === 2) setPage('oem');
+        });
         ctx.onLayout(queueRender);
-        ui.onVisible((name, visible) => { if (name === 'MAIN' && visible) render().catch((e) => log.warn('render: ' + shortError(e))); });
+        ui.onVisible((name, visible) => {
+            if (name === 'MAIN' && visible) {
+                // entering the app always lands the controller mark on the first row (Ambient lighting)
+                state.oemFocus = 0; state.detailFocus = -1;
+                if (ctx.display) { ctx.display.focusKey = 'tgt:row0'; lastFocusKey = 'tgt:row0'; }
+                render().catch((e) => log.warn('render: ' + shortError(e)));
+            }
+        });
+        if (ctx.loop) ctx.loop('MAIN', 6, render);
 
         await watchSignals();
         try { state.diag = await new Diag(ctx.signals, log).init(); state.diag.quiet = true; state.diag.busyLog = false; }
@@ -759,12 +1031,48 @@ mgu.run({
         if (ui.isVisible('MAIN')) render().catch((e) => log.warn('first render: ' + shortError(e)));
         autoScanTimer = setTimeout(() => {
             autoScanTimer = null;
-            if (!stopped) scanModules().catch((e) => log.warn('automatic ambient scan: ' + shortError(e)));
+            if (stopped) return;
+            scanModules().then(() => {
+                // The car remembers the last app look: re-apply it once modules are known.
+                if (stopped || !state.look || !state.oemEnabled) return;
+                if (state.modules.length && freshSpeed()) reapplyLook('LAST AMBIENT LOOK RESTORED');
+                else if (state.modules.length) state.pendingLook = true;   // retry when a fresh speed arrives
+            }).catch((e) => log.warn('automatic ambient scan: ' + shortError(e)));
         }, 250);
-        ctx.app.on('shutdown', () => {
+        if (ctx.display) {
+            ctx.display.hideTargetMark = true; ctx.display.customBackBtn = true;
+            ctx.display.focusKey = 'tgt:row0'; lastFocusKey = 'tgt:row0';
+            ctx.display.onBack = () => {
+                if (state.detail) { actions.detailBack(); return true; }
+                return false;
+            };
+        }   // our red row IS the mark; no kit "SELECTED" caption
+        // The controller walks the kit's targets (cv.target): mirror its focusKey onto the
+        // row it is on and paint that row solid red. Touches never set this mark.
+        focusPoll = setInterval(() => {
+            if (stopped || !ctx.display) return;
+            const k = ctx.display.focusKey;
+            if (k === lastFocusKey) return;
+            lastFocusKey = k;
+            const rm = /^tgt:row(\d+)$/.exec(k || '');
+            const dm = /^tgt:drow(\d+)$/.exec(k || '');
+            const intoView = (g, i, cur) => {
+                const lo = Math.max(0, g.offsets[i] + g.rowHs[i] - g.avail), hi = g.offsets[i];
+                return Math.max(lo, Math.min(hi, cur));
+            };
+            if (rm && lastHudGeom && lastHudGeom.offsets[rm[1]] !== undefined) {
+                state.oemFocus = +rm[1]; state.oemScroll = intoView(lastHudGeom, +rm[1], state.oemScroll); queueRender();
+            } else if (dm && lastDetGeom && lastDetGeom.offsets[dm[1]] !== undefined) {
+                state.detailFocus = +dm[1]; state.detailScroll = intoView(lastDetGeom, +dm[1], state.detailScroll); queueRender();
+            } else if (k) {
+                if (state.oemFocus !== -1 || state.detailFocus !== -1) { state.oemFocus = -1; state.detailFocus = -1; queueRender(); }
+            }
+        }, 90);
+        if (ctx.app && typeof ctx.app.on === 'function') ctx.app.on('shutdown', () => {
             stopped = true; clearTimeout(state.renewTimer); clearTimeout(renderTimer); clearTimeout(autoScanTimer);
+            clearInterval(focusPoll);
             ctx._moreAmbientWatches.forEach((sub) => { try { if (sub && sub.shutdown) Promise.resolve(sub.shutdown()).catch(() => {}); } catch (e) {} });
-            if (state.activeCustom && state.diag && state.diag.available) {
+            if (state.activeCustom && !state.blackoutOverride && state.diag && state.diag.available) {
                 (async () => {
                     for (const m of state.modules) {
                         try { await sendRestore(m.bus, m.nad); } catch (e) { log.warn('shutdown restore: ' + shortError(e)); }
