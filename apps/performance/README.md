@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.54 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.55 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER · EST.** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run. The two gauge limits can be changed
@@ -15,7 +15,8 @@ In Comfort, the Engine Data readings, scales, and live bars turn blue. The
 dedicated DYNO RUN graph keeps its power, torque, and ECU torque traces in red
 shades for a consistent dyno palette.
 The Engine Data header shows the last confirmed BMW drive mode immediately on
-the next start, then refreshes it from FES while the app opens. COMFORT is blue,
+the next start, then refreshes it from FES while the app opens. A low-rate
+read-only poll remains active until the current mode arrives. COMFORT is blue,
 SPORT modes are red, and ECO is green. A first launch with no saved mode still
 waits for the vehicle to publish its current mode.
 Engine Data updates at up to 20 frames per second; the other pages remain at

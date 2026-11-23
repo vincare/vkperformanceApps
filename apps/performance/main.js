@@ -1144,42 +1144,39 @@ mgu.run({
             if (sub) shutdownSubscription(sub);
         }
 
+        function retryDriveModePoll() {
+            if (state.stopped || driveModeConfirmed || driveModePollTimer) return;
+            driveModePollTimer = setTimeout(() => {
+                driveModePollTimer = null;
+                startDriveModePoll();
+            }, 5000);
+        }
+
         function startDriveModePoll() {
-            if (state.stopped || driveModeConfirmed || driveModePollStarting || driveModePollSub) return;
+            if (state.stopped || driveModeConfirmed || driveModePollStarting || driveModePollSub || driveModePollTimer) return;
             driveModeLoading = true;
             driveModePollStarting = true;
             queueRender();
             // The regular FES subscription handles changes. This one-field
-            // read-only poll supplements it during startup if the first value
-            // is BMW's INITIALISIERUNG/invalid state, then closes on a valid mode.
+            // read-only poll keeps checking at a low rate until BMW reports a
+            // valid mode; some cars publish it after the other live signals.
             startWatch(FES, { statusFESVehicleDynamicSwitchHMI: applyDrivingMode }, {
-                pollMs: 1500,
+                pollMs: 3000,
                 onDiagnostic: () => {},
             }).then((sub) => {
                 driveModePollStarting = false;
-                if (!sub) {
-                    driveModeLoading = false;
-                    queueRender();
+                if (driveModeConfirmed || state.stopped) {
+                    if (sub) shutdownSubscription(sub);
                     return;
                 }
-                if (driveModeConfirmed || state.stopped) {
-                    shutdownSubscription(sub);
+                if (!sub || sub.error) {
+                    if (sub) shutdownSubscription(sub);
+                    driveModeLoading = true;
+                    queueRender();
+                    retryDriveModePoll();
                     return;
                 }
                 driveModePollSub = sub;
-                if (sub.error) {
-                    stopDriveModePoll();
-                    driveModeLoading = false;
-                    queueRender();
-                    return;
-                }
-                // Bound the startup polling window; the main event subscription
-                // remains active and will still accept a later valid update.
-                driveModePollTimer = setTimeout(() => {
-                    stopDriveModePoll();
-                    driveModeLoading = false;
-                    queueRender();
-                }, 20000);
             });
         }
 
@@ -1194,10 +1191,13 @@ mgu.run({
                 return;
             }
             const changed = drivingMode === null || String(drivingMode) !== String(raw);
+            const needsRender = changed || !driveModeConfirmed || driveModeLoading;
             drivingMode = raw;
             driveModeConfirmed = true;
             driveModeLoading = false;
             stopDriveModePoll();
+            // Refresh the mode badge even when exhaust control is disarmed.
+            if (needsRender) queueRender();
             if (changed) settings.set('lastDriveMode', raw);
             if (!valveCanActuate()) { valveAuto.drive = raw; return; }
             const pending = valveAuto.driveMode(raw);
@@ -2215,8 +2215,8 @@ mgu.run({
                 G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 0, (demo
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
                     : activeMode ? [{ text: modeBadge, color: modeColor }]
-                    : [{ text: vehicleDataReady ? 'LIVE DATA' : driveModeLoading ? 'READING DRIVE MODE' : 'WAITING FOR SIGNALS',
-                        color: vehicleDataReady || driveModeLoading ? 'dim' : 'crit' }])
+                    : [{ text: driveModeLoading ? 'READING DRIVE MODE' : vehicleDataReady ? 'LIVE DATA' : 'WAITING FOR SIGNALS',
+                        color: driveModeLoading || vehicleDataReady ? 'dim' : 'crit' }])
                     .concat(notice ? [{ text: notice, color: 'crit' }] : []));
             } else if (page === 1) {
                 FlapUi.draw(cv, G, t, currentValveView(), Object.assign({}, valveActions, burbleActions),
