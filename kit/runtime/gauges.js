@@ -677,6 +677,7 @@ function gmeter(cv, t, cx, cy, r, g) {
  * Each drawn tab is left in cv.tabRects ({ i, x, y, w, h }), so a touch on it can open that page.
  */
 const BAR_H = 36, TOP = 44, BOTTOM = 512;
+const TAB_GAP = 8, TAB_DIVIDER = '#aeb4bc';
 /**
  * Tab widths: each name's width plus `pad`, at least `min`; when that doesn't fit in `room` the
  * padding shrinks (down to `pad0`) and the minimum goes, so many tabs still show side by side.
@@ -698,7 +699,8 @@ function frame(cv, t, tabs, sel, badges) {
     const live = (badges || []).filter(Boolean);
     const labels = (tabs || []).map((n) => upperText(n));
     const badgesW = live.reduce((a, b) => a + Math.max(24 * 3.5, cv.textWidth(b.text, 18, opt) + 24) + 24 * 0.4, 0);
-    const widths = tabWidths(cv, labels, 20, opt, 150, 48, W - 32 - badgesW, 20);
+    const widths = tabWidths(cv, labels, 20, opt, 150, 48,
+        W - 32 - badgesW - TAB_GAP * Math.max(0, labels.length - 1), 20);
     let x = 16;
     cv.tabRects = [];
     labels.forEach((label, i) => {
@@ -709,8 +711,8 @@ function frame(cv, t, tabs, sel, badges) {
             cv.fillRect(x, BAR_H - 4, tw, 4, S);
         }
         cv.text(label, x + tw / 2, 25, 20, on ? t.selText || S : t.dim, opt);
-        if (i < tabs.length - 1) cv.fillRect(x + tw, 9, 1, BAR_H - 18, withAlpha('#ffffff', 0.12));
-        x += tw;
+        if (i < tabs.length - 1) cv.fillRect(x + tw + TAB_GAP / 2, 9, 1, BAR_H - 18, withAlpha(TAB_DIVIDER, 0.48));
+        x += tw + TAB_GAP;
     });
     badgeRow(cv, t, W - 16, 6, 24, 18, (badges || []).filter(Boolean));
 }
@@ -745,8 +747,9 @@ function header(cv, t, x, y, w, h, title, tabs, sel, badges, flat, compact) {
     cv.fillRect(x, y + h - 2, w, 2, withAlpha('#ffffff', 0.22));
     const right = badgeRow(cv, t, x + w - 16, y + (h - 30) / 2, 30, 18, badges || []);
     const names = (tabs || []).map((n) => upperText(n));
-    const tw = tabWidths(cv, names, 20, opt, 170, 64, right - x - 20, 24);
-    const tabsW = tw.reduce((a, b) => a + b, 0);
+    const gapsW = TAB_GAP * Math.max(0, names.length - 1);
+    const tw = tabWidths(cv, names, 20, opt, 170, 64, right - x - 20 - gapsW, 24);
+    const tabsW = tw.reduce((a, b) => a + b, 0) + gapsW;
     let tx = x + 20;
     const tsize = 38, titleW = title ? cv.textWidth(title, tsize) : 0;
     if (title && tx + titleW + 40 + tabsW <= right) {
@@ -763,8 +766,8 @@ function header(cv, t, x, y, w, h, title, tabs, sel, badges, flat, compact) {
             cv.fillRect(tx, y + h - 5, bw, 5, S);
         }
         cv.text(n, tx + bw / 2, y + h / 2 + 7, 20, on ? t.selText || '#ffffff' : t.dim, opt);
-        if (i < names.length - 1) cv.fillRect(tx + bw, y + h * 0.28, 1, h * 0.44, withAlpha('#ffffff', 0.14));
-        tx += bw;
+        if (i < names.length - 1) cv.fillRect(tx + bw + TAB_GAP / 2, y + h * 0.28, 1, h * 0.44, withAlpha(TAB_DIVIDER, 0.48));
+        tx += bw + TAB_GAP;
     });
 }
 
@@ -777,7 +780,8 @@ function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges) {
     const badgesW = bws.reduce((a, b) => a + b + bh * 0.4, 0);
     const tsize = 32, titleW = title ? cv.textWidth(title, tsize) : 0;
     const room = w - 20 - (badgesW ? badgesW + 12 : 0);
-    const tabRoom = room - 20;
+    const gapsW = TAB_GAP * Math.max(0, names.length - 1);
+    const tabRoom = room - 20 - gapsW;
     const minTabSize = 18, maxTabSize = 24;
     let tabSize = maxTabSize;
     let tw;
@@ -789,12 +793,14 @@ function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges) {
         tabSize = minTabSize;
         tw = tabWidths(cv, names, tabSize, opt, 132, 44, tabRoom, 20);
     }
-    const tabsW = tw.reduce((a, b) => a + b, 0);
+    const tabsW = tw.reduce((a, b) => a + b, 0) + gapsW;
     // the tabs start 20 px in: the name shows only where every tab still fits after it (else the last tab, Settings, drops)
     const showTitle = title && 20 + titleW + 32 + tabsW <= room;
     // only as wide as the content: the rest of the strip stays the HMI's
     let end = x + 20 + (showTitle ? titleW + 32 : 0);
-    names.forEach((n, i) => { if (end + tw[i] <= x + room) end += tw[i]; });
+    names.forEach((n, i) => {
+        if (end + tw[i] <= x + room) end += tw[i] + (i < names.length - 1 ? TAB_GAP : 0);
+    });
     end = Math.min(x + w, end + (badgesW ? 12 + badgesW : 0) + 16);
     cv.fillRect(x, y, end - x, h, t.bg);
     cv.fillRect(x, y + h - 2, end - x, 2, withAlpha('#ffffff', 0.22));
@@ -813,8 +819,8 @@ function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges) {
             cv.fillRect(tx, y + h - 4, bw, 4, S);
         }
         cv.text(n, tx + bw / 2, y + h / 2 + tabSize * 0.34, tabSize, on ? t.selText || '#ffffff' : t.dim, opt);
-        if (i < names.length - 1) cv.fillRect(tx + bw, y + h * 0.3, 1, h * 0.4, withAlpha('#ffffff', 0.14));
-        tx += bw;
+        if (i < names.length - 1) cv.fillRect(tx + bw + TAB_GAP / 2, y + h * 0.3, 1, h * 0.4, withAlpha(TAB_DIVIDER, 0.48));
+        tx += bw + TAB_GAP;
     });
     if (badgesW) badgeRow(cv, t, tx + 12 + badgesW, y + (h - bh) / 2, bh, bsize, badges);
     return end;
