@@ -345,10 +345,10 @@ mgu.run({
                 modules: state.modules.filter((m) => !m.fault && m.part === 'unknown') });
             return looks.filter((look) => look.modules.length);
         }
-        async function applyCustom(isRenewal, requestedColour, requestedZones) {
+        async function applyCustom(isRenewal, requestedColour, requestedZones, allowWhileMoving) {
             if (stopped || state.applyBusy || state.scanBusy || state.busy) return;
             const renewingBlackout = isRenewal && state.blackoutOverride;
-            if (!renewingBlackout && !canChangeColor()) {
+            if (!renewingBlackout && !allowWhileMoving && !canChangeColor()) {
                 if (isRenewal) {
                     state.activeCustom = false; state.customUpper = null; state.customLower = null; state.customOther = null; state.renewTimer = null;
                     setNotice('CUSTOM COLOUR WILL RETURN TO BMW WHEN ITS SHORT HOLD EXPIRES', C.amber);
@@ -402,7 +402,6 @@ mgu.run({
         }
         async function applyBlackoutOverride() {
             if (state.blackoutApplying || stopped || state.oemEnabled) return false;
-            if (!freshSpeed()) return false;
             state.blackoutApplying = true;
             state.blackoutLastAttemptAt = Date.now();
             const black = { byZone: {
@@ -411,7 +410,7 @@ mgu.run({
                 other: { rgb: [0, 0, 0], brightness: 0 },
             } };
             try {
-                await applyCustom(false, black, ['upper', 'lower', 'other']);
+                await applyCustom(false, black, ['upper', 'lower', 'other'], true);
                 const applied = [state.customUpper, state.customLower, state.customOther].some((c) =>
                     c && c.brightness === 0 && c.rgb && c.rgb.every((n) => n === 0));
                 state.blackoutOverride = !!(applied && state.activeCustom);
@@ -453,7 +452,6 @@ mgu.run({
         }
         async function setOemLightingEnabled(enabled) {
             const previewOnly = !!ctx.preview && !state.proxy;
-            if (!previewOnly && !canChangeColor()) return false;
             const canBlackoutWithModules = !enabled && state.modules.length && state.diag && state.diag.available;
             if (!state.proxy && !previewOnly && !canBlackoutWithModules) {
                 setNotice('BMW AMBIENT LIGHT CONTROL IS NOT AVAILABLE', C.amber); return false;
@@ -462,7 +460,30 @@ mgu.run({
             state.oemToggleBusy = true;
             const previousEnabled = state.oemEnabled;
             try {
-                if (state.activeCustom || state.blackoutOverride) await restoreBmw();
+                if (enabled && (state.activeCustom || state.blackoutOverride)) {
+                    const canReapplyLook = state.look && (
+                        (state.look.type === 'combo' && COMBOS[state.look.index]) ||
+                        (state.look.type === 'colour' && PALETTE[state.look.index]) ||
+                        (state.look.type === 'oem' && state.oemSelected)
+                    );
+                    if (canReapplyLook) {
+                        clearTimeout(state.renewTimer); state.renewTimer = null;
+                        state.activeCustom = false; state.blackoutOverride = false;
+                        state.customUpper = null; state.customLower = null; state.customOther = null;
+                    } else await restoreBmw();
+                } else if (!enabled && state.activeCustom) {
+                    // Replace the current custom colour directly with the blackout request.
+                    // Do not wait for a serial release of every module before turning the lights off.
+                    clearTimeout(state.renewTimer); state.renewTimer = null;
+                    state.activeCustom = false; state.blackoutOverride = false;
+                    state.customUpper = null; state.customLower = null; state.customOther = null;
+                }
+                state.oemEnabled = !!enabled;
+                state.oemPendingTarget = !!enabled;
+                state.oemPendingAt = Date.now();
+                saveLook();
+                queueRender();
+
                 let bmwAccepted = false;
                 let bmwError = null;
                 if (state.proxy) {
@@ -472,19 +493,23 @@ mgu.run({
                     } catch (e) { bmwError = e; }
                 }
                 state.oemEnabled = !!enabled;
-                state.oemPendingTarget = bmwAccepted ? !!enabled : null;
-                state.oemPendingAt = bmwAccepted ? Date.now() : 0;
+                state.oemPendingTarget = bmwAccepted ? !!enabled : (!enabled && canBlackoutWithModules ? false : null);
+                state.oemPendingAt = state.oemPendingTarget !== null ? Date.now() : 0;
                 let moduleBlackout = false;
                 if (!enabled && !previewOnly && state.modules.length && state.diag && state.diag.available) {
                     moduleBlackout = await applyBlackoutOverride();
                 }
                 if (!previewOnly && !bmwAccepted && !moduleBlackout) {
                     state.oemEnabled = previousEnabled; state.oemPendingTarget = null; state.oemPendingAt = 0;
+                    saveLook(); queueRender();
                     throw bmwError || new Error('BMW ambient control is unavailable');
                 }
-                setNotice(enabled ? 'AMBIENT LIGHTING ON' : moduleBlackout
+                state.oemPendingTarget = bmwAccepted ? !!enabled : null;
+                state.oemPendingAt = bmwAccepted ? Date.now() : 0;
+                setNotice(enabled ? (previewOnly ? 'PREVIEW LIGHTING ON' : 'AMBIENT LIGHTING ON') : moduleBlackout
                     ? 'AMBIENT LIGHTING OFF · BMW REQUEST ' + (bmwAccepted ? 'ACCEPTED' : 'UNAVAILABLE') + ' · MODULES HELD DARK'
-                    : 'AMBIENT LIGHTING OFF · BMW REQUEST ACCEPTED', bmwAccepted ? C.green : C.amber);
+                    : bmwAccepted ? 'AMBIENT LIGHTING OFF · BMW REQUEST ACCEPTED' : 'PREVIEW LIGHTING OFF',
+                bmwAccepted ? C.green : C.amber);
                 saveLook();
                 queueRender();
                 return true;
