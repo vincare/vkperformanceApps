@@ -33,8 +33,10 @@ const W = 1600, H = 520;
 const PAGE_TEXT_SCALE = 1.3;
 const FRESH_MS = 4500;
 const DYNO_FRESH_MS = 500;
-// Vehicle readings do not need a new screen frame more than 10 times a second.
+// Keep non-dashboard pages light; the main Engine Data page gets a smoother 20 Hz update.
 const RENDER_MS = 100;
+const ENGINE_DATA_FPS = 20;
+const ENGINE_DATA_RENDER_MS = 1000 / ENGINE_DATA_FPS;
 const DME_POLL_MS = 1200;
 const PEAK_HOLD_MS = 15000;
 const CD_STALE = 120000;
@@ -2334,7 +2336,8 @@ mgu.run({
             const now = Date.now();
             // The renderer maintains its own frame keepalive. Do not rebuild a
             // screen unless app data, navigation, or layout actually changed.
-            if (!renderDirty || now - lastRenderAt < RENDER_MS) return;
+            const renderInterval = page === 0 ? ENGINE_DATA_RENDER_MS : RENDER_MS;
+            if (!renderDirty || now - lastRenderAt < renderInterval) return;
 
             renderDirty = false;
             const finishRender = () => {
@@ -2362,7 +2365,7 @@ mgu.run({
                 renderQueued = false;
                 renderTimer = null;
                 render().catch((e) => log.warn('render: ' + shortError(e)));
-            }, RENDER_MS);
+            }, page === 0 ? ENGINE_DATA_RENDER_MS : RENDER_MS);
         }
 
         function freshnessSignature(now) {
@@ -2617,9 +2620,10 @@ mgu.run({
         diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', engineMonitorReadOnly: true,
             exhaustControlDisarmed: !valveController.armedSetting,
             rawDiagnostics: diagnostics(), dmeCandidates: settings.get('readDmeCandidates') === true });
-        // Keep the app loop at the same 10 Hz budget as screen drawing even
-        // when the renderer itself is ticking at 60 Hz.
-        if (ctx.loop) mainLoop = ctx.loop('MAIN', 10, render, { gpuFps: 10 });
+        // Engine Data gets 20 Hz; other pages retain their 10 Hz renderer cap.
+        if (ctx.loop) mainLoop = ctx.loop('MAIN', 10, render, {
+            gpuFps: () => page === 0 ? ENGINE_DATA_FPS : 10,
+        });
         render().catch((e) => log.warn('first render: ' + shortError(e)));
     },
 });

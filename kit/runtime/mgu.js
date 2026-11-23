@@ -697,17 +697,24 @@ async function runInner(impl) {
         /**
          * Run fn while screen `stateName` is visible: once per screen refresh (up to 60 fps)
          * when the GPU renderer shows it, else about `fps` times a second. Set options.gpuFps
-         * to cap callback ticks for apps that do not need display-rate animation.
+         * to cap callback ticks for apps that do not need display-rate animation. It may be a
+         * number or a function returning the current cap, for page-specific frame rates.
          */
         loop(stateName, fps, fn, options) {
             let timer = null, on = false, running = false, frames = 0, spent = 0;
-            const gpuFps = options && typeof options.gpuFps === 'number' && isFinite(options.gpuFps)
-                ? Math.max(1, Math.min(60, options.gpuFps)) : 0;
-            const gpuInterval = gpuFps ? 1000 / gpuFps : 0;
+            const gpuFps = options && options.gpuFps;
+            const gpuInterval = () => {
+                const requested = typeof gpuFps === 'function' ? gpuFps() : gpuFps;
+                const rate = typeof requested === 'number' && isFinite(requested)
+                    ? Math.max(1, Math.min(60, requested)) : 0;
+                return rate ? 1000 / rate : 0;
+            };
             let lastGpuTick = 0;
             const gpuOn = () => display.active(stateName);
-            const gpuDelay = () => gpuInterval
-                ? Math.max(0, gpuInterval - (Date.now() - lastGpuTick)) : 0;
+            const gpuDelay = () => {
+                const interval = gpuInterval();
+                return interval ? Math.max(0, interval - (Date.now() - lastGpuTick)) : 0;
+            };
             const tick = async () => {
                 timer = null;
                 if (!on || running) return;
