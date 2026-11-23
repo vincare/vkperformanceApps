@@ -1287,8 +1287,10 @@ mgu.run({
         startWatch(CDS2, { statusLongitudinalAccelerationMassCenter: setLongitudinalAcceleration,
             statusPushButtonMSA2: setMsa });
         startWatch(VEHICLE, { statusNewCurrentUnitsStatusExt: setPressureUnits });
-        startWatch(VEHICLE2, { statusCarSpeed2: setVehicleSpeed,
-            statusOilDipstick2: setOilLevel, statusVehicleMass: setMass });
+        startWatch(VEHICLE2, { statusCarSpeed2: setVehicleSpeed, statusVehicleMass: setMass });
+        // The oil dipstick getter often does not emit change notifications. Poll it
+        // independently so oil level refreshes without slowing the speed signal used by timers.
+        startWatch(VEHICLE2, { statusOilDipstick2: setOilLevel }, { pollMs: 10000 });
         startWatch(ENV, { ExteriorTemperature: setAmbient });
         startWatch(KOMBI, { statusRangeTankStatus: setTank, statusBordcomputerAverage: setBoardAvg });
         startWatch(PEDAL, { AngleAcceleratorPedal: setPedal });
@@ -1340,7 +1342,7 @@ mgu.run({
         let dmeExtraIndex = 0;
         let lastDmeCycle = 0;
         // OBD service 06 cylinder misfire counts (MIDs A2..AD), one MID per CAR DATA cycle
-        let misfireMids = null, misfireCounts = [], misfireCursor = 0, misfireRetryAt = 0;
+        let misfireMids = null, misfireCounts = [], misfireCursor = 0, misfireRetryAt = 0, misfireDid = false;
         async function pollMisfire(now) {
             const cfg = dme.misfire || {};
             const ecu = cfg.ecu == null ? dme.ecu : cfg.ecu;
@@ -1350,15 +1352,18 @@ mgu.run({
             };
             if (!misfireMids || !misfireMids.length) {
                 if (now < misfireRetryAt) return;
-                let supported;
-                try { supported = await reader.supported(ecu, 0xA0, false); }
-                catch (e) {
-                    misfireMids = null;
-                    set(null, 'unavailable');
-                    misfireRetryAt = Date.now() + 30000;
-                    return;
-                }
+                let supported = null;
+                try { supported = await reader.supported(ecu, 0xA0, false); } catch (e) { /* try BMW's UDS form below */ }
                 misfireMids = (supported || []).filter((mid) => mid >= 0xA2 && mid <= 0xAD).slice(0, 12);
+                misfireDid = false;
+                // Some BMW DMEs expose the OBD monitor table only through the equivalent
+                // UDS F6xx identifiers. Fall back to that read-only form when service 06
+                // does not advertise the cylinder misfire monitors.
+                if (!misfireMids.length) {
+                    try { supported = await reader.supported(ecu, 0xA0, true); } catch (e) { supported = null; }
+                    misfireMids = (supported || []).filter((mid) => mid >= 0xA2 && mid <= 0xAD).slice(0, 12);
+                    misfireDid = true;
+                }
                 if (!misfireMids.length) {
                     set(null, 'unavailable');
                     misfireMids = null;
@@ -1370,11 +1375,20 @@ mgu.run({
             }
             const mid = misfireMids[misfireCursor++ % misfireMids.length];
             let rows;
-            try { rows = await reader.monitor(ecu, mid, false); }
+            try { rows = await reader.monitor(ecu, mid, misfireDid); }
             catch (e) {
+                rows = null;
+            }
+            // A DME may advertise service 06 but refuse its result request. Try the
+            // BMW UDS F6 form once and keep using it if it answers.
+            if ((!rows || !rows.length) && !misfireDid) {
+                try { rows = await reader.monitor(ecu, mid, true); } catch (e) { rows = null; }
+                if (rows && rows.length) misfireDid = true;
+            }
+            if (!rows || !rows.length) {
                 misfireMids = null;
-                set(null, 'unavailable');
                 misfireRetryAt = Date.now() + 30000;
+                set(null, 'unavailable');
                 return;
             }
             const tid = parseInt(cfg.tid || '0C', 16);

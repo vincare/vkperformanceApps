@@ -23,6 +23,12 @@ function contain(rect, width, height) {
 function DragRunSpeed(kmh, unit) { return DragRun.speedValue(kmh, unit); }
 function DragRunSeconds(value) { return DragRun.seconds(value); }
 
+function hasTimedResults(run) {
+    const result = run && run.result;
+    return !!result && Object.keys(result).some((key) => typeof result[key] === 'number'
+        && isFinite(result[key]) && result[key] > 0);
+}
+
 function runStamp(at) {
     const date = new Date(at), pad = (v) => String(v).padStart(2, '0');
     return pad(date.getDate()) + '.' + pad(date.getMonth() + 1) + '.' + date.getFullYear()
@@ -270,7 +276,9 @@ function drawSheet(cv, G, t, s, car, actions) {
 
     // VALID/INVALID sticker at the right of the timing values: it sits inside the dark
     // ribbon band (baked on that band's colour, 50% ink), beside the first rows.
-    const liveStamp = stampArt(s.slope == null || s.slope >= -1.0, '#1b070c');
+    const hasLiveTimes = hasTimedResults(current) || Object.keys(s.rolling || {}).some((key) =>
+        typeof s.rolling[key] === 'number' && isFinite(s.rolling[key]) && s.rolling[key] > 0);
+    const liveStamp = hasLiveTimes ? stampArt(s.slope == null || s.slope >= -1.0, '#1b070c') : null;
     if (liveStamp) {
         const ih = 96, iw = Math.round(ih * liveStamp.w / liveStamp.h);
         const iy = y0 + 26;
@@ -678,12 +686,13 @@ function drawReport(cv, G, t, s, actions) {
     // Right ribbon — VALID/INVALID stamp sticker + 2-column sub-split breakdown
     const ribX = ribbon(cv, G, y0, y1);
     const valid = slopeV == null || slopeV >= -1.0;
-    const stamp = stampArt(valid);
+    const hasTimes = hasTimedResults(run);
+    const stamp = hasTimes ? stampArt(valid) : null;
     if (stamp) {
         const ih = 112, iw = Math.round(ih * stamp.w / stamp.h);
         const iy = y0 + 22;
         cv.image(stamp.id, xAt(ribX + 105, iy + ih / 2) - iw / 2, iy, iw, ih);
-    } else {
+    } else if (hasTimes) {
         const vCol = valid ? '#2ee06f' : '#ff243b';
         cv.text(valid ? 'VALID RUN' : 'INVALID RUN', xAt(ribX + 105, y0 + 60), y0 + 80, 22, vCol,
             { align: 'center', font: 'bold', spacing: 1.4, literal: true });
