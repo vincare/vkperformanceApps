@@ -28,7 +28,7 @@ const scaling = {
 };
 
 equal(app.id, 'performance', 'app id');
-equal(app.version, '0.6.35', 'app version');
+equal(app.version, '0.6.36', 'app version');
 const valveControl = app.settings.find((setting) => setting.key === 'valveControl');
 equal(valveControl.default, 'off', 'real exhaust control defaults disarmed');
 equal(valveControl.hidden, undefined, 'exhaust arming is visible in Settings');

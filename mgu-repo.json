@@ -6,7 +6,7 @@
     "icon": "icon.png",
     "build": {
       "python": "kit/tools/build.py",
-      "args": ["{id}"],
+      "args": ["--store-package", "{id}"],
       "sdk": "oap-sdk",
       "output": "dist/{id}@{version}.tgz",
       "network": ["doom", "performance"],

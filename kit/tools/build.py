@@ -9,6 +9,9 @@ Produces in dist/:
     <id>@<ver>.tgz   npm-format package (the platform's preinstalled_apps format)
     <id>/            the staged tree (handy for inspection)
 
+Use --store-package for MGU Store builds: it emits only the .tgz selected by
+mgu-repo.json and skips the duplicate .mgu archive.
+
 The RHMI layout (application.xml + uiDescription.json) is GENERATED from the
 "screens" + "settings" in app.json, using only widget templates that BMW's own
 apps use on this firmware (see reference/rhmi-widget-cells.md).
@@ -581,7 +584,7 @@ def build_start_widget(spec, app_id, icon_src, out, pkg_out=None):
     return {'component': comp, 'layout': ui['containers']['500']['components'][str(WIDGET_COMPONENT_ID)]['cells']['Widget']['value']}
 
 
-def build(app_id, language='en', preview_only=False):
+def build(app_id, language='en', preview_only=False, store_package=False):
     language = normalize_language(language)
     if not preview_only and not all(os.path.isfile(os.path.join(SDK, name)) for name in ('index.js', 'package.json')):
         raise SystemExit('BMW oap-sdk is missing. Extract it from your own head unit with kit/tools/extract_sdk.js, '
@@ -804,16 +807,24 @@ def build(app_id, language='en', preview_only=False):
 
     # --- archives ---
     os.makedirs(DIST, exist_ok=True)
-    bundle = os.path.join(DIST, f'{app_id}@{ver}.mgu')
-    with gz_header_free(bundle) as gz, tarfile.open(fileobj=gz, mode='w') as tf:
-        for n in ('meta.json', 'source', 'rhmiData', 'rhmiDataStartWidget', 'oapgen'):
-            if os.path.exists(os.path.join(stage, n)):
-                tf.add(os.path.join(stage, n), arcname=n)
+    # The MGU Store consumes the npm-format .tgz declared in mgu-repo.json.
+    # Writing the install-helper .mgu as well duplicates the packed app art
+    # and can exceed the Store's 200 MiB build-write budget.
+    if not store_package:
+        bundle = os.path.join(DIST, f'{app_id}@{ver}.mgu')
+        with gz_header_free(bundle) as gz, tarfile.open(fileobj=gz, mode='w') as tf:
+            for n in ('meta.json', 'source', 'rhmiData', 'rhmiDataStartWidget', 'oapgen'):
+                if os.path.exists(os.path.join(stage, n)):
+                    tf.add(os.path.join(stage, n), arcname=n)
     npm = os.path.join(DIST, f'{app_id}@{ver}.tgz')
     with gz_header_free(npm) as gz, tarfile.open(fileobj=gz, mode='w') as tf:
         tf.add(src, arcname='package')
-    print(f'{app_id} {ver}: {os.path.relpath(bundle, ROOT)} ({os.path.getsize(bundle) // 1024} KiB), '
-          f'{len(uidesc["containers"])} screens, states {state_ids}')
+    if store_package:
+        print(f'{app_id} {ver}: {os.path.relpath(npm, ROOT)} ({os.path.getsize(npm) // 1024} KiB), '
+              f'{len(uidesc["containers"])} screens, states {state_ids}')
+    else:
+        print(f'{app_id} {ver}: {os.path.relpath(bundle, ROOT)} ({os.path.getsize(bundle) // 1024} KiB), '
+              f'{len(uidesc["containers"])} screens, states {state_ids}')
 
 
 def gz_header_free(path):
@@ -829,11 +840,13 @@ def main():
     parser.add_argument('--language', type=normalize_language, choices=languages(), default='en',
                         help='UI language; Korean also accepts ko-KR, ko-kr and ko_KR, Spanish es-ES and es_ES')
     parser.add_argument('--preview-only', action='store_true', help='stage an offline preview without BMW SDK or installable archives')
+    parser.add_argument('--store-package', action='store_true',
+                        help='emit only the .tgz consumed by MGU Store (avoids a duplicate .mgu build)')
     parser.add_argument('apps', nargs='*')
     args = parser.parse_args()
     ids = args.apps or sorted(d for d in os.listdir(APPS) if os.path.exists(os.path.join(APPS, d, 'app.json')))
     for i in ids:
-        build(i, args.language, preview_only=args.preview_only)
+        build(i, args.language, preview_only=args.preview_only, store_package=args.store_package)
 
 
 if __name__ == '__main__':
