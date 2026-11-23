@@ -149,6 +149,8 @@ mgu.run({
             oemPaletteOpen: false, oemSelected: null, oemBackground: 62, oemAccent: 76,
             oemNight: false, oemEnabled: true, oemDynamic: true, oemFocus: 0, oemWantApply: false,
             oemPendingTarget: null, oemPendingAt: 0, oemToggleBusy: false,
+            oemDesiredTarget: null, oemToggleWaiters: [], oemRetryPending: false,
+            oemRestoreRequested: false,
             blackoutOverride: false, blackoutApplying: false, blackoutLastAttemptAt: 0,
             oemScroll: 0, oemScrollMax: 0,
             detail: null, detailScroll: 0, detailScrollMax: 0, selColour: -1, selCombo: -1, previewChoice: null,
@@ -158,6 +160,7 @@ mgu.run({
         let stopped = false, renderTimer = null, autoScanTimer = null, renderQueued = false;
         let lastAction = Object.create(null), hitboxes = [], wheelGeom = null;
         let lastHudGeom = null, lastDetGeom = null, lastFocusKey = null, focusPoll = null;
+        let ambientTouchDown = null;
         let lastOemLockAt = 0;
         const favFile = path.join(ctx.dataDir, 'moreambients_favourites.json');
         const lookFile = path.join(ctx.dataDir, 'moreambients_look.json');
@@ -217,6 +220,11 @@ mgu.run({
                 renderTimer = null; renderQueued = false;
                 Promise.resolve(render()).catch((e) => log.warn('render: ' + shortError(e)));
             }, 55);
+        }
+        function retryOemToggleWhenIdle() {
+            if (!state.oemRetryPending || state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying || stopped) return;
+            state.oemRetryPending = false;
+            setTimeout(() => { if (!stopped) setOemLightingEnabled(state.oemEnabled); }, 0);
         }
         function canChangeColor() {
             if (!freshSpeed()) { setNotice('WAITING FOR A FRESH VEHICLE SPEED SIGNAL', C.amber); return false; }
@@ -312,9 +320,12 @@ mgu.run({
                 log.warn('ambient module scan: ' + shortError(e));
             } finally {
                 state.scanBusy = false; queueRender();
-                if (!state.oemEnabled && state.modules.length && !state.blackoutOverride) {
+                if (state.oemEnabled && state.oemRestoreRequested && state.modules.length) state.oemRetryPending = true;
+                if (state.oemRetryPending) retryOemToggleWhenIdle();
+                else if (!state.oemEnabled && state.modules.length && !state.blackoutOverride) {
                     setTimeout(() => applyBlackoutOverride(), 0);
-                } else if (state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
+                }
+                if (state.oemEnabled && state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
             }
         }
         function average(list) {
@@ -398,10 +409,16 @@ mgu.run({
                 if (state.blackoutOverride) state.blackoutOverride = false;
                 if (!isRenewal) setNotice('COLOUR COMMAND FAILED · ' + shortError(e).slice(0, 70), C.red);
                 log.warn('ambient write: ' + shortError(e));
-            } finally { state.applyBusy = false; queueRender(); }
+            } finally {
+                state.applyBusy = false; queueRender();
+                retryOemToggleWhenIdle();
+                if (!state.oemEnabled && state.modules.length && !state.blackoutOverride && !state.blackoutApplying) {
+                    setTimeout(() => applyBlackoutOverride(), 0);
+                }
+            }
         }
         async function applyBlackoutOverride() {
-            if (state.blackoutApplying || stopped || state.oemEnabled) return false;
+            if (state.blackoutApplying || stopped || state.oemEnabled || state.blackoutOverride) return false;
             state.blackoutApplying = true;
             state.blackoutLastAttemptAt = Date.now();
             const black = { byZone: {
@@ -416,24 +433,26 @@ mgu.run({
                 state.blackoutOverride = !!(applied && state.activeCustom);
                 queueRender();
                 return state.blackoutOverride;
-            } finally { state.blackoutApplying = false; }
+            } finally { state.blackoutApplying = false; retryOemToggleWhenIdle(); }
         }
         async function restoreBmw() {
-            if (state.applyBusy || state.scanBusy || state.busy) return;
+            if (state.applyBusy || state.scanBusy || state.busy) return false;
             clearTimeout(state.renewTimer); state.renewTimer = null; state.activeCustom = false; state.blackoutOverride = false;
             if (!state.modules.length || !state.diag || !state.diag.available) {
                 state.upperRead = null; state.lowerRead = null; state.customUpper = null; state.customLower = null; state.customOther = null;
                 setNotice('RESTORE LINK UNAVAILABLE · THE SHORT BMW OVERRIDE WILL EXPIRE BY ITSELF', C.amber);
-                return;
+                return false;
             }
             state.busy = true; setNotice('RESTORING BMW LIGHTING…', C.cyan);
             let ok = 0, failed = 0;
             try {
                 for (const m of state.modules) { if (await sendRestore(m.bus, m.nad)) ok++; else failed++; }
                 state.upperRead = null; state.lowerRead = null; state.customUpper = null; state.customLower = null; state.customOther = null;
+                if (ok > 0 && failed === 0) state.oemRestoreRequested = false;
                 setNotice('BMW LIGHTING RESTORED · ' + ok + ' MODULES' + (failed ? ' · ' + failed + ' DID NOT ACK' : ''), failed ? C.amber : C.green);
+                return ok > 0 && failed === 0;
             } catch (e) { setNotice('RESTORE FAILED · ' + shortError(e).slice(0, 72), C.red); log.warn('ambient restore: ' + shortError(e)); }
-            finally { state.busy = false; queueRender(); }
+            finally { state.busy = false; queueRender(); retryOemToggleWhenIdle(); }
         }
         async function setFactorySlot(n) {
             if (state.activeCustom) await restoreBmw();
@@ -450,27 +469,17 @@ mgu.run({
             request.controlMenuAmbientePanoramicRoofInteriorLighting = 'SIGNAL_UNBEFUELLT';
             return request;
         }
-        async function setOemLightingEnabled(enabled) {
-            const previewOnly = !!ctx.preview && !state.proxy;
+        async function sendOemLightingRequest(enabled, previewOnly) {
             const canBlackoutWithModules = !enabled && state.modules.length && state.diag && state.diag.available;
-            if (!state.proxy && !previewOnly && !canBlackoutWithModules) {
-                setNotice('BMW AMBIENT LIGHT CONTROL IS NOT AVAILABLE', C.amber); return false;
+            const hadModuleOverride = state.activeCustom || state.blackoutOverride || state.oemRestoreRequested;
+            const canRestoreWithModules = enabled && state.modules.length && state.diag && state.diag.available;
+            if (!state.proxy && !previewOnly && !canBlackoutWithModules && !canRestoreWithModules && !state.scanBusy) {
+                setNotice('BMW AMBIENT CONTROL UNAVAILABLE · CHECK THE VEHICLE LINK', C.amber);
+                return false;
             }
-            if (state.oemToggleBusy) return false;
-            state.oemToggleBusy = true;
-            const previousEnabled = state.oemEnabled;
             try {
-                if (enabled && (state.activeCustom || state.blackoutOverride)) {
-                    const canReapplyLook = state.look && (
-                        (state.look.type === 'combo' && COMBOS[state.look.index]) ||
-                        (state.look.type === 'colour' && PALETTE[state.look.index]) ||
-                        (state.look.type === 'oem' && state.oemSelected)
-                    );
-                    if (canReapplyLook) {
-                        clearTimeout(state.renewTimer); state.renewTimer = null;
-                        state.activeCustom = false; state.blackoutOverride = false;
-                        state.customUpper = null; state.customLower = null; state.customOther = null;
-                    } else await restoreBmw();
+                if (enabled && hadModuleOverride) {
+                    clearTimeout(state.renewTimer); state.renewTimer = null;
                 } else if (!enabled && state.activeCustom) {
                     // Replace the current custom colour directly with the blackout request.
                     // Do not wait for a serial release of every module before turning the lights off.
@@ -478,11 +487,6 @@ mgu.run({
                     state.activeCustom = false; state.blackoutOverride = false;
                     state.customUpper = null; state.customLower = null; state.customOther = null;
                 }
-                state.oemEnabled = !!enabled;
-                state.oemPendingTarget = !!enabled;
-                state.oemPendingAt = Date.now();
-                saveLook();
-                queueRender();
 
                 let bmwAccepted = false;
                 let bmwError = null;
@@ -492,32 +496,77 @@ mgu.run({
                         bmwAccepted = true;
                     } catch (e) { bmwError = e; }
                 }
-                state.oemEnabled = !!enabled;
-                state.oemPendingTarget = bmwAccepted ? !!enabled : (!enabled && canBlackoutWithModules ? false : null);
-                state.oemPendingAt = state.oemPendingTarget !== null ? Date.now() : 0;
                 let moduleBlackout = false;
-                if (!enabled && !previewOnly && state.modules.length && state.diag && state.diag.available) {
+                let moduleRestore = false;
+                if (enabled && !previewOnly && state.modules.length && state.diag && state.diag.available
+                    && (hadModuleOverride || !bmwAccepted)) {
+                    moduleRestore = await restoreBmw();
+                    if (moduleRestore) state.oemRestoreRequested = false;
+                } else if (!enabled && !previewOnly && state.modules.length && state.diag && state.diag.available) {
                     moduleBlackout = await applyBlackoutOverride();
                 }
-                if (!previewOnly && !bmwAccepted && !moduleBlackout) {
-                    state.oemEnabled = previousEnabled; state.oemPendingTarget = null; state.oemPendingAt = 0;
-                    saveLook(); queueRender();
-                    throw bmwError || new Error('BMW ambient control is unavailable');
+
+                // Keep the latest request if startup discovery or another module operation is still using the link.
+                const waitingForWork = (!enabled && (state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying))
+                    || (enabled && state.oemRestoreRequested && state.scanBusy)
+                    || (enabled && hadModuleOverride && (state.applyBusy || state.busy || state.blackoutApplying))
+                    || (!bmwAccepted && !moduleBlackout && !moduleRestore
+                        && (state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying));
+                if (!previewOnly && waitingForWork) {
+                    state.oemRetryPending = true;
+                    state.oemPendingTarget = !!enabled; state.oemPendingAt = Date.now();
+                    setNotice('AMBIENT LIGHT ' + (enabled ? 'ON' : 'OFF') + ' REQUEST QUEUED · FINISHING VEHICLE CONTROL', C.cyan);
+                    return true;
                 }
-                state.oemPendingTarget = bmwAccepted ? !!enabled : null;
-                state.oemPendingAt = bmwAccepted ? Date.now() : 0;
-                setNotice(enabled ? (previewOnly ? 'PREVIEW LIGHTING ON' : 'AMBIENT LIGHTING ON') : moduleBlackout
-                    ? 'AMBIENT LIGHTING OFF · BMW REQUEST ' + (bmwAccepted ? 'ACCEPTED' : 'UNAVAILABLE') + ' · MODULES HELD DARK'
-                    : bmwAccepted ? 'AMBIENT LIGHTING OFF · BMW REQUEST ACCEPTED' : 'PREVIEW LIGHTING OFF',
-                bmwAccepted ? C.green : C.amber);
-                saveLook();
-                queueRender();
+                if (!previewOnly && !bmwAccepted && !moduleBlackout && !moduleRestore) {
+                    const error = bmwError || new Error('BMW ambient command was not acknowledged');
+                    setNotice('AMBIENT LIGHT ' + (enabled ? 'ON' : 'OFF') + ' NOT CONFIRMED · ' + shortError(error).slice(0, 52), C.red);
+                    log.warn('ambient on/off: ' + shortError(error));
+                    return false;
+                }
+                if (enabled && !hadModuleOverride && bmwAccepted) state.oemRestoreRequested = false;
+                if (state.oemDesiredTarget === null) {
+                    state.oemPendingTarget = !!enabled; state.oemPendingAt = Date.now();
+                    setNotice(enabled
+                        ? (previewOnly ? 'PREVIEW LIGHTING ON' : moduleRestore && !bmwAccepted ? 'AMBIENT LIGHTING ON · MODULES RESTORED' : 'AMBIENT LIGHTING ON · REQUEST SENT')
+                        : moduleBlackout && !bmwAccepted ? 'AMBIENT LIGHTING OFF · MODULES HELD DARK' : 'AMBIENT LIGHTING OFF · REQUEST SENT',
+                    bmwAccepted ? C.green : C.amber);
+                }
+                saveLook(); queueRender();
                 return true;
             } catch (e) {
                 setNotice('AMBIENT LIGHT REQUEST FAILED · ' + shortError(e).slice(0, 64), C.red);
                 log.warn('ambient on/off: ' + shortError(e));
                 return false;
-            } finally { state.oemToggleBusy = false; }
+            }
+        }
+        async function setOemLightingEnabled(enabled) {
+            const target = !!enabled;
+            const previewOnly = !!ctx.preview && !state.proxy;
+            // Reflect the tap immediately. Additional taps replace the pending target and are not dropped
+            // while a previous BMW request is still in flight.
+            if (target && !state.oemEnabled) state.oemRestoreRequested = true;
+            if (!target) state.oemRestoreRequested = false;
+            state.oemEnabled = target;
+            state.oemDesiredTarget = target;
+            state.oemPendingTarget = target;
+            state.oemPendingAt = Date.now();
+            saveLook(); queueRender();
+            setNotice('AMBIENT LIGHT ' + (target ? 'ON' : 'OFF') + ' · SENDING REQUEST…', C.cyan);
+            if (state.oemToggleBusy) return new Promise((resolve) => state.oemToggleWaiters.push(resolve));
+            state.oemToggleBusy = true;
+            let result = true;
+            try {
+                while (state.oemDesiredTarget !== null) {
+                    const next = state.oemDesiredTarget;
+                    state.oemDesiredTarget = null;
+                    result = await sendOemLightingRequest(next, previewOnly);
+                }
+                return result;
+            } finally {
+                state.oemToggleBusy = false;
+                state.oemToggleWaiters.splice(0).forEach((resolve) => resolve(result));
+            }
         }
         function effectiveOemBrightness(value) {
             return clamp(Math.round(value * (state.oemNight ? 0.45 : 1)), 10, 100);
@@ -1027,6 +1076,30 @@ mgu.run({
             }
         }
         ctx.onTap((x, y) => { try { hitTest(x, y); } catch (e) { setNotice('CONTROL FAILED · ' + shortError(e), C.red); } });
+        // Give the pinned ambient-light row its own touchscreen gesture. The car renderer routes
+        // some taps through page targets and others through the page tap handler; taking this row
+        // explicitly avoids the switch looking live while its action is missed by either route.
+        if (ctx.onTouch) ctx.onTouch((phase, x, y) => {
+            let row = null;
+            for (let i = hitboxes.length - 1; i >= 0; i--) {
+                if (hitboxes[i].key === 'hudRow' && hitboxes[i].row === 0) { row = hitboxes[i]; break; }
+            }
+            const inRow = !!(row && x >= row.x && x <= row.x + row.w && y >= row.y && y <= row.y + row.h);
+            if (phase === 1) {
+                if (state.page !== 'oem' || state.detail || !inRow) { ambientTouchDown = null; return false; }
+                ambientTouchDown = { x, y, cancelled: false };
+                return true;
+            }
+            if (!ambientTouchDown) return false;
+            if (phase === 2 && (Math.abs(x - ambientTouchDown.x) > 16 || Math.abs(y - ambientTouchDown.y) > 16))
+                ambientTouchDown.cancelled = true;
+            if (phase === 3) {
+                const tap = !ambientTouchDown.cancelled && inRow;
+                ambientTouchDown = null;
+                if (tap) Promise.resolve(actions.oemLight()).catch((e) => setNotice('AMBIENT CONTROL FAILED · ' + shortError(e), C.red));
+            }
+            return true;
+        });
         if (ctx.onScroll) ctx.onScroll((dy) => {
             const useDetail = state.detail && state.detailScrollMax > 0;
             const max = useDetail ? state.detailScrollMax : (state.oemScrollMax || 0);
