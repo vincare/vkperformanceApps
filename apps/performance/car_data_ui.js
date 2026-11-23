@@ -18,7 +18,7 @@ const SECTIONS = [
     { key: 'boost', title: 'BOOST', sub: 'CHARGE PRESSURE & INTAKE AIR' },
     { key: 'fuel', title: 'FUEL SYSTEM', sub: 'TANK LEVEL · RANGE · FUEL PRESSURE' },
     { key: 'ignition', title: 'IGNITION', sub: 'SPARK TIMING & START SYSTEM' },
-    { key: 'drivetrain', title: 'DRIVETRAIN', sub: 'GEARBOX · XDRIVE · TYRES' },
+    { key: 'drivetrain', title: 'DRIVETRAIN', sub: 'GEARBOX · XDRIVE · ENGINE' },
     { key: 'electrical', title: 'ELECTRICAL', sub: 'BATTERY & VEHICLE SYSTEMS' },
     { key: 'tyres', title: 'TYRES INFO', sub: 'PRESSURE & TEMPERATURE PER WHEEL' },
 ];

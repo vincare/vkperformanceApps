@@ -36,6 +36,7 @@ const DYNO_FRESH_MS = 500;
 const RENDER_MS = 100;
 const DME_POLL_MS = 1200;
 const PEAK_HOLD_MS = 15000;
+const CD_STALE = 120000;
 const RPM_MAX = 8000;
 const BOOST_MAX_BAR = 2.5;
 const PRESSURE_UNITS = { 1: 'BAR', 2: 'KPA', 3: 'PSI', BAR: 'BAR', KPA: 'KPA', PSI: 'PSI' };
@@ -145,7 +146,10 @@ mgu.run({
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
         let vehicleGear = null, vehicleGearAt = 0;
-        let page = 0, engineConfigView = 'sections', carDataView = 'menu', valveReady = false, drivingMode = null;
+        const cachedDriveMode = settings.get('lastDriveMode');
+        let page = 0, engineConfigView = 'sections', carDataView = 'menu', valveReady = false;
+        let drivingMode = flapFor(cachedDriveMode) ? cachedDriveMode : null;
+        let driveModeConfirmed = false;
         let burbleTarget = 1.5, burbleCommandActive = false;
         let driveModeLoading = false, driveModePollStarting = false, driveModePollSub = null, driveModePollTimer = null;
         let valveRescanTimer = null, smokeTick = null;
@@ -698,6 +702,12 @@ mgu.run({
         }
 
         function updateMetric(name, raw, value, unit, source, status) {
+            const previous = state[name];
+            const nextStatus = status || (finite(value) ? 'live' : 'invalid');
+            // Transient empty replies and quiet getters should not blank a good
+            // sample. Keep it briefly, using the same limit as CAR DATA.
+            if ((!finite(value) || nextStatus !== 'live') && previous && previous.status === 'live' &&
+                finite(previous.value) && Date.now() - previous.at <= CD_STALE) return;
             state[name] = {
                 raw, value: finite(value) ? value : null, unit: unit || '', source: source || '',
                 at: Date.now(), status: status || (finite(value) ? 'live' : 'invalid'),
@@ -821,10 +831,9 @@ mgu.run({
             // or the car leaves the qualifier out entirely (same rules as car_vitals).
             const rawSplit = payload && payload.valueDistributionLongitudinalTorqueRearAxisFrontAxis;
             const q = payload && payload.qualifierValueDistributionLongitudinalTorqueRearAxisFrontAxis;
-            const splitOk = q === undefined || q === null || q === 2 || q === 10 ||
-                /SIGNALWERT_IST_GUELTIG/.test(String(q));
+            const splitOk = q === undefined || q === null || /^(2|10|SIGNALWERT_IST_GUELTIG)$/.test(String(q));
             const split = splitOk ? Calc.scale(rawSplit, { factor: 0.01, invalid: 65535 }) : null;
-            if (finite(split) && split > 0) updateMetric('splitRear', rawSplit, split, '%', source, 'live');
+            if (finite(split) && split >= 0 && split <= 100) updateMetric('splitRear', rawSplit, split, '%', source, 'live');
         }
 
         function setGearboxStatus(payload) {
@@ -916,6 +925,9 @@ mgu.run({
         const CONS_UNITS = { VERBRAUCH_IN_L_S_100KM: 'l/100km', VERBRAUCH_IN_MPG_UK: 'mpg', VERBRAUCH_IN_MPG_US: 'mpg US', VERBRAUCH_IN_KM_S_L: 'km/l', 1: 'l/100km', 2: 'mpg', 3: 'mpg US', 4: 'km/l' };
 
         function textMetric(name, text, source) {
+            const previous = state[name];
+            if (!text && previous && previous.status === 'live' && previous.text &&
+                Date.now() - previous.at <= CD_STALE) return;
             state[name] = { raw: text, value: null, text: text || null, unit: '', source: source || '', at: Date.now(), status: text ? 'live' : 'invalid' };
             record(name, text, text, '', source, state[name].status);
             if (page !== 1) queueRender();
@@ -941,10 +953,13 @@ mgu.run({
         }
         function setHandBrake(payload, source) {
             const raw = payload && payload.statusContactHandBrake;
-            const value = enumStatus(raw, BRAKE_STATES, (s) => /NICHT.*(ANGEZOG|BETAETIG|BETÄTIG|FESTGESTELLT|APPLIED)/.test(s) ? 'RELEASED'
-                : /NICHT.*(GELOES|GELÖS|LOESEN|LÖSEN|OFFEN|RELEASED)/.test(s) ? 'APPLIED'
-                    : /ANGEZOG|BETAETIG|BETÄTIG|FESTGESTELLT|APPLIED/.test(s) ? 'APPLIED'
-                : /GELOES|GELÖS|LOESEN|LÖSEN|OFFEN|RELEASED/.test(s) ? 'RELEASED' : null);
+            const normalized = typeof raw === 'boolean' ? String(raw).toUpperCase() : raw;
+            const value = enumStatus(normalized, BRAKE_STATES, (s) => /^(TRUE|ON|1)$/.test(s) ? 'APPLIED'
+                : /^(FALSE|OFF|0)$/.test(s) ? 'RELEASED'
+                    : /NICHT.*(ANGEZOG|BETAETIG|BETÄTIG|FESTGESTELLT|APPLIED)/.test(s) ? 'RELEASED'
+                        : /NICHT.*(GELOES|GELÖS|LOESEN|LÖSEN|OFFEN|RELEASED)/.test(s) ? 'APPLIED'
+                            : /ANGEZOG|BETAETIG|BETÄTIG|FESTGESTELLT|APPLIED/.test(s) ? 'APPLIED'
+                                : /GELOES|GELÖS|LOESEN|LÖSEN|OFFEN|RELEASED/.test(s) ? 'RELEASED' : null);
             textMetric('handBrake', value, source);
         }
         function setMsa(payload, source) {
@@ -961,11 +976,28 @@ mgu.run({
         function setTank(payload, source) {
             if (!payload) return;
             const tank = payload.fluidLevelFuelTank;
-            updateMetric('tankLitres', tank, finite(tank) && tank >= 0 && tank <= 200 ? tank : null, 'l', source, 'live');
+            const validTank = finite(tank) && tank >= 0 && tank <= 200;
+            updateMetric('tankLitres', tank, validTank ? tank : null, 'l', source, validTank ? 'live' : 'invalid');
+            if (validTank) updateFuelReserve(tank);
             const range = payload.range;
             updateMetric('rangeKm', range, finite(range) && range >= 0 && range < 4095 ? range : null, 'km', source, 'live');
             const odo = payload.mileageKilometre;
             updateMetric('odoKm', odo, finite(odo) && odo >= 0 && odo < 16777215 ? odo : null, 'km', source, 'live');
+        }
+
+        let fuelReserveUntil = 0, fuelReserveLatched = false, fuelReserveTimer = null;
+        function updateFuelReserve(litres) {
+            if (litres > 9) fuelReserveLatched = false;
+            if (litres > 8 || fuelReserveLatched) return;
+            fuelReserveLatched = true;
+            fuelReserveUntil = Date.now() + 5000;
+            if (fuelReserveTimer) clearTimeout(fuelReserveTimer);
+            fuelReserveTimer = setTimeout(() => {
+                fuelReserveTimer = null;
+                fuelReserveUntil = 0;
+                queueRender();
+            }, 5000);
+            queueRender();
         }
         function setBoardAvg(payload, source) {
             const raw = payload && payload.consumptionAverage1BC1;
@@ -1091,7 +1123,7 @@ mgu.run({
         }
 
         function startDriveModePoll() {
-            if (state.stopped || drivingMode !== null || driveModePollStarting || driveModePollSub) return;
+            if (state.stopped || driveModeConfirmed || driveModePollStarting || driveModePollSub) return;
             driveModeLoading = true;
             driveModePollStarting = true;
             queueRender();
@@ -1108,7 +1140,7 @@ mgu.run({
                     queueRender();
                     return;
                 }
-                if (drivingMode !== null || state.stopped) {
+                if (driveModeConfirmed || state.stopped) {
                     shutdownSubscription(sub);
                     return;
                 }
@@ -1139,9 +1171,12 @@ mgu.run({
                 }
                 return;
             }
+            const changed = drivingMode === null || String(drivingMode) !== String(raw);
             drivingMode = raw;
+            driveModeConfirmed = true;
             driveModeLoading = false;
             stopDriveModePoll();
+            if (changed) settings.set('lastDriveMode', raw);
             if (!valveCanActuate()) { valveAuto.drive = raw; return; }
             const pending = valveAuto.driveMode(raw);
             if (pending) pending.then(queueRender).catch((e) => log.warn('exhaust drive mode: ' + shortError(e)));
@@ -1364,6 +1399,7 @@ mgu.run({
         let dmeExtraIndex = 0;
         let lastDmeCycle = 0;
         let lastEgsTryAt = 0;
+        let lastDiagWakeAt = 0;
         // OBD service 06 cylinder misfire counts (MIDs A2..AD), one MID per CAR DATA cycle.
         // Probe A2 directly first: some DMEs answer the monitor but do not publish the A0 list.
         let misfireEcu = null, misfireMids = null, misfireCounts = [], misfireCursor = 0;
@@ -1464,11 +1500,29 @@ mgu.run({
             if (row.value < 65535) misfireCounts[misfireMids.indexOf(mid)] = row.value;
             if (misfireCounts.some((value) => value !== null)) set(misfireCounts.slice(), 'live');
         }
+        function wakeSilentDiagUnits(now) {
+            if (!readOnlyLink || !fresh(state.rpm, now) || state.rpm.value < 500 || now - lastDiagWakeAt < 15000) return;
+            const units = new Set([dme.ecu]);
+            Object.keys(dme).forEach((key) => {
+                const items = dme[key];
+                if (Array.isArray(items)) items.forEach((item) => {
+                    if (item && finite(item.ecu)) units.add(item.ecu);
+                });
+                else if (items && finite(items.ecu)) units.add(items.ecu);
+            });
+            if (dme.misfire && dme.misfire.ecu == null && dme.ecu !== 0x13) units.add(0x13);
+            const silent = Array.from(units).filter((ecu) => readOnlyLink.silent(ecu));
+            if (!silent.length) return;
+            silent.forEach((ecu) => readOnlyLink.wake(ecu));
+            lastDiagWakeAt = now;
+            diagLog('dme_targets_woken', { ecus: silent, engineRpm: state.rpm.value });
+        }
         async function pollDme() {
             const now = Date.now();
             if (state.stopped || state.dmeBusy || settings.get('demo') === 'on' ||
                 settings.get('readDmeCandidates') !== true || valveCommandActive || burbleCommandActive || valveScanBusy ||
                 valveController.state.busy || valveController.tune.busy || now < valvePriorityUntil) return;
+            wakeSilentDiagUnits(now);
             const gearbox = state.gearboxTemp;
             const gearboxSignalFresh = gearbox && gearbox.status === 'live' && finite(gearbox.value) && now - gearbox.at <= 120000;
             const needsEgsTemp = (page === 0 || page === 5) && (dme.egs || []).length > 0 && !gearboxSignalFresh &&
@@ -1569,17 +1623,19 @@ mgu.run({
         }
 
         function selectTorque(now) {
-            if (fresh(state.torqueFes, now)) return { value: state.torqueFes.value, source: 'BMW SPORT SIGNAL' };
+            const value = heldNum('torqueFes');
+            if (finite(value)) return { value, source: 'BMW SPORT SIGNAL' };
             return null;
         }
 
         function boostValue(now) {
             const source = settings.get('boostSource') || 'auto';
-            if (source !== 'dme' && fresh(state.boostFes, now) && (source === 'fes' || fesBoostTrusted)) {
-                return { value: state.boostFes.value, approximate: true, source: 'BMW SPORT DISPLAY' };
+            const fes = heldNum('boostFes'), dmeValue = heldNum('boostDme');
+            if (source !== 'dme' && finite(fes) && (source === 'fes' || fesBoostTrusted)) {
+                return { value: fes, approximate: true, source: 'BMW SPORT DISPLAY' };
             }
-            if (source !== 'fes' && fresh(state.boostDme, now) && (source === 'dme' || dmeBoostTrusted)) {
-                return { value: state.boostDme.value, approximate: !state.baroMeasured, source: state.boostDme.source };
+            if (source !== 'fes' && finite(dmeValue) && (source === 'dme' || dmeBoostTrusted)) {
+                return { value: dmeValue, approximate: !state.baroMeasured, source: state.boostDme.source };
             }
             return null;
         }
@@ -1612,20 +1668,23 @@ mgu.run({
                 result.peaks = peakValues('demo', result, now);
                 return result;
             }
-            const rpm = fresh(state.rpm, now) ? state.rpm.value : null;
-            const tq = selectTorque(now);
-            const powerPct = fresh(state.powerPct, now) ? state.powerPct.value : null;
+            const engineOff = cdText('engineState') === 'ENGINE OFF';
+            const rpm = engineOff ? 0 : heldNum('rpm');
+            const tq = engineOff ? { value: 0, source: 'ENGINE OFF' } : selectTorque(now);
+            const powerPct = engineOff ? 0 : heldNum('powerPct');
             const torque = tq ? tq.value : null;
+            const gear = vehicleGearAt && now - vehicleGearAt <= CD_STALE ? vehicleGear : null;
+            const speed = heldNum('speed');
             const result = {
                 demo: false, rpm, torque, torqueSource: tq ? tq.source : null,
                 power: powerFor(powerPct, torque, rpm), powerUnit,
                 powerPct,
-                speed: fresh(state.speed, now) ? state.speed.value : null,
-                gear: vehicleGearAt && now - vehicleGearAt <= FRESH_MS ? vehicleGear : null,
-                torquePct: fresh(state.torquePct, now) ? state.torquePct.value : null,
-                boost: boostValue(now),
-                oil: fresh(state.oilTemp, now) ? state.oilTemp.value : null,
-                gearbox: fresh(state.gearboxTemp, now) ? state.gearboxTemp.value : null,
+                speed: finite(speed) ? speed : gear === 'P' ? 0 : null,
+                gear,
+                torquePct: engineOff ? 0 : heldNum('torquePct'),
+                boost: engineOff ? { value: 0, approximate: false, source: 'ENGINE OFF' } : boostValue(now),
+                oil: heldNum('oilTemp'),
+                gearbox: heldNum('gearboxTemp'),
             };
             result.peaks = peakValues('live', result, now);
             return result;
@@ -1635,7 +1694,6 @@ mgu.run({
            Numbers and texts only surface while their metric is fresh: engine-bus
            values use FRESH_MS, slow cluster/TPMS values use CD_STALE. Anything
            older or missing renders as an em dash rather than a made-up number. */
-        const CD_STALE = 120000;
         function cdNum(name, maxAge) {
             const m = state[name];
             return m && m.status === 'live' && Date.now() - m.at <= (maxAge || CD_STALE) && finite(m.value) ? m.value : null;
@@ -1644,6 +1702,7 @@ mgu.run({
             const m = state[name];
             return m && m.status === 'live' && Date.now() - m.at <= (maxAge || CD_STALE) && m.text ? m.text : null;
         }
+        function heldNum(name) { return cdNum(name, CD_STALE); }
         function cdFast(name) { return cdNum(name, FRESH_MS); }
         const cdu = (v, digits, unit) => finite(v) ? formatNumber(v, digits) + ' ' + unit : null;
         const cdt = (v) => v === null || v === undefined ? null : String(v);
@@ -1753,9 +1812,9 @@ mgu.run({
                     drivetrain: [
                         { label: 'GEAR', value: s.gear || 'D3' },
                         { label: 'GEARBOX OIL TEMP', value: cdu(s.gearbox, 0, '°C') },
-                        { label: 'XDRIVE REAR SPLIT', value: cdu(w(72, 12, 0.3), 0, '%'), detail: 'rear axle torque' },
-                        { label: 'TYRE PRESSURE', value: '2.4 · 2.4 · 2.5 · 2.5', detail: 'FL · FR · RL · RR · bar' },
-                        { label: 'TYRE TEMP', value: '24 · 24 · 26 · 26', detail: 'FL · FR · RL · RR · °C' },
+                        { label: 'XDRIVE REAR SPLIT', value: settings.get('drivetrainType') === 'rwd' ? 'NOT SUPPORTED ON RWD' : cdu(w(72, 12, 0.3), 0, '%'), detail: 'rear axle torque' },
+                        { label: 'ENGINE RPM', value: cdu(s.rpm, 0, 'rpm'), detail: 'crankshaft speed' },
+                        { label: 'ENGINE TORQUE', value: cdu(s.torque, 0, 'Nm'), detail: 'BMW engine signal' },
                     ],
                     electrical: [
                         { label: 'BATTERY VOLTAGE', value: cdu(w(14.1, 0.4, 0.2), 1, 'V') },
@@ -1774,7 +1833,7 @@ mgu.run({
                 };
                 return demoRow[view] || [];
             }
-            const gear = vehicleGearAt && now - vehicleGearAt <= FRESH_MS ? vehicleGear : null;
+            const gear = vehicleGearAt && now - vehicleGearAt <= CD_STALE ? vehicleGear : null;
             const boost = boostValue(now);
             const baro = finite(state.baroKpa) ? state.baroKpa : 101.3;
             const targetKpa = cdNum('boostTargetKpa');
@@ -1797,8 +1856,8 @@ mgu.run({
                         if (m.value.length && m.value.every((v) => v === 0)) return '0';
                         return m.value.map((v) => (v === null || v === undefined ? '-' : String(v))).join(' · ');
                     })() },
-                    { label: 'COOLANT TEMP', value: cdu(cdFast('coolantTemp'), 0, '°C') },
-                    { label: 'ENGINE OIL TEMP', value: cdu(cdFast('oilTemp'), 0, '°C') },
+                    { label: 'COOLANT TEMP', value: cdu(cdNum('coolantTemp'), 0, '°C') },
+                    { label: 'ENGINE OIL TEMP', value: cdu(cdNum('oilTemp'), 0, '°C') },
                     { label: 'OIL LEVEL', value: cdt(cdText('oilLevel')) },
                     { label: 'OIL PRESSURE', value: (() => {
                         const op = cdNum('oilPress');
@@ -1839,9 +1898,10 @@ mgu.run({
                 drivetrain: [
                     { label: 'GEAR', value: cdt(gear) },
                     { label: 'GEARBOX OIL TEMP', value: cdu(cdNum('gearboxTemp'), 0, '°C') },
-                    { label: 'XDRIVE REAR SPLIT', value: cdu(cdFast('splitRear'), 0, '%'), detail: 'rear axle torque' },
-                    { label: 'TYRE PRESSURE', value: tyreQuad(['tyrePFL', 'tyrePFR', 'tyrePRL', 'tyrePRR'], 2), detail: 'FL · FR · RL · RR · bar' },
-                    { label: 'TYRE TEMP', value: tyreQuad(['tyreTFL', 'tyreTFR', 'tyreTRL', 'tyreTRR'], 0), detail: 'FL · FR · RL · RR · °C' },
+                    { label: 'XDRIVE REAR SPLIT', value: settings.get('drivetrainType') === 'rwd'
+                        ? 'NOT SUPPORTED ON RWD' : cdu(cdNum('splitRear'), 0, '%'), detail: 'rear axle torque' },
+                    { label: 'ENGINE RPM', value: cdu(s.rpm, 0, 'rpm'), detail: 'crankshaft speed' },
+                    { label: 'ENGINE TORQUE', value: cdu(s.torque, 0, 'Nm'), detail: 'BMW engine signal' },
                 ],
                 electrical: [
                     { label: 'BATTERY VOLTAGE', value: cdu(cdNum('battVolt'), 1, 'V') },
@@ -2069,17 +2129,17 @@ mgu.run({
                 const activeMode = modeName(drivingMode) || '';
                 const modeColor = /COMFORT/i.test(activeMode) ? '#55a9ff'
                     : /ECO/i.test(activeMode) ? '#3ddb7f'
-                    : /ADAPTIVE/i.test(activeMode) ? '#b07cff' : null;
+                    : /ADAPTIVE/i.test(activeMode) ? '#b07cff'
+                    : /^SPORT/i.test(activeMode) ? '#f32635' : activeMode ? 'dim' : null;
                 const modeBadge = activeMode.toUpperCase().replace(/\+/g, ' PLUS');
                 const vehicleDataReady = s.rpm !== null && s.speed !== null;
                 drawEngine(cv, t, s, modeColor);
                 const notice = valveActionNotice && Date.now() < valveActionNoticeUntil ? valveActionNotice : '';
                 G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 0, (demo
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
-                    : modeColor ? [{ text: modeBadge, color: modeColor }]
-                    : /^SPORT(?:\b| PLUS| INDIVIDUAL)/i.test(modeBadge)
-                        ? [{ text: modeBadge, color: '#f32635' }]
-                        : [{ text: vehicleDataReady ? 'LIVE DATA' : 'WAITING FOR SIGNALS', color: vehicleDataReady ? 'dim' : 'crit' }])
+                    : activeMode ? [{ text: modeBadge, color: modeColor }]
+                    : [{ text: vehicleDataReady ? 'LIVE DATA' : driveModeLoading ? 'READING DRIVE MODE' : 'WAITING FOR SIGNALS',
+                        color: vehicleDataReady || driveModeLoading ? 'dim' : 'crit' }])
                     .concat(notice ? [{ text: notice, color: 'crit' }] : []));
             } else if (page === 1) {
                 FlapUi.draw(cv, G, t, currentValveView(), Object.assign({}, valveActions, burbleActions),
@@ -2182,6 +2242,13 @@ mgu.run({
                 wv.demo = demo;
                 WarmupUi.draw(cv, G, t, wv);
             }
+            if (!demo && Date.now() < fuelReserveUntil) {
+                const toastW = 520, toastH = 40, toastX = (W - toastW) / 2, toastY = 50;
+                cv.roundRect(toastX, toastY, toastW, toastH, 8, '#6f101b');
+                cv.strokeRoundRect(toastX, toastY, toastW, toastH, 8, 2, '#ff3345');
+                cv.text('FUEL RESERVE (8L LEFT)', W / 2, toastY + 27, 22, '#ffffff',
+                    { align: 'center', font: 'bold', spacing: 1.1, literal: true });
+            }
             return ui.image('MAIN_GFX', cv);
         }
 
@@ -2247,6 +2314,7 @@ mgu.run({
             if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
             if (valveNoticeTimer) { clearTimeout(valveNoticeTimer); valveNoticeTimer = null; }
+            if (fuelReserveTimer) { clearTimeout(fuelReserveTimer); fuelReserveTimer = null; }
             stopDriveModePoll();
             valveAuto._stop();
             if (readOnlyLink) readOnlyLink.cancel();

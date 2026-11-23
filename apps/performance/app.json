@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
-  "version": "0.6.42",
+  "version": "0.6.43",
   "assets": [
     {
       "file": "assets/car-models/M340i_Black.png",
@@ -829,6 +829,27 @@
       "key": "sec_other",
       "label": "OTHER",
       "type": "section"
+    },
+    {
+      "key": "drivetrainType",
+      "label": "Drivetrain type",
+      "desc": "Choose the car's actual drivetrain so the xDrive-only rear split is labelled correctly.",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        [
+          "auto",
+          "Auto · show split when available"
+        ],
+        [
+          "rwd",
+          "Rear-wheel drive"
+        ],
+        [
+          "xdrive",
+          "xDrive"
+        ]
+      ]
     },
     {
       "key": "carModel",

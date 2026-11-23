@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.42 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.43 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER · EST.** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run. The two gauge limits can be changed
@@ -14,8 +14,10 @@ that do not fall on a regular tick interval.
 In Comfort, the Engine Data readings, scales, and live bars turn blue. The
 dedicated DYNO RUN graph keeps its power, torque, and ECU torque traces in red
 shades for a consistent dyno palette.
-The Engine Data header shows the active drive mode: COMFORT in blue, and SPORT,
-SPORT PLUS, or SPORT INDIVIDUAL in red.
+The Engine Data header shows the last confirmed BMW drive mode immediately on
+the next start, then refreshes it from FES while the app opens. COMFORT is blue,
+SPORT modes are red, and ECO is green. A first launch with no saved mode still
+waits for the vehicle to publish its current mode.
 The app loop and live screen drawing are limited to 10 frames per second.
 Screens are redrawn only when data, navigation, or layout changes; the renderer
 keeps the last frame alive without rebuilding it.
@@ -55,15 +57,23 @@ keeps the last valid reading until it expires, instead of briefly clearing it.
 ## CAR DATA readings
 
 Cluster and status values that may not send change events are refreshed through
-their read getters every 10 seconds. The drivetrain page keeps gearbox oil
-temperature for up to two minutes because a stable temperature is not expected
-to change as often as engine speed. It reads the same temperature from the
+their read getters every 10 seconds. Valid engine, speed and gearbox samples are
+kept for up to two minutes so a quiet parked car does not make the display flash
+to dashes; explicit zero readings remain zero. A known engine-off state sets
+engine RPM, torque and power to zero. Gearbox oil temperature is read from the
 gearbox control unit (EGS) if the cluster's `BasicDataSet` does not provide it.
-The low-pressure fuel row tries DME/OBD candidates, including PID `22` for the
-BMW low-pressure value. Battery charge, start-stop, parking brake, trip
-computer, odometer, and target tyre pressure continue to use the car's own
-signals; a car that does not publish one of those signals will not show a
-substitute value.
+The drivetrain page now shows engine RPM and torque in place of tyre pressure
+and tyre temperature. Set **Drivetrain type** to **Rear-wheel drive** to show
+`NOT SUPPORTED ON RWD`; Auto leaves the split blank until a valid xDrive signal
+arrives. Fuel Reserve appears for five seconds at 8 litres or below, once until
+the tank rises above 9 litres.
+
+Rail pressure, low-pressure pump, and ignition timing are read through the
+configured DME/OBD candidates. Their availability and scaling depend on the
+vehicle's engine control unit; the app keeps a last valid value briefly but
+does not invent a reading when the ECU does not provide one. Parking-brake
+status is read from BMW's `CDS.statusHandBrake` signal and retains the last valid
+state through a short invalid reply.
 
 ## ENGINE CONFIG page
 
