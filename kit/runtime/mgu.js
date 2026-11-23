@@ -696,16 +696,24 @@ async function runInner(impl) {
         canvas(w, h) { return display.canvas(w, h); },
         /**
          * Run fn while screen `stateName` is visible: once per screen refresh (up to 60 fps)
-         * when the GPU renderer shows it, else about `fps` times a second.
+         * when the GPU renderer shows it, else about `fps` times a second. Set options.gpuFps
+         * to cap callback ticks for apps that do not need display-rate animation.
          */
-        loop(stateName, fps, fn) {
+        loop(stateName, fps, fn, options) {
             let timer = null, on = false, running = false, frames = 0, spent = 0;
+            const gpuFps = options && typeof options.gpuFps === 'number' && isFinite(options.gpuFps)
+                ? Math.max(1, Math.min(60, options.gpuFps)) : 0;
+            const gpuInterval = gpuFps ? 1000 / gpuFps : 0;
+            let lastGpuTick = 0;
             const gpuOn = () => display.active(stateName);
+            const gpuDelay = () => gpuInterval
+                ? Math.max(0, gpuInterval - (Date.now() - lastGpuTick)) : 0;
             const tick = async () => {
                 timer = null;
                 if (!on || running) return;
                 running = true;
                 const t0 = Date.now();
+                if (gpuOn()) lastGpuTick = t0;
                 try { await fn(); } catch (e) { log.error('loop ' + stateName, e); }
                 running = false;
                 const dt = Date.now() - t0;
@@ -726,12 +734,16 @@ async function runInner(impl) {
                     // the renderer sends a tick when it can take the next frame; if this frame was
                     // not sent (unchanged), look again shortly
                     // (a tick normally follows a sent frame; 250 ms is the safety net if none comes)
-                    timer = setTimeout(tick, display.gpu.waiting ? 250 : 16);
+                    timer = setTimeout(tick, Math.max(display.gpu.waiting ? 250 : 16, gpuDelay()));
                 } else timer = setTimeout(tick, Math.max(15, 1000 / fps - (dt || 0)));
             };
             display.onTick(() => {
                 // a tick from the renderer, or the renderer went away (then back to the timer)
                 if (!on || running) return;
+                if (gpuOn() && gpuDelay() > 0) {
+                    if (timer === null) timer = setTimeout(tick, gpuDelay());
+                    return;
+                }
                 if (timer !== null) { clearTimeout(timer); timer = null; }
                 if (gpuOn()) tick(); else schedule(0);
             });
@@ -744,7 +756,12 @@ async function runInner(impl) {
             if (ui.isVisible(stateName)) set(true);
             return {
                 stop: () => set(false),
-                kick: () => { if (on && !running) { if (timer !== null) clearTimeout(timer); timer = setTimeout(tick, 0); } },
+                kick: () => {
+                    if (on && !running) {
+                        if (timer !== null) clearTimeout(timer);
+                        timer = setTimeout(tick, gpuOn() ? gpuDelay() : 0);
+                    }
+                },
             };
         },
     };

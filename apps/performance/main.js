@@ -32,10 +32,8 @@ const path = require('path');
 const W = 1600, H = 520;
 const FRESH_MS = 4500;
 const DYNO_FRESH_MS = 500;
-// The renderer can request frames at 60 Hz even though vehicle data changes
-// far more slowly. Keep live pages near 11 Hz and let static pages sleep.
-const RENDER_MS = 90;
-const STATIC_HEARTBEAT_MS = 1000;
+// Vehicle readings do not need a new screen frame more than 10 times a second.
+const RENDER_MS = 100;
 const DME_POLL_MS = 1200;
 const PEAK_HOLD_MS = 15000;
 const RPM_MAX = 8000;
@@ -2191,13 +2189,10 @@ mgu.run({
             if (state.stopped) return;
             if (renderInFlight) return renderInFlight;
 
-            const livePage = page === 0 || page === 3 || page === 4 || page === 6;
-            const interval = livePage ? RENDER_MS : STATIC_HEARTBEAT_MS;
             const now = Date.now();
-            if (!renderDirty && now - lastRenderAt < interval) return;
-            // Keep a pending live update until the frame budget allows it. A
-            // later renderer tick will draw the newest state, coalescing bursts.
-            if (livePage && now - lastRenderAt < RENDER_MS) return;
+            // The renderer maintains its own frame keepalive. Do not rebuild a
+            // screen unless app data, navigation, or layout actually changed.
+            if (!renderDirty || now - lastRenderAt < RENDER_MS) return;
 
             renderDirty = false;
             const finishRender = () => {
@@ -2226,6 +2221,18 @@ mgu.run({
                 renderTimer = null;
                 render().catch((e) => log.warn('render: ' + shortError(e)));
             }, RENDER_MS);
+        }
+
+        function freshnessSignature(now) {
+            const parts = [];
+            Object.keys(state).forEach((name) => {
+                const m = state[name];
+                if (!m || typeof m !== 'object' || !finite(m.at) || !m.status) return;
+                if (page === 3) parts.push(freshWithin(m, now, DYNO_FRESH_MS) ? '1' : '0');
+                parts.push(fresh(m, now) ? '1' : '0');
+                parts.push(m.status === 'live' && finite(m.value) && now - m.at <= CD_STALE ? '1' : '0');
+            });
+            return parts.join('');
         }
 
         function cleanup() {
@@ -2300,14 +2307,23 @@ mgu.run({
                 queueRender();
             }
         }, 100);
+        let lastFreshnessSignature = freshnessSignature(Date.now());
         freshnessTimer = setInterval(() => {
             if (settings.get('demo') === 'on') dynoRecorder.reset();
             else {
                 const now = Date.now();
+                const previousDynoStatus = dynoRecorder.status;
                 logDynoGate(now);
                 handleDynoEvent(dynoRecorder.tick(now, dynoSetup()));
+                if (page === 3 && dynoRecorder.status !== previousDynoStatus) queueRender();
             }
-            if (page !== 1) queueRender();
+            if (page !== 1 && page !== 2) {
+                const signature = freshnessSignature(Date.now());
+                if (signature !== lastFreshnessSignature) {
+                    lastFreshnessSignature = signature;
+                    queueRender();
+                }
+            }
         }, 1000);
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, DME_POLL_MS);
 
@@ -2434,9 +2450,9 @@ mgu.run({
         diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', engineMonitorReadOnly: true,
             exhaustControlDisarmed: !valveController.armedSetting,
             rawDiagnostics: diagnostics(), dmeCandidates: settings.get('readDmeCandidates') === true });
-        // The renderer may tick at 60 Hz; render() limits actual drawing to the
-        // vehicle-data rate and sends a 1 Hz keepalive on static pages.
-        if (ctx.loop) mainLoop = ctx.loop('MAIN', 10, render);
+        // Keep the app loop at the same 10 Hz budget as screen drawing even
+        // when the renderer itself is ticking at 60 Hz.
+        if (ctx.loop) mainLoop = ctx.loop('MAIN', 10, render, { gpuFps: 10 });
         render().catch((e) => log.warn('first render: ' + shortError(e)));
     },
 });
