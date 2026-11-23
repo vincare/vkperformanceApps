@@ -26,7 +26,9 @@ const SECTIONS = [
 function sectionOf(key) { return SECTIONS.find((s) => s.key === key) || SECTIONS[0]; }
 
 function menuCard(cv, G, t, x, y, w, h, def, action) {
-    const art = Sheet.sectionArt(def.key, t.bg);
+    // CAR DATA's eight badges are decoded a little at a time after the menu
+    // appears. Drawing must never synchronously decode the whole image set.
+    const art = Sheet.cachedSectionArt(def.key, t.bg);
     if (art) {
         // The supplied badge already carries the section's name; the badge itself is the button.
         const ih = 150, iw = Math.round(ih * art.w / art.h);
@@ -162,4 +164,4 @@ function draw(cv, G, t, s, actions) {
     return cv;
 }
 
-module.exports = { W, H, draw, SECTIONS };
+module.exports = { W, H, draw, SECTIONS, prepareArt: Sheet.sectionArt };

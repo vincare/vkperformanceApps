@@ -260,11 +260,11 @@ class Display {
     }
     /** Settings is the header's last tab where the kit runs the screen (the app has a Settings button). */
     hasSettings() { return !!(this.screen && (this.screen.buttons || []).some((b) => b[0] === 'BTN_SETTINGS')); }
-    /** The header's tabs: the app's, then Settings. { tabs, sel, badges, settings: index or -1 } */
+    /** The header's tabs: the app's, then a Settings icon. { tabs, sel, badges, settings: index or -1 } */
     _tabList() {
         const base = this.tabInfo || { tabs: [], sel: -1, badges: [] };
         const tabs = (base.tabs || []).slice();
-        const settings = this.own() && this.hasSettings() ? tabs.push('Settings') - 1 : -1;
+        const settings = this.own() && this.hasSettings() ? tabs.push({ label: 'Settings', icon: 'settings' }) - 1 : -1;
         const sel = this.sheet && this.sheet.settings ? settings : this.sheet ? -1 : base.sel;
         return { tabs, sel, badges: base.badges || [], settings };
     }
@@ -875,7 +875,9 @@ class Display {
         // compact header in the HMI strip's own black, only as wide as its name, tabs and badges:
         // right of it the HMI's strip shows through (radio station, phone signal, status icons)
         const hx = HMI.left - pl.x;
-        const end = G.header(c, Object.assign({}, t, { bg: HMI.headBg }), hx, 0, HMI.status.x - pl.x - hx, FULL.headH,
+        const radioReserve = HMI.status.h > 0 ? 70 : 0;
+        const headerWidth = Math.max(0, HMI.status.x - pl.x - hx - radioReserve);
+        const end = G.header(c, Object.assign({}, t, { bg: HMI.headBg }), hx, 0, headerWidth, FULL.headH,
             this.screen.title !== undefined && this.screen.title !== null ? this.screen.title : this.spec.title,
             tb.tabs, tb.sel, tb.badges, true, true);
         // the HMI's own title is in the strip under the header: a narrower header (a sheet: no tabs) stays

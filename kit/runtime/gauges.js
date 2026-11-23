@@ -677,17 +677,40 @@ function gmeter(cv, t, cx, cy, r, g) {
  * Each drawn tab is left in cv.tabRects ({ i, x, y, w, h }), so a touch on it can open that page.
  */
 const BAR_H = 36, TOP = 44, BOTTOM = 512;
-const TAB_GAP = 8, TAB_DIVIDER = '#aeb4bc';
+const TAB_GAP = 8, TAB_DIVIDER = '#aeb4bc', SETTINGS_TAB_W = 52;
 /**
  * Tab widths: each name's width plus `pad`, at least `min`; when that doesn't fit in `room` the
  * padding shrinks (down to `pad0`) and the minimum goes, so many tabs still show side by side.
  */
-function tabWidths(cv, names, size, opt, min, pad, room, pad0) {
-    const tw = names.map((n) => cv.textWidth(n, size, opt));
-    const wide = tw.map((w) => Math.max(min, w + pad));
+function tabWidths(cv, names, size, opt, min, pad, room, pad0, iconTabs, iconWidth) {
+    const icons = iconTabs || [];
+    iconWidth = iconWidth || Math.max(56, size * 2.4);
+    const tw = names.map((n, i) => icons[i] ? 0 : cv.textWidth(n, size, opt));
+    const wide = tw.map((w, i) => icons[i] ? iconWidth : Math.max(min, w + pad));
     if (wide.reduce((a, b) => a + b, 0) <= room) return wide;
-    const p = Math.max(pad0, Math.min(pad, (room - tw.reduce((a, b) => a + b, 0)) / Math.max(1, names.length)));
-    return tw.map((w) => w + p);
+    const iconTotal = tw.reduce((a, w, i) => a + (icons[i] ? iconWidth : 0), 0);
+    const textTotal = tw.reduce((a, w, i) => a + (icons[i] ? 0 : w), 0);
+    const textCount = Math.max(1, names.length - icons.filter(Boolean).length);
+    const p = Math.max(pad0, Math.min(pad, (room - iconTotal - textTotal) / textCount));
+    return tw.map((w, i) => icons[i] ? iconWidth : w + p);
+}
+function tabParts(tabs) {
+    const list = (tabs || []).map((tab) => typeof tab === 'string'
+        ? { label: tab, icon: null }
+        : { label: tab && tab.label || '', icon: tab && tab.icon || null });
+    return { names: list.map((tab) => upperText(tab.label)), icons: list.map((tab) => tab.icon === 'settings') };
+}
+function settingsGear(cv, cx, cy, size, color, background) {
+    const points = [], step = Math.PI * 2 / 8, root = size * 0.34, tip = size * 0.48;
+    for (let i = 0; i < 8; i++) {
+        const a = i * step;
+        [[a - step * 0.35, root], [a - step * 0.22, tip],
+            [a + step * 0.22, tip], [a + step * 0.35, root]].forEach(([angle, radius]) => {
+            points.push([cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius]);
+        });
+    }
+    cv.fill(points, color);
+    cv.circle(cx, cy, size * 0.16, background);
 }
 function frame(cv, t, tabs, sel, badges) {
     if (cv.chrome) { cv.chrome.tabs = { tabs: tabs || [], sel, badges: (badges || []).filter(Boolean) }; return; }
@@ -746,9 +769,9 @@ function header(cv, t, x, y, w, h, title, tabs, sel, badges, flat, compact) {
     if (!flat) cv.gradientRect(x, y, w, h, [[0, withAlpha('#ffffff', 0.02)], [1, withAlpha('#ffffff', 0.08)]]);
     cv.fillRect(x, y + h - 2, w, 2, withAlpha('#ffffff', 0.22));
     const right = badgeRow(cv, t, x + w - 16, y + (h - 30) / 2, 30, 18, badges || []);
-    const names = (tabs || []).map((n) => upperText(n));
+    const parts = tabParts(tabs), names = parts.names, icons = parts.icons;
     const gapsW = TAB_GAP * Math.max(0, names.length - 1);
-    const tw = tabWidths(cv, names, 20, opt, 170, 64, right - x - 20 - gapsW, 24);
+    const tw = tabWidths(cv, names, 20, opt, 170, 64, right - x - 20 - gapsW, 24, icons, SETTINGS_TAB_W);
     const tabsW = tw.reduce((a, b) => a + b, 0) + gapsW;
     let tx = x + 20;
     const tsize = 38, titleW = title ? cv.textWidth(title, tsize) : 0;
@@ -765,7 +788,8 @@ function header(cv, t, x, y, w, h, title, tabs, sel, badges, flat, compact) {
             cv.gradientRect(tx, y, bw, h, [[0, withAlpha(S, 0)], [1, withAlpha(S, 0.25)]]);
             cv.fillRect(tx, y + h - 5, bw, 5, S);
         }
-        cv.text(n, tx + bw / 2, y + h / 2 + 7, 20, on ? t.selText || '#ffffff' : t.dim, opt);
+        if (icons[i]) settingsGear(cv, tx + bw / 2, y + h / 2, Math.min(34, h * 0.48), '#ffffff', t.bg);
+        else cv.text(n, tx + bw / 2, y + h / 2 + 7, 20, on ? t.selText || '#ffffff' : t.dim, opt);
         if (i < names.length - 1) cv.fillRect(tx + bw + TAB_GAP / 2, y + h * 0.28, 1, h * 0.44, withAlpha(TAB_DIVIDER, 0.48));
         tx += bw + TAB_GAP;
     });
@@ -774,7 +798,7 @@ function header(cv, t, x, y, w, h, title, tabs, sel, badges, flat, compact) {
 function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges) {
     const S = t.sel || t.accent, opt = { align: 'center', font: 'bold', spacing: 1.6 };
     const bopt = { align: 'center', font: 'bold', spacing: 1.5 };
-    const names = (tabs || []).map((n) => upperText(n));
+    const parts = tabParts(tabs), names = parts.names, icons = parts.icons;
     const bh = 30, bsize = 17;
     const bws = (badges || []).map((b) => Math.max(bh * 3.5, cv.textWidth(b.text, bsize, bopt) + bh));
     const badgesW = bws.reduce((a, b) => a + b + bh * 0.4, 0);
@@ -786,12 +810,12 @@ function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges) {
     let tabSize = maxTabSize;
     let tw;
     for (; tabSize > minTabSize; tabSize--) {
-        tw = tabWidths(cv, names, tabSize, opt, 132, 44, tabRoom, 20);
+        tw = tabWidths(cv, names, tabSize, opt, 132, 44, tabRoom, 20, icons, SETTINGS_TAB_W);
         if (tw.reduce((a, b) => a + b, 0) <= tabRoom) break;
     }
     if (!tw || tw.reduce((a, b) => a + b, 0) > tabRoom) {
         tabSize = minTabSize;
-        tw = tabWidths(cv, names, tabSize, opt, 132, 44, tabRoom, 20);
+        tw = tabWidths(cv, names, tabSize, opt, 132, 44, tabRoom, 20, icons, SETTINGS_TAB_W);
     }
     const tabsW = tw.reduce((a, b) => a + b, 0) + gapsW;
     // the tabs start 20 px in: the name shows only where every tab still fits after it (else the last tab, Settings, drops)
@@ -818,7 +842,8 @@ function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges) {
             cv.gradientRect(tx, y, bw, h, [[0, withAlpha(S, 0)], [1, withAlpha(S, 0.25)]]);
             cv.fillRect(tx, y + h - 4, bw, 4, S);
         }
-        cv.text(n, tx + bw / 2, y + h / 2 + tabSize * 0.34, tabSize, on ? t.selText || '#ffffff' : t.dim, opt);
+        if (icons[i]) settingsGear(cv, tx + bw / 2, y + h / 2, Math.min(34, h * 0.48), '#ffffff', t.bg);
+        else cv.text(n, tx + bw / 2, y + h / 2 + tabSize * 0.34, tabSize, on ? t.selText || '#ffffff' : t.dim, opt);
         if (i < names.length - 1) cv.fillRect(tx + bw + TAB_GAP / 2, y + h * 0.3, 1, h * 0.4, withAlpha(TAB_DIVIDER, 0.48));
         tx += bw + TAB_GAP;
     });

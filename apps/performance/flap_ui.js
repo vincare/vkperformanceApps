@@ -153,6 +153,10 @@ function sectionArt(kind, bg) {
     return art;
 }
 
+function cachedSectionArt(kind, bg) {
+    return sectionArtCache[kind + '|' + bg] || null;
+}
+
 function drawConfigCard(cv, G, t, x, y, w, h, title, subtitle, kind, action) {
     const art = sectionArt(kind, t.bg);
     if (art) {
@@ -608,4 +612,4 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     return cv;
 }
 
-module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, drawBackChip };
+module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, drawBackChip };

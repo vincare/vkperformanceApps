@@ -144,7 +144,8 @@ mgu.run({
         const diagnosticDedup = Object.create(null);
         let renderTimer = null, renderQueued = false, renderInFlight = null;
         let renderDirty = true, lastRenderAt = 0;
-        let freshnessTimer = null, dmeTimer = null, demoTimer = null;
+        let freshnessTimer = null, dmeTimer = null, demoTimer = null, carDataArtTimer = null;
+        let carDataArtIndex = 0, carDataArtBg = null;
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
         let vehicleGear = null, vehicleGearAt = 0;
@@ -703,6 +704,21 @@ mgu.run({
             });
         }
 
+        const carDataMetricViews = {
+            engineInfo: ['misfire', 'coolantTemp', 'oilTemp', 'oilLevel', 'oilPress'],
+            powertrain: ['dmePower', 'airFlow', 'throttleValve', 'chargePress', 'pedalPct', 'powerPct', 'torqueFes', 'rpm', 'engineState'],
+            boost: ['boostFes', 'boostDme', 'boostPeak', 'boostTargetKpa', 'iatTemp', 'engineLoad', 'engineState'],
+            fuel: ['tankLitres', 'rangeKm', 'avgCons', 'fuelHp', 'fuelLp'],
+            ignition: ['engineState', 'ignTiming', 'msaState', 'tankLitres', 'rangeKm'],
+            drivetrain: ['gear', 'gearboxTemp', 'splitRear', 'rpm', 'torqueFes', 'engineState'],
+            electrical: ['battVolt', 'battCharge', 'msaState', 'handBrake', 'odoKm'],
+            tyres: ['tyrePFL', 'tyrePFR', 'tyrePRL', 'tyrePRR', 'tyrePtFL', 'tyrePtFR', 'tyrePtRL', 'tyrePtRR', 'tyreTFL', 'tyreTFR', 'tyreTRL', 'tyreTRR'],
+        };
+        function carDataMetricVisible(name) {
+            const visible = carDataMetricViews[carDataView] || [];
+            return visible.indexOf(name) >= 0;
+        }
+
         function updateMetric(name, raw, value, unit, source, status) {
             const previous = state[name];
             const nextStatus = status || (finite(value) ? 'live' : 'invalid');
@@ -716,15 +732,16 @@ mgu.run({
             };
             record(name, raw, finite(value) ? value : null, unit, source, state[name].status);
             feedWarmup();
-            // Rebuild only pages that display or consume telemetry; static
-            // configuration and mode pages update from their own actions.
-            if (page === 0 || page === 3 || page === 4 || page === 5 || page === 6) queueRender();
+            // CAR DATA only redraws when the active section uses this metric.
+            // The menu and unrelated sections stay static while telemetry streams.
+            if (page === 0 || page === 3 || page === 4 || page === 6 ||
+                (page === 5 && carDataMetricVisible(name))) queueRender();
         }
 
         function onProvider(iface, available) {
             state.providers[iface] = !!available;
             diagLog('provider', { interface: iface, available: !!available });
-            queueRender();
+            if (page !== 5) queueRender();
         }
 
         function onRuntimeDiagnostic(event) {
@@ -847,7 +864,7 @@ mgu.run({
             if (!label) return;
             vehicleGear = label;
             vehicleGearAt = Date.now();
-            if (page === 0) queueRender();
+            if (page === 0 || (page === 5 && carDataView === 'drivetrain')) queueRender();
         }
 
         function setGearSelection(payload) {
@@ -855,7 +872,7 @@ mgu.run({
             if (!label) return;
             vehicleGear = label;
             vehicleGearAt = Date.now();
-            if (page === 0) queueRender();
+            if (page === 0 || (page === 5 && carDataView === 'drivetrain')) queueRender();
         }
 
         function setLongitudinalAcceleration(payload, source) {
@@ -912,7 +929,7 @@ mgu.run({
             state.tempUnit = ({ 1: 'C', 2: 'F', C: 'C', F: 'F' })[typeof tempRaw === 'string' ? tempRaw.trim().toUpperCase() : tempRaw] || state.tempUnit || null;
             diagLog('pressure_units', { source, raw, unit: unit || 'unknown' });
             if (state.boostFes.at) setFesBoost({ displayBoostPressure: state.boostFes.raw }, 'reconvert');
-            queueRender();
+            if (page !== 5 || carDataMetricVisible('boostFes')) queueRender();
         }
 
         /* ---- CAR DATA tab decoders: enums become text metrics, numbers become metrics ---- */
@@ -932,7 +949,7 @@ mgu.run({
                 Date.now() - previous.at <= CD_STALE) return;
             state[name] = { raw: text, value: null, text: text || null, unit: '', source: source || '', at: Date.now(), status: text ? 'live' : 'invalid' };
             record(name, text, text, '', source, state[name].status);
-            if (page !== 1) queueRender();
+            if (page !== 1 && (page !== 5 || carDataMetricVisible(name))) queueRender();
         }
 
         function setAmbient(payload, source) {
@@ -1398,7 +1415,15 @@ mgu.run({
             { name: 'chargePress', cfg: dme.chargePress || [], unit: 'hPa' },
             { name: 'oilPress', cfg: dme.oilPress || [], unit: 'hPa' },
         ].filter((item) => item.cfg.length > 0);
-        let dmeExtraIndex = 0;
+        const dmeExtrasByView = {
+            engineInfo: ['oilPress'],
+            powertrain: ['dmePower', 'airFlow', 'throttleValve', 'chargePress'],
+            boost: ['iatTemp', 'boostTargetKpa', 'engineLoad'],
+            fuel: ['fuelHp', 'fuelLp'],
+            ignition: ['ignTiming'],
+            electrical: ['battVolt'],
+        };
+        let dmeExtraIndex = 0, lastDmeExtraView = null;
         let lastDmeCycle = 0;
         let lastEgsTryAt = 0;
         let lastDiagWakeAt = 0;
@@ -1406,6 +1431,33 @@ mgu.run({
         // Probe A2 directly first: some DMEs answer the monitor but do not publish the A0 list.
         let misfireEcu = null, misfireMids = null, misfireCounts = [], misfireCursor = 0;
         let misfireRetryAt = 0, misfireNextAt = 0, misfireDid = false, misfireScanComplete = false, misfireProbeMid = 0xA3;
+
+        function warmCarDataArt() {
+            if (state.stopped || page !== 5 || carDataView !== 'menu') {
+                carDataArtTimer = null;
+                return;
+            }
+            const sections = CarDataUi.SECTIONS;
+            if (carDataArtIndex >= sections.length) {
+                carDataArtTimer = null;
+                queueRender();
+                return;
+            }
+            CarDataUi.prepareArt(sections[carDataArtIndex++].key, carDataArtBg);
+            carDataArtTimer = setTimeout(warmCarDataArt, 140);
+        }
+
+        function scheduleCarDataArtWarmup(bg) {
+            if (carDataArtBg !== bg) {
+                carDataArtBg = bg;
+                carDataArtIndex = 0;
+            }
+            if (carDataArtTimer || carDataArtIndex >= CarDataUi.SECTIONS.length) return;
+            // Draw the menu first; decode one badge between frames instead of
+            // blocking the CAR DATA tab while all eight PNGs are prepared.
+            carDataArtTimer = setTimeout(warmCarDataArt, 120);
+        }
+
         async function pollMisfire(now) {
             const cfg = dme.misfire || {};
             const set = (value, status) => {
@@ -1413,7 +1465,7 @@ mgu.run({
                 if (status === 'unavailable' && state.misfire && state.misfire.status === 'live' &&
                     Date.now() - state.misfire.at <= 120000) return;
                 state.misfire = { raw: value, value, unit: 'counts', source: 'DME / OBD service 06', at: Date.now(), status };
-                queueRender();
+                if (page === 5 && carDataView === 'engineInfo') queueRender();
             };
             if (!misfireMids || !misfireMids.length) {
                 if (now < misfireRetryAt) return;
@@ -1524,22 +1576,32 @@ mgu.run({
             if (state.stopped || state.dmeBusy || settings.get('demo') === 'on' ||
                 settings.get('readDmeCandidates') !== true || valveCommandActive || burbleCommandActive || valveScanBusy ||
                 valveController.state.busy || valveController.tune.busy || now < valvePriorityUntil) return;
-            wakeSilentDiagUnits(now);
+            if (!(page === 5 && carDataView === 'menu')) wakeSilentDiagUnits(now);
             const gearbox = state.gearboxTemp;
             const gearboxSignalFresh = gearbox && gearbox.status === 'live' && finite(gearbox.value) &&
                 now - gearbox.at <= GEARBOX_STALE_MS;
-            const needsEgsTemp = (page === 0 || page === 5) && (dme.egs || []).length > 0 && !gearboxSignalFresh &&
+            const needsEgsTemp = (page === 0 || (page === 5 && carDataView === 'drivetrain')) &&
+                (dme.egs || []).length > 0 && !gearboxSignalFresh &&
                 now - lastEgsTryAt >= 15000;
-            // CAR DATA (page 5) also reads values that make sense with the engine off —
-            // battery voltage, intake temp, fuel pressures — so the rpm gate lifts on it.
-            if ((!fresh(state.rpm, now) || state.rpm.value < 500) && page !== 5 && !needsEgsTemp) return;
+            const activeCarData = page === 5 && carDataView !== 'menu';
+            // Selected CAR DATA sections can read engine-off values too. The
+            // static section menu does not need to keep the diagnostic bus busy.
+            if ((!fresh(state.rpm, now) || state.rpm.value < 500) && !activeCarData && !needsEgsTemp) return;
             if (now - lastDmeCycle < DME_POLL_MS) return;
             const boostSource = settings.get('boostSource') || 'auto';
-            const needsDmeBoost = boostSource === 'dme' ||
+            const pageNeedsDmeBoost = page !== 5 || carDataView === 'boost';
+            const needsDmeBoost = pageNeedsDmeBoost && (boostSource === 'dme' ||
                 (boostSource === 'auto' && !(fresh(state.boostFes, now) && fesBoostTrusted)) ||
-                (page === 5 && !(fresh(state.boostDme, now)));
-            const wantExtras = page === 5 && dmeExtras.length > 0;
+                (page === 5 && carDataView === 'boost' && !(fresh(state.boostDme, now))));
+            const extraNames = dmeExtrasByView[carDataView] || [];
+            const activeExtras = page === 5 ? dmeExtras.filter((item) => extraNames.indexOf(item.name) >= 0) : [];
+            const wantExtras = activeExtras.length > 0;
             if ((!needsDmeBoost || boostSource === 'fes') && !wantExtras && !needsEgsTemp) return;
+            const extraView = page === 5 ? carDataView : null;
+            if (extraView !== lastDmeExtraView) {
+                dmeExtraIndex = 0;
+                lastDmeExtraView = extraView;
+            }
             lastDmeCycle = now;
             state.dmeBusy = true;
             try {
@@ -1600,20 +1662,19 @@ mgu.run({
                     }
                     if (state.stopped) return;
                 }
-                // CAR DATA tab: two round-robin engine-unit values per cycle while the tab is open.
+                // Read only the active CAR DATA section's values, one request
+                // per cycle, so opening the static menu never floods the ECU.
                 if (wantExtras && !state.stopped) {
-                    for (let n = 0; n < 2; n++) {
-                        const item = dmeExtras[dmeExtraIndex % dmeExtras.length];
-                        dmeExtraIndex++;
-                        const value = await reader.value(item.name, item.cfg);
-                        // Keep the last valid DME sample through a transient no-reply. cdNum()
-                        // expires it after CD_STALE, so the UI does not flash a dash each poll.
-                        if (value !== null || !state[item.name] || state[item.name].status !== 'live') {
-                            updateMetric(item.name, value, value, item.unit, 'DME ' + item.name,
-                                value === null ? 'invalid' : 'live');
-                        }
-                        if (state.stopped) return;
+                    const item = activeExtras[dmeExtraIndex % activeExtras.length];
+                    dmeExtraIndex++;
+                    const value = await reader.value(item.name, item.cfg);
+                    // Keep the last valid DME sample through a transient no-reply. cdNum()
+                    // expires it after CD_STALE, so the UI does not flash a dash each poll.
+                    if (value !== null || !state[item.name] || state[item.name].status !== 'live') {
+                        updateMetric(item.name, value, value, item.unit, 'DME ' + item.name,
+                            value === null ? 'invalid' : 'live');
                     }
+                    if (state.stopped) return;
                     // ENGINE INFO also asks for the cylinder misfire counts — one MID a cycle.
                     if (carDataView === 'engineInfo') await pollMisfire(now);
                 }
@@ -2224,10 +2285,11 @@ mgu.run({
                 CarDataUi.draw(cv, G, t, {
                     view: carDataView, demo, rows: carDataRows(carDataView, demo, s),
                     // Composite onto the slab's pure black, not theme.bg, so no grey frame shows.
-                    side: selectedCarSideVisual({ bg: '#000000' }),
+                    side: carDataView === 'menu' ? null : selectedCarSideVisual({ bg: '#000000' }),
                 }, Object.assign({
                     back: () => { carDataView = 'menu'; queueRender(); return render(); },
                 }, sectionActions));
+                if (carDataView === 'menu') scheduleCarDataArtWarmup(t.bg);
             } else if (page === 6) {
                 if (demo) {
                     // Demo feed: plausible temperatures climbing so the page animates.
@@ -2295,10 +2357,12 @@ mgu.run({
         }
 
         function freshnessSignature(now) {
+            if (page === 5 && carDataView === 'menu') return '';
             const parts = [];
             Object.keys(state).forEach((name) => {
                 const m = state[name];
                 if (!m || typeof m !== 'object' || !finite(m.at) || !m.status) return;
+                if (page === 5 && !carDataMetricVisible(name)) return;
                 if (page === 3) parts.push(freshWithin(m, now, DYNO_FRESH_MS) ? '1' : '0');
                 parts.push(fresh(m, now) ? '1' : '0');
                 parts.push(m.status === 'live' && finite(m.value) && now - m.at <= metricStaleMs(name) ? '1' : '0');
@@ -2315,6 +2379,7 @@ mgu.run({
             if (dragPulse) { clearInterval(dragPulse); dragPulse = null; }
             if (dmeTimer) { clearInterval(dmeTimer); dmeTimer = null; }
             if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+            if (carDataArtTimer) { clearTimeout(carDataArtTimer); carDataArtTimer = null; }
             if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
             if (valveNoticeTimer) { clearTimeout(valveNoticeTimer); valveNoticeTimer = null; }
