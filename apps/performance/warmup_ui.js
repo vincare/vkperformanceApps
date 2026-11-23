@@ -91,10 +91,10 @@ function trendChart(cv, G, x, y, w, h, trend, temps) {
             if (typeof v !== 'number' || !isFinite(v)) { px = null; continue; }
             const tx = x + w - ((now - p[0]) / span) * w;
             const ty = cy + ch - Math.max(0, Math.min(1, (v - MIN) / (MAX - MIN))) * ch;
-            if (px !== null) cv.line(px, py, tx, ty, 2, G.withAlpha(cols[li], 0.9));
+            if (px !== null) cv.line(px, py, tx, ty, 4, G.withAlpha(cols[li], 0.95));
             px = tx; py = ty; ex = tx; ey = ty;
         }
-        if (ex !== null) cv.circle(ex, ey, 3.5, cols[li]);
+        if (ex !== null) cv.circle(ex, ey, 5.5, cols[li]);
     });
 }
 
