@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
-  "version": "0.6.36",
+  "version": "0.6.37",
   "assets": [
     {
       "file": "assets/car-models/M340i_Black.png",
@@ -205,7 +205,7 @@
       "sha256": "f7590aa2e3cc03883c3d6ae93e4a6af30a505eaef9ae4366bc12ca760e24672e"
     }
   ],
-  "maxDiskUsage": 33554432,
+  "maxDiskUsage": 134217728,
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
   "mguHmi": [
