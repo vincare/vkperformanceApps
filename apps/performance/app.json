@@ -2,7 +2,7 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
-  "version": "0.6.38",
+  "version": "0.6.39",
   "assets": [
     {
       "file": "assets/car-models/M340i_Black.png",
@@ -1161,6 +1161,16 @@
           "min": 0.5,
           "max": 8,
           "note": "OBD service 01 PID 0x0A (same as F40A)"
+        },
+        {
+          "obd": "22",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.00079,
+          "offset": 0,
+          "min": 0.5,
+          "max": 15,
+          "note": "OBD service 01 PID 0x22 (same as F422)"
         }
       ],
       "timing": [
@@ -1310,6 +1320,30 @@
           "min": 0,
           "max": 10000,
           "note": "DME8 OELDRUCK: oil pressure, hPa"
+        }
+      ],
+      "egs": [
+        {
+          "ecu": 24,
+          "did": "6000",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 160,
+          "note": "ZF 8HP EGS temperature, deg C + 40"
+        },
+        {
+          "ecu": 24,
+          "did": "DA12",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -48,
+          "min": -40,
+          "max": 160,
+          "note": "EGS transmission oil temperature, deg C + 48"
         }
       ],
       "misfire": {

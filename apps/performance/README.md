@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.38 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.39 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER · EST.** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run. The two gauge limits can be changed
@@ -43,6 +43,19 @@ SPORT PLUS, or SPORT INDIVIDUAL in red.
   kPa; it subtracts barometric pressure from `F433`, then OBD PID `33`, to
   calculate gauge pressure in bar. When barometric pressure cannot be read,
   101.3 kPa is used and the display labels the result an estimate.
+
+## CAR DATA readings
+
+Cluster and status values that may not send change events are refreshed through
+their read getters every 10 seconds. The drivetrain page keeps gearbox oil
+temperature for up to two minutes because a stable temperature is not expected
+to change as often as engine speed. It reads the same temperature from the
+gearbox control unit (EGS) if the cluster's `BasicDataSet` does not provide it.
+The low-pressure fuel row tries DME/OBD candidates, including PID `22` for the
+BMW low-pressure value. Battery charge, start-stop, parking brake, trip
+computer, odometer, and target tyre pressure continue to use the car's own
+signals; a car that does not publish one of those signals will not show a
+substitute value.
 
 ## ENGINE CONFIG page
 

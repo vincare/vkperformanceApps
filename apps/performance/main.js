@@ -925,12 +925,32 @@ mgu.run({
             updateMetric('ambientTemp', raw, value, 'degC', source, value === null ? 'invalid' : 'live');
         }
         function setEngineStatus(payload, source) { textMetric('engineState', ENGINE_STATES[payload && payload.statusEngineRunDrive], source); }
+        function enumStatus(raw, table, classify) {
+            const direct = table[raw];
+            if (direct) return direct;
+            if (typeof raw !== 'string') return null;
+            const value = raw.toUpperCase();
+            if (/INVALID|INITIAL|UNKNOWN|NO_VALUE|NICHT_VERFUEGBAR/.test(value)) return null;
+            return classify(value);
+        }
         function setBattery(payload, source) {
             const raw = payload && payload.conditionBatteryChargingCondition;
             updateMetric('battCharge', raw, finite(raw) && raw >= 0 && raw <= 100 ? raw : null, '%', source, 'live');
         }
-        function setHandBrake(payload, source) { textMetric('handBrake', BRAKE_STATES[payload && payload.statusContactHandBrake], source); }
-        function setMsa(payload, source) { textMetric('msaState', MSA_STATES[payload && payload.statusFunctionMSA], source); }
+        function setHandBrake(payload, source) {
+            const raw = payload && payload.statusContactHandBrake;
+            const value = enumStatus(raw, BRAKE_STATES, (s) => /NICHT.*(ANGEZOG|BETAETIG|BETÄTIG|FESTGESTELLT|APPLIED)/.test(s) ? 'RELEASED'
+                : /NICHT.*(GELOES|GELÖS|LOESEN|LÖSEN|OFFEN|RELEASED)/.test(s) ? 'APPLIED'
+                    : /ANGEZOG|BETAETIG|BETÄTIG|FESTGESTELLT|APPLIED/.test(s) ? 'APPLIED'
+                : /GELOES|GELÖS|LOESEN|LÖSEN|OFFEN|RELEASED/.test(s) ? 'RELEASED' : null);
+            textMetric('handBrake', value, source);
+        }
+        function setMsa(payload, source) {
+            const raw = payload && payload.statusFunctionMSA;
+            const value = enumStatus(raw, MSA_STATES, (s) => /DEAKTIV|DISABL|OFF|NICHT.*(AKTIV|ENABL|ON)/.test(s) ? 'OFF'
+                : /AKTIV|ENABL|ON/.test(s) ? 'ON' : null);
+            textMetric('msaState', value, source);
+        }
         function setOilLevel(payload, source) { textMetric('oilLevel', OIL_LEVELS[payload && payload.fluidLevelEngineOilRelative], source); }
         function setMass(payload, source) {
             const raw = payload && payload.massVehicle;
@@ -949,7 +969,7 @@ mgu.run({
             const raw = payload && payload.consumptionAverage1BC1;
             const unit = CONS_UNITS[payload && payload.statusUnitOfMeasurementConsumptionBC] || 'l/100km';
             const value = Calc.scale(raw, { factor: 0.1, invalid: 65535 });
-            textMetric('avgCons', finite(value) ? formatNumber(value, 1) + ' ' + unit : null, source);
+            textMetric('avgCons', finite(value) && value >= 0 && value <= 100 ? formatNumber(value, 1) + ' ' + unit : null, source);
         }
         function setPedal(payload, source) {
             const raw = payload && payload.actualValueAngleAcceleratorPedal;
@@ -1282,17 +1302,17 @@ mgu.run({
         const PEDAL = 'de.bmw.powertrain.AcceleratorPedal';
         const TPMS = 'de.bmw.infotainment.vehicle.TPMS';
         startWatch(CDS, { statusEngineSpeed2: setRpm, statusEngineTemperature: setEngineTemps,
-            statusEngineStatus: setEngineStatus, statusBattery2: setBattery, statusHandBrake: setHandBrake });
-        startWatch(BASIC_DATA, { basicDataSet: setGearboxTemp });
+            statusEngineStatus: setEngineStatus, statusBattery2: setBattery, statusHandBrake: setHandBrake }, { pollMs: 10000 });
+        startWatch(BASIC_DATA, { basicDataSet: setGearboxTemp }, { pollMs: 10000 });
         startWatch(CDS2, { statusLongitudinalAccelerationMassCenter: setLongitudinalAcceleration,
-            statusPushButtonMSA2: setMsa });
+            statusPushButtonMSA2: setMsa }, { pollMs: 10000 });
         startWatch(VEHICLE, { statusNewCurrentUnitsStatusExt: setPressureUnits });
         startWatch(VEHICLE2, { statusCarSpeed2: setVehicleSpeed, statusVehicleMass: setMass });
         // The oil dipstick getter often does not emit change notifications. Poll it
         // independently so oil level refreshes without slowing the speed signal used by timers.
         startWatch(VEHICLE2, { statusOilDipstick2: setOilLevel }, { pollMs: 10000 });
         startWatch(ENV, { ExteriorTemperature: setAmbient });
-        startWatch(KOMBI, { statusRangeTankStatus: setTank, statusBordcomputerAverage: setBoardAvg });
+        startWatch(KOMBI, { statusRangeTankStatus: setTank, statusBordcomputerAverage: setBoardAvg }, { pollMs: 10000 });
         startWatch(PEDAL, { AngleAcceleratorPedal: setPedal });
         // TPMS also needs a poll: BMW's own x_call only ever reads these, so a car may never notify them.
         startWatch(TPMS, { statusTyrePressure: setTyrePress, statusTyreTemperature: setTyreTemp,
@@ -1341,6 +1361,7 @@ mgu.run({
         ].filter((item) => item.cfg.length > 0);
         let dmeExtraIndex = 0;
         let lastDmeCycle = 0;
+        let lastEgsTryAt = 0;
         // OBD service 06 cylinder misfire counts (MIDs A2..AD), one MID per CAR DATA cycle
         let misfireMids = null, misfireCounts = [], misfireCursor = 0, misfireRetryAt = 0, misfireDid = false;
         async function pollMisfire(now) {
@@ -1402,16 +1423,20 @@ mgu.run({
             if (state.stopped || state.dmeBusy || settings.get('demo') === 'on' ||
                 settings.get('readDmeCandidates') !== true || valveCommandActive || burbleCommandActive || valveScanBusy ||
                 valveController.state.busy || valveController.tune.busy || now < valvePriorityUntil) return;
+            const gearbox = state.gearboxTemp;
+            const gearboxSignalFresh = gearbox && gearbox.status === 'live' && finite(gearbox.value) && now - gearbox.at <= 120000;
+            const needsEgsTemp = (page === 0 || page === 5) && (dme.egs || []).length > 0 && !gearboxSignalFresh &&
+                now - lastEgsTryAt >= 15000;
             // CAR DATA (page 5) also reads values that make sense with the engine off —
             // battery voltage, intake temp, fuel pressures — so the rpm gate lifts on it.
-            if ((!fresh(state.rpm, now) || state.rpm.value < 500) && page !== 5) return;
+            if ((!fresh(state.rpm, now) || state.rpm.value < 500) && page !== 5 && !needsEgsTemp) return;
             if (now - lastDmeCycle < DME_POLL_MS) return;
             const boostSource = settings.get('boostSource') || 'auto';
             const needsDmeBoost = boostSource === 'dme' ||
                 (boostSource === 'auto' && !(fresh(state.boostFes, now) && fesBoostTrusted)) ||
                 (page === 5 && !(fresh(state.boostDme, now)));
             const wantExtras = page === 5 && dmeExtras.length > 0;
-            if ((!needsDmeBoost || boostSource === 'fes') && !wantExtras) return;
+            if ((!needsDmeBoost || boostSource === 'fes') && !wantExtras && !needsEgsTemp) return;
             lastDmeCycle = now;
             state.dmeBusy = true;
             try {
@@ -1453,6 +1478,24 @@ mgu.run({
                             baroMeasured: state.baroMeasured, boostBar: value, moving: dmeBoostTrusted,
                         });
                     }
+                }
+                // The EGS provides gearbox oil temperature on cars where the
+                // instrument cluster's BasicDataSet does not publish it.
+                if (needsEgsTemp && !state.stopped) {
+                    lastEgsTryAt = Date.now();
+                    const value = await reader.value('egs', dme.egs);
+                    const candidate = dme.egs[reader.pick.egs || 0];
+                    if (value === null) {
+                        const attempts = dme.egs.map((c) => {
+                            const r = reader.raws[reader.key(c)] || {};
+                            return { ecu: c.ecu == null ? dme.ecu : c.ecu, candidate: DidReader.label(c), reason: r.why || '', raw: r.bytes || '' };
+                        });
+                        diagLog('gearbox_egs_unavailable', { attempts });
+                    } else {
+                        updateMetric('gearboxTemp', value, value, 'degC', 'EGS ' + DidReader.label(candidate), 'live');
+                        diagLog('gearbox_egs_value', { ecu: candidate && candidate.ecu, candidate: candidate && DidReader.label(candidate), value });
+                    }
+                    if (state.stopped) return;
                 }
                 // CAR DATA tab: two round-robin engine-unit values per cycle while the tab is open.
                 if (wantExtras && !state.stopped) {
@@ -1744,7 +1787,7 @@ mgu.run({
                 ],
                 drivetrain: [
                     { label: 'GEAR', value: cdt(gear) },
-                    { label: 'GEARBOX OIL TEMP', value: cdu(cdFast('gearboxTemp'), 0, '°C') },
+                    { label: 'GEARBOX OIL TEMP', value: cdu(cdNum('gearboxTemp'), 0, '°C') },
                     { label: 'XDRIVE REAR SPLIT', value: cdu(cdFast('splitRear'), 0, '%'), detail: 'rear axle torque' },
                     { label: 'TYRE PRESSURE', value: tyreQuad(['tyrePFL', 'tyrePFR', 'tyrePRL', 'tyrePRR'], 2), detail: 'FL · FR · RL · RR · bar' },
                     { label: 'TYRE TEMP', value: tyreQuad(['tyreTFL', 'tyreTFR', 'tyreTRL', 'tyreTRR'], 0), detail: 'FL · FR · RL · RR · °C' },
