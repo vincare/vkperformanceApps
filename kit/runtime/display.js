@@ -432,14 +432,31 @@ class Display {
         const cur = ring.find((p) => p.k === this.focusKey), cr = cur && this._rectOf(cur);
         if (!cr) return dir === 'W' ? null : ring.find((p) => p.tab === here) || ring[0] || null;
         const cx = cr.x + cr.w / 2, cy = cr.y + cr.h / 2;
-        let best = null, score = Infinity;
+        const horiz = dir === 'E' || dir === 'W';
+        // A place whose own row (sideways) or column (up/down) overlaps the current one's is the real
+        // neighbour that way - without this a header tab above the page stole sideways tilts off cards.
+        let best = null, ahead0 = Infinity;
+        ring.forEach((p) => {
+            if (p === cur || p.scroll) return;
+            const r = this._rectOf(p);
+            if (!r) return;
+            const dx = r.x + r.w / 2 - cx, dy = r.y + r.h / 2 - cy;
+            const fwd = dir === 'E' ? dx : dir === 'W' ? -dx : dir === 'S' ? dy : -dy;
+            if (fwd <= 4) return;
+            const overlap = horiz ? r.y < cr.y + cr.h && r.y + r.h > cr.y : r.x < cr.x + cr.w && r.x + r.w > cr.x;
+            if (overlap && fwd < ahead0) { ahead0 = fwd; best = p; }
+        });
+        if (best) return best;
+        let score = Infinity;
         ring.forEach((p) => {
             if (p === cur || p.scroll) return;
             const r = this._rectOf(p);
             if (!r) return;
             const dx = r.x + r.w / 2 - cx, dy = r.y + r.h / 2 - cy;
             const ahead = dir === 'E' ? dx : dir === 'W' ? -dx : dir === 'S' ? dy : -dy, side = dir === 'E' || dir === 'W' ? Math.abs(dy) : Math.abs(dx);
-            if (ahead <= 4) return;
+            // a sideways push must not land on something that is more above/below than beside
+            // (a header tab over the card, the bar below): those belong to the up/down tilts
+            if (ahead <= 4 || (horiz && side > ahead)) return;
             const sc = ahead + 2 * side;
             if (sc < score) { score = sc; best = p; }
         });
@@ -871,13 +888,20 @@ class Display {
         // the page button (or row) the controller is on, and one just pressed
         const k = pl.scale, onPage = (key) => !this.sheet && key && (this.pageTargets || []).find((q) => 'tgt:' + q.key === key);
         const pt = onPage(this.focusKey), pp = Date.now() - this.pressedT < 300 && onPage(this.pressed);
-        if (pp) c.roundRect(pp.x * k + pl.ox, pp.y * k + pl.oy, pp.w * k, pp.h * k, (pp.r != null ? pp.r : pp.h / 2) * k, G.withAlpha(t.sel || t.accent, 0.35));
+        if (pp && !pp.q) c.roundRect(pp.x * k + pl.ox, pp.y * k + pl.oy, pp.w * k, pp.h * k, (pp.r != null ? pp.r : pp.h / 2) * k, G.withAlpha(t.sel || t.accent, 0.35));
         // the controller on a page that scrolls: a frame round the page; on a list (cv.scroll = { y, bar }) its
         // scroll bar in the colour of the selection (bar: where the page drew it, so it moves with the list)
         const sb = this.focusKey === 'scroll' && !this.sheet && this.pageScroll;
         if (sb === true) c.strokeRoundRect(hx + 6, FULL.headH + 6, W - hx - 12, H - this.barH() - FULL.headH - 12, 14, 3, G.withAlpha(t.sel || t.accent, 0.8));
         else if (sb && sb.bar) c.roundRect((sb.bar.x - 2) * k + pl.ox, sb.bar.y * k + pl.oy, (sb.bar.w + 4) * k, sb.bar.h * k, (sb.bar.w / 2 + 2) * k, t.sel || t.accent);
-        if (pt) c.strokeRoundRect(pt.x * k + pl.ox - 5, pt.y * k + pl.oy - 5, pt.w * k + 10, pt.h * k + 10, (pt.r != null ? pt.r : pt.h / 2) * k + 5, 3, t.sel || t.accent);
+        // the controller's place is marked by an underline under the target, not a frame round it
+        if (pt) {
+            const uw = Math.min(pt.w * k, 96), ux = pt.x * k + pl.ox + (pt.w * k - uw) / 2;
+            const uy = pt.y * k + pl.oy + pt.h * k + 7;
+            c.fillRect(ux, uy, uw, 4, t.sel || t.accent);
+            c.text('SELECTED', ux + uw / 2, uy + 22, 14, '#ffffff',
+                { align: 'center', font: 'bold', spacing: 1.8, literal: true });
+        }
         // the strip's bottom edge continues under the see-through part
         c.fillRect(sx, 0, W - sx, FULL.headH, HMI.headBg);
         c.fillRect(sx, FULL.headH - 2, W - sx, 2, G.withAlpha('#ffffff', 0.22));

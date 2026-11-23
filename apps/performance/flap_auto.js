@@ -11,20 +11,12 @@
  *               Hybrid Eco / Electric / Electric Individual -> CLOSED
  *             DRIVE MODE is saved with the settings (key driveLink, not shown in the menu), so it is still on
  *             after the next start.
- *   rpm guard Close is paused (OEM sent, the DME opens the flap as it needs) while the live engine speed
- *             is above the "Close: hand back above" setting, and resumes below that limit - 500 rpm.
- *   no rpm    Armed with a limit set, Close is not held without a live engine speed (none yet, or none for 5 s):
- *               manual CLOSE  -> OEM, LATCHED: it stays OEM even when the signal returns; press CLOSE again;
- *               DRIVE MODE    -> OEM, paused: Close comes back by itself once a live engine speed below the
- *               (Eco Pro)        limit - 500 rpm is back (no CLOSE button to press again in DRIVE MODE).
- *             Disarmed (simulated) or limit "Never": no rpm check at all.
  *   hold      the DME lets a tester's command go after ~20 s, so OPEN / CLOSED is sent again every 15 s.
  *
  * Disarmed: the controller simulates (nothing reaches the car); auto only follows along, no repeats.
  * Nothing here talks to the car itself: every command goes through controller.setMode().
  */
 
-const HYST = 500;
 // actualValueModeDrivingExperience's plug-in hybrid numbers (PHEV_SPORT_STANDARD 15 ... BOOST 28, as in Ambient config)
 const PHEV_FLAP = { 15: 'OPEN', 16: 'OPEN', 23: 'OPEN', 28: 'OPEN',      // PHEV Sport, Sport Individual, Sport+, Boost
     17: 'OEM', 19: 'OEM',                                                // PHEV Hybrid (Standard), Hybrid Comfort
@@ -71,29 +63,24 @@ class AutoFlap {
         this.c = o.controller;
         this.get = o.get;
         this.set = o.set || (() => {});
-        this.rpm = o.rpm || (() => null);
         this.log = o.log;
         this.holdMs = o.holdMs || 15000;
         this.onChange = o.onChange || (() => {});
         this.desired = 'OEM';
         this.source = 'start';        // start | press | drive
         this.drive = null;            // last driving mode (raw)
-        this.paused = false;          // Close paused by the rpm guard
-        this.why = null;              // why paused: 'rpm' (over the limit) | 'nosignal' (DRIVE MODE, no engine speed)
         this.sent = 'OEM';            // the mode last sent (or simulated)
         this._timer = null;
         this._q = Promise.resolve();
         this._link = this.linkOn ? 'on' : 'off';
-        this.rpmLost = false; // latched after manual CLOSE loses its RPM signal
     }
 
     get linkOn() { return this.get('driveLink') === 'on'; }
     get holdOn() { return this.get('hold') !== 'off'; }
-    get limit() { const v = Number(this.get('closeLimit')); return v > 0 ? v : null; }
     get armed() { return !!this.c.armedSetting; }
 
     /** what goes to the car now */
-    effective() { return this.desired === 'CLOSED' && this.paused ? 'OEM' : this.desired; }
+    effective() { return this.desired; }
 
     /** the button lit: 'DRIVE' while the driving mode is followed, else the mode asked for */
     selected() { return this.linkOn ? 'DRIVE' : this.desired; }
@@ -107,13 +94,6 @@ class AutoFlap {
             if (this.linkOn) { this._link = 'off'; this.set('driveLink', 'off'); }
             this.desired = mode; this.source = 'press';
         }
-        this.rpmLost = false; // a new user choice clears the previous indication
-        if (this.desired === 'CLOSED' && this.source === 'press' && this._blind()) {
-            this.desired = 'OEM';
-            this.rpmLost = true;
-            this.log.warn('manual CLOSE blocked: no valid RPM; requesting OEM');
-        }
-        this._pauseFor(this.desired);
         return this.apply(true);
     }
 
@@ -125,15 +105,8 @@ class AutoFlap {
         const m = flapFor(raw);
         if (!m) return null;
         this.desired = m; this.source = 'drive';
-        this._pauseFor(m);
         this.log.info('drive mode ' + modeName(raw) + ' -> ' + m);
         return this.apply(false);
-    }
-
-    /** Close wanted right now: paused if over the limit, or (DRIVE MODE) with no engine speed */
-    _pauseFor(m) {
-        this.why = m !== 'CLOSED' ? null : this._over() ? 'rpm' : this.source === 'drive' && this._blind() ? 'nosignal' : null;
-        this.paused = !!this.why;
     }
 
     /** the car came up (ignition on): the DME starts on its own strategy, send what is wanted again */
@@ -151,41 +124,6 @@ class AutoFlap {
         }
         if (key === 'driveLink' && !this.linkOn && this.source === 'drive') { this.desired = 'OEM'; this.source = 'press'; return this.apply(false); }
         if (key === 'hold' || key === 'arm') { this._stop(); if (this.armed && this.holdOn && this.sent !== 'OEM') this._schedule(); }
-        if (key === 'closeLimit') return this.tick();
-        return Promise.resolve();
-    }
-
-    _over() { const r = this.rpm(), l = this.limit; return !!(l && r !== null && r > l); }
-    /** armed, a limit set, and no live engine speed: the guard can't see, so Close is not held */
-    _blind() { return !!(this.armed && this.limit && this.rpm() === null); }
-
-    /** a few times a second: the Close rpm guard and the no-rpm fail-safe */
-    tick() {
-        // manual CLOSE without a live engine speed (armed, a limit set): OEM, latched until CLOSE is pressed again,
-        // even if the engine speed returns
-        if (this.source === 'press' && this.desired === 'CLOSED' && this._blind()) {
-            this.rpmLost = true;
-            this.desired = 'OEM';
-            this.paused = false; this.why = null;
-            this._stop(); // prevent any queued HOLD from resending CLOSE
-            this.log.warn('manual CLOSE lost RPM: requesting OEM; manual reselect required');
-            return this.apply(true);
-        }
-        if (this.desired !== 'CLOSED') { this.paused = false; this.why = null; return Promise.resolve(); }
-        const r = this.rpm(), l = this.limit;
-        if (!l) { if (this.paused) { this.paused = false; this.why = null; return this.apply(false); } return Promise.resolve(); }
-        if (r === null) {
-            // DRIVE MODE (Eco Pro) without a live engine speed: paused, not latched; comes back below
-            if (this.armed && this.why !== 'nosignal') {
-                this.paused = true; this.why = 'nosignal';
-                this.log.warn('drive mode CLOSE paused: no valid RPM; requesting OEM');
-                return this.apply(false);
-            }
-            return Promise.resolve();
-        }
-        if (this.paused && this.why === 'nosignal' && r >= l - HYST) { this.why = 'rpm'; return Promise.resolve(); }  // signal back, still high
-        if (!this.paused && r > l) { this.paused = true; this.why = 'rpm'; this.log.info('close paused at ' + Math.round(r) + ' rpm'); return this.apply(false); }
-        if (this.paused && r < l - HYST) { this.paused = false; this.why = null; this.log.info('close resumed at ' + Math.round(r) + ' rpm'); return this.apply(false); }
         return Promise.resolve();
     }
 
@@ -219,10 +157,6 @@ class AutoFlap {
 
     /** a line for the screen under the state word */
     note() {
-        const fmt = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        if (this.rpmLost) return { text: 'RPM signal lost · OEM requested · select CLOSE again', warn: true };
-        if (this.desired === 'CLOSED' && this.paused && this.why === 'nosignal') return { text: 'RPM signal lost · Close paused · the car has the flap', warn: true };
-        if (this.desired === 'CLOSED' && this.paused) return { text: 'Close paused above ' + fmt(this.limit) + ' rpm · the car has the flap', warn: true };
         const parts = [];
         if (this.linkOn) parts.push(this.drive != null && flapFor(this.drive) ? modeName(this.drive) : 'Waiting for the driving mode');
         if (!this.linkOn && this.sent !== 'OEM' && this.armed && this.holdOn && this.nextAt) parts.push('holding');   // not in DRIVE MODE
@@ -230,4 +164,4 @@ class AutoFlap {
     }
 }
 
-module.exports = { AutoFlap, flapFor, modeName, HYST };
+module.exports = { AutoFlap, flapFor, modeName };

@@ -44,7 +44,7 @@ function dmeBoostBar(absoluteKpa, barometricKpa) {
 function powerKw(powerPercent, torqueNm, engineRpm, source, maxPowerKw) {
     if (source !== 'calc' && finite(powerPercent) && powerPercent >= 0 && powerPercent <= 100 &&
         finite(maxPowerKw) && maxPowerKw > 0) {
-        return { kw: powerPercent / 100 * maxPowerKw, source: 'BMW SPORT DISPLAY', approximate: false };
+        return { kw: powerPercent / 100 * maxPowerKw, source: 'BMW SPORT DISPLAY', approximate: true };
     }
     if (finite(torqueNm) && finite(engineRpm)) {
         return { kw: Math.max(0, torqueNm * engineRpm / 9549), source: 'TORQUE × RPM', approximate: true };

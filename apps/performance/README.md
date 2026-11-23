@@ -1,7 +1,7 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.31 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
-red display places live **HORSE POWER** and **TORQUE** gauges in the large left
+PERFORMANCE 0.6.33 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+red display places live **HORSE POWER · EST.** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run. The two gauge limits can be changed
 separately in Settings; the defaults are 300 hp and 800 Nm.
@@ -27,10 +27,11 @@ SPORT PLUS, or SPORT INDIVIDUAL in red.
 - **Live power** prefers BMW's `FES.statusVehicleDynamicEngine` field
   `displaySportEnginePower`. This is a percentage, not an HP value; the app
   multiplies it by the configured maximum power in kW, then converts to kW,
-  hp, or PS. The setting defaults to 215 kW, matching M Vitals' default. Use
-  the same maximum and power unit in both apps to compare the number. If the
-  percentage is unavailable or `Torque × RPM` is selected, power is estimated
-  as `Nm × RPM / 9549` kW.
+  hp, or PS. The gauge labels this as an estimate, not a direct horsepower
+  measurement. The setting defaults to 215 kW, matching M
+  Vitals' default, and is available in Settings so it can be calibrated to the
+  car. If the percentage is unavailable or `Torque × RPM` is selected, power
+  is estimated as `Nm × RPM / 9549` kW.
 - **Vehicle speed** comes from `Vehicle2.statusCarSpeed2` (`speedVehicleCentreOfGravity`),
   scaled by 0.015625 km/h per raw count. The current selector/gear comes from the
   read-only `VehicleInformation.statusGearboxDrive` signal, with
@@ -55,32 +56,31 @@ MODE**; the driving mode appears only when **BY DRIVE MODE** is selected.
 The app ignores BMW's initialization mode value and makes a short read-only
 refresh while waiting for the first valid drive mode. Physical valve position
 remains unverified.
-The supplied Jersey 75 font is not embedded: its included license disallows
-redistribution and modification. The page uses the app's bundled bold display
-font until a redistribution license is available.
-**Car Model** in Settings selects one of the six original PNGs supplied in
-`assets/car-models/`; the default is
-`M340i_Blue.png`. The selection is saved by the app's normal settings storage
-and is used again when PERFORMANCE starts. The selected car uses a contain fit
-that preserves its full aspect ratio. Transparent image areas use the screen
-background, without a grey panel behind the car.
+Jersey 75 is not included because its supplied license disallows redistribution
+and modification. Large numeric readouts use the app's bundled numeric font.
+**Car Model** in Settings selects the rear and paired side-view artwork for
+M340i G20, M440i G22, M760Li G11/G12, or M550i G30 in blue, red, or black. The
+new G11/G12 and G30 designs are kept in `designs/CARS/` and read from the
+compressed design pack in installed builds. The selection is saved by the
+app's normal settings storage and used again when PERFORMANCE starts. Engine
+Config uses the rear artwork; DYNO RUN, DRAG RUN, and TYRES INFO use the paired
+SIDEVIEW. Each image keeps its source aspect ratio and transparent areas use
+the screen background, without a grey panel behind the car.
 
-The PNG source files are kept byte-for-byte as supplied. The two Blue files
-provide transparent body cutouts. The Red and Black files have baked studio
-backgrounds; the app uses the transparent Blue cutout for the matching chassis
-to remove those backgrounds while keeping the selected car's own image pixels.
-Transparent areas are composited onto the screen background. The app decodes
-only the selected image (and its matching cutout) and downsizes it in memory to
-fit the renderer's 1024-pixel texture limit; it does not rewrite the source
-artwork. The native MGU renderer receives the image through its documented
-pixmap protocol, which supports images alongside touch and controller input.
+The PNG source files are kept byte-for-byte as supplied. Original M340i/M440i
+Red and Black files use the matching Blue cutout to remove their baked studio
+backgrounds. The new M760Li and M550i color files carry their own transparency.
+The app decodes only the selected image (and, for the original color files, its
+matching cutout) and downsizes it in memory to fit the renderer's 1024-pixel
+texture limit; it does not rewrite the source artwork. The native MGU renderer
+receives the image through its documented pixmap protocol, which supports
+images alongside touch and controller input.
 
-Animated grey wisps are anchored to separately measured coordinates for each
-of the six files. Closed, OEM, and Comfort-by-drive-mode show wisps from the
-left pair; an Open request shows wisps from all four tips. Small animated
-butterfly markers inside the outlets follow the requested valve mode. Smoke
-and valve graphics are visual effects, not measurements or confirmation of
-physical valve position.
+Animated grey wisps and valve markers use exhaust anchors for each supported
+rear-view body, including the two-outlet M550i and four-outlet M760Li. Closed,
+OEM, and Comfort-by-drive-mode show a reduced set of wisps; an Open request
+shows wisps from every outlet. Smoke and valve graphics are visual effects,
+not measurements or confirmation of physical valve position.
 
 The page offers **OPEN VALVES**, **CLOSE VALVES**, **OEM CONTROL**, and **BY DRIVE MODE**.
 Drive Mode follows the existing Engine Config mapping: Sport opens, Comfort and
@@ -88,17 +88,14 @@ Adaptive return control to BMW, and Eco Pro closes, with the same plug-in hybrid
 mode handling as that app.
 
 The valve controls adapt the upstream Engine Config controller and per-DME adapter.
-**Exhaust valve control** defaults to **Armed** so the buttons work without a setup
-step. Arming by itself performs only read-only DME identity and flap-capability
-checks; the app does not request a flap mode on first launch. A command is sent
-only after an explicit tap on a control, and only if a matching flap is detected.
-The setting can still be switched to Disarmed, which prevents vehicle commands.
-On upgrade, Drive Mode following is reset to Off once so enabling the new default
-cannot cause a previously saved follow mode to issue a command at startup. Tap
-**BY DRIVE MODE** to turn following on again; that selection is then remembered.
-The close-RPM guard defaults to 4,000 rpm and fails back to BMW control if fresh
-RPM is unavailable. Repeating the request every 15 seconds is optional and off
-by default. Drive Mode following is only enabled by pressing its page button.
+**Car exhaust control** defaults to **Disarmed**. Turn it on in Settings before
+using a valve command. Arming performs only read-only DME identity and
+flap-capability checks; the app does not request a flap mode on first launch. A
+command is sent only after an explicit tap on a control, and only if a matching
+flap is detected. On upgrade, the saved arm setting is reset to Off once so an
+older enabled value cannot survive the safety change. Drive Mode following is
+off by default and only enabled by pressing its page button. Repeating the
+request every 15 seconds is optional and off by default.
 
 The reused MG1 adapter sends BMW's existing UDS `0x2F` control for DID `0x60FD`
 only after the setting is armed and a read-only flap match succeeds. It requests
@@ -116,11 +113,12 @@ repeats; the DME is expected to resume its own strategy after its short-term
 override expires.
 
 On Engine Data, **M SOUND MODE** requests OPEN from the same guarded controller;
-pressing it again returns control to BMW. The button shows only its name. It is
+pressing it again returns control to BMW. The button shows only its name. Car
+exhaust control is off by default and must be enabled in Settings. It is
 red while the app's open request is active or the vehicle is in Sport, Sport+,
 or Sport Individual, and grey for an active manual CLOSED request. In BMW's OEM
 mode, the indicator follows the selected driving mode; physical valve position
-is not read directly. It uses the default Armed setting and the same matched-DME checks as
+is not read directly. The same matched-DME checks apply as
 the Engine Config buttons. If diagnostics are starting or no supported DME is
 matched, taps still respond and the status panel explains why no command was sent.
 It controls the exhaust flap only; it does
@@ -163,7 +161,7 @@ The plotted power and torque traces stay unfilled so they remain distinct from
 the chart grid and do not form a block below a short RPM sweep.
 
 The page displays a side-view image paired to the selected **Car Model** in
-Settings. All six supplied side-view PNG files are included unchanged and are
+Settings. All supplied side-view PNG files are included unchanged and are
 fit on the right side without cropping. The image loader uses the
 matching chassis silhouette for the red and black variants so their transparent
 background stays clean. Settings also let you choose Nm, lb-ft or kgm, toggle
@@ -224,7 +222,9 @@ attribution are retained in `LICENSE` and the relevant source comments.
 The engine monitor and boost candidates use SOME/IP subscriptions and read-only
 UDS/OBD requests. Exhaust flap control is the only write path, isolated behind
 its disarmed-by-default setting, a matching DME capability check, and a manual
-page action. Demo is off by default; dyno recording pauses in Demo and the screen
+page action. The setting is visible in Settings, and its saved value is reset to
+Off once for this update so an older saved Armed value cannot survive the safety
+default change. Demo is off by default; dyno recording pauses in Demo and the screen
 clearly marks simulated live readings.
 
 ## Local checks and preview

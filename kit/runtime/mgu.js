@@ -534,8 +534,9 @@ class Widget {
 const settingsRows = [];
 function wireSettings(ctx) {
     const { ui, settings } = ctx;
-    // hidden settings (kept by the app itself, never on a screen) have no component to look up
-    const schema = settings.schema.filter((s) => !s.hidden);
+    // hidden settings (kept by the app itself, never on a screen) have no component to look up;
+    // section rows are group headings on the settings screen: a static label, nothing to wire
+    const schema = settings.schema.filter((s) => !s.hidden && s.type !== 'section');
     // the settings screen, or an app's own menu screen that shows them ("settings": true)
     if (!schema.length || !schema.some((s) => ui.comp('SET_' + s.key.toUpperCase()))) return;
     // choice / number settings are drop-downs (kit/tools/build.py): their rows are the values in this order
@@ -549,7 +550,8 @@ function wireSettings(ctx) {
         if (s.type === 'bool' && !ui.id8) return Promise.all([ui.text(comp, s.label), ui.checked(comp, !!settings.get(s.key))]);
         if (values(s)) return ui.selected(comp, Math.max(0, values(s).indexOf(settings.get(s.key))));
         // other types: two-row buttons in the wide settings state, label above, value below
-        return ui.cells(comp, 0, { Text1stRow: s.label, Text2ndRow: settings.display(s.key) });
+        // ("desc" from app.json goes after the value on the second row, as BMW's own settings do)
+        return ui.cells(comp, 0, { Text1stRow: s.label, Text2ndRow: settings.display(s.key) + (s.desc ? ' · ' + s.desc : '') });
     }));
     schema.forEach((s) => {
         const comp = 'SET_' + s.key.toUpperCase();

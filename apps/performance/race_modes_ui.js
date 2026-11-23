@@ -3,6 +3,15 @@
 const W = 1600, H = 520;
 
 function card(cv, G, t, x, y, w, h, title, subtitle, kind, onOpen) {
+    const art = require('./flap_ui').sectionArt(kind, t.bg);
+    if (art) {
+        // Every badge at the same on-screen height: the badge itself is the button.
+        const ih = 200, iw = Math.round(ih * art.w / art.h);
+        const ix = x + (w - iw) / 2, iy = y + (h - ih) / 2;
+        cv.image(art.id, ix, iy, iw, ih);
+        if (cv.own && onOpen) cv.target(ix, iy, iw, ih, onOpen, 'performance_race_' + kind, 26);
+        return;
+    }
     cv.roundRect(x, y, w, h, 9, G.withAlpha('#ffffff', 0.035));
     cv.strokeRoundRect(x, y, w, h, 9, 1.5, G.withAlpha('#ffffff', 0.18));
     cv.fillRect(x + 1, y + 24, 4, 68, t.accent);
@@ -32,17 +41,17 @@ function card(cv, G, t, x, y, w, h, title, subtitle, kind, onOpen) {
     cv.roundRect(bx, by, bw, bh, 6, G.withAlpha(t.accent, 0.84));
     cv.strokeRoundRect(bx, by, bw, bh, 6, 1.5, G.withAlpha(t.accent, 0.95));
     cv.text('OPEN ' + title, cx, by + 32, 17, '#ffffff', { align: 'center', font: 'bold', spacing: 1.3, literal: true });
-    if (cv.own && onOpen) cv.target(x, y, w, h, onOpen, 'performance_race_' + kind);
+    if (cv.own && onOpen) cv.target(x, y, w, h, onOpen, 'performance_race_' + kind, 20);
 }
 
 function draw(cv, G, t, actions) {
     cv.clear(t.bg);
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 2);
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 2);
     G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || '#f32635');
-    const y = Math.max(98, (G.TOP || 44) + 32), h = Math.min(340, (G.pageBottom(cv) || H) - y - 12);
-    const w = 580, gap = 56, x0 = (W - (w * 2 + gap)) / 2;
-    card(cv, G, t, x0, y, w, h, 'DYNO RUN', 'ROAD POWER & TORQUE ESTIMATE', 'dyno', actions && actions.dyno);
-    card(cv, G, t, x0 + w + gap, y, w, h, 'DRAG RUN', 'ACCELERATION TIMES & RUN HISTORY', 'drag', actions && actions.drag);
+    // Same card geometry and badge size as ENGINE CONFIG's section picker (flap_ui drawSectionMenu).
+    const y = (G.TOP || 44) + 30, h = 414, w = 760, gap = 32;
+    card(cv, G, t, 24, y, w, h, 'DYNO RUN', 'ROAD POWER & TORQUE ESTIMATE', 'dyno', actions && actions.dyno);
+    card(cv, G, t, 24 + w + gap, y, w, h, 'DRAG RUN', 'ACCELERATION TIMES & RUN HISTORY', 'drag', actions && actions.drag);
     return cv;
 }
 

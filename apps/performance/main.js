@@ -21,6 +21,9 @@ const CarImages = require('./car_images');
 const DynoUi = require('./dyno_ui');
 const DragRunUi = require('./drag_run_ui');
 const RaceModesUi = require('./race_modes_ui');
+const CarDataUi = require('./car_data_ui');
+const WarmupUi = require('./warmup_ui');
+const { Warmup } = require('./warmup');
 const { Controller: FlapController } = require('./flap_controller');
 const { AutoFlap, flapFor, modeName } = require('./flap_auto');
 const fs = require('fs');
@@ -29,7 +32,7 @@ const path = require('path');
 const W = 1600, H = 520;
 const FRESH_MS = 4500;
 const DYNO_FRESH_MS = 500;
-const RENDER_MS = 90;
+const RENDER_MS = 16;
 const DME_POLL_MS = 1200;
 const PEAK_HOLD_MS = 15000;
 const RPM_MAX = 8000;
@@ -95,7 +98,13 @@ mgu.run({
         } catch (e) { /* first start */ }
         let dragRuns = [], dragBest = Object.create(null), dragSelectedAt = null;
         let dragView = 'live', dragListOffset = 0, dragClearUntil = 0, dragPeakG = 0;
-        let dragPulse = null, lastDragState = 'wait';
+        let rollingTimer = null, rollingResult = {}, demoRollingCleared = false;
+        // Dragy-style road grade: accelerometer holds gravity, so slope% =
+        // (a_measured - dv/dt) / g. At a standstill dv/dt is 0 and the raw
+        // accelerometer offset is the grade directly.
+        let slopePct = null, slopeAt = 0, accelMps2 = null, accelAt = 0;
+        const slopeSpeeds = [];   // {t, v} km/h samples for dv/dt
+        let dragPulse = null, lastDragState = 'wait', mainLoop = null;
         try {
             const saved = JSON.parse(fs.readFileSync(dragRunFile, 'utf8'));
             if (saved && Array.isArray(saved.runs)) dragRuns = saved.runs.filter((run) =>
@@ -119,6 +128,13 @@ mgu.run({
         };
         let firstFesBoost = null, fesBoostTrusted = false;
         let firstDmeBoost = null, dmeBoostTrusted = false;
+        // WARMUP page: warm-up ETAs, safe rev limit, turbo cool-down and cold starts.
+        // Fed from updateMetric below so the history fills on every page, not just WARMUP.
+        const warmup = new Warmup({
+            settings,
+            redline: () => settings.get('warmupRedline') || 7000,
+            coldRpm: () => settings.get('warmupColdLimit') || 3500,
+        });
         const peaks = { live: Object.create(null), demo: Object.create(null) };
         const subscriptions = [];
         const diagnosticDedup = Object.create(null);
@@ -126,15 +142,16 @@ mgu.run({
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
         let vehicleGear = null, vehicleGearAt = 0;
-        let page = 0, engineConfigView = 'sections', valveReady = false, drivingMode = null;
+        let page = 0, engineConfigView = 'sections', carDataView = 'menu', valveReady = false, drivingMode = null;
         let burbleTarget = 1.5, burbleCommandActive = false;
         let driveModeLoading = false, driveModePollStarting = false, driveModePollSub = null, driveModePollTimer = null;
-        let valveTick = null, valveRescanTimer = null, smokeTick = null;
+        let valveRescanTimer = null, smokeTick = null;
         let valveNoticeTimer = null, valveActionNotice = '', valveActionNoticeUntil = 0;
         let valveScanBusy = false, valveScanTries = 0, valveScanAt = 0, bm3ScanRetryCount = 0;
         let carVisual = null, carVisualKey = '', carSideVisual = null, carSideVisualKey = '';
         let mSoundEnabled = false;
         let mSoundBusy = false;
+        let demoSelectedMode = null;
         let valveCommandActive = false, valvePriorityUntil = 0;
 
         function selectedCarVisual(theme) {
@@ -227,18 +244,79 @@ mgu.run({
             return render();
         }
 
+        let dynoFlashAt = 0, dynoFlashKey = null, dynoFlashTimer = null;
+        function dynoFlash(key) {
+            dynoFlashKey = key;
+            dynoFlashAt = Date.now();
+            clearTimeout(dynoFlashTimer);
+            dynoFlashTimer = setTimeout(queueRender, 1050);
+        }
+
         function updateDynoActionLabel() {
             if (ui.text) ui.text('BTN_DYNO_ACTION', 'Open DYNO RUN');
             if (ui.text) ui.text('BTN_DYNO_VIEW', 'DYNO RUN');
         }
 
         function saveDragRuns() {
-            try { fs.writeFileSync(dragRunFile, JSON.stringify({ runs: dragRuns, best: dragBest, selectedAt: dragSelectedAt })); }
+            const best = {};
+            Object.keys(dragBest).forEach((key) => {
+                if (!dragBest[key] || !dragBest[key].demo) best[key] = dragBest[key];
+            });
+            try {
+                fs.writeFileSync(dragRunFile, JSON.stringify({
+                    runs: dragRuns.filter((run) => !run.demo), best, selectedAt: dragSelectedAt,
+                }));
+            }
             catch (e) { log.warn('drag run save: ' + shortError(e)); }
         }
 
         function dragUnit() { return settings.get('dragSpeedUnit') === 'mph' ? 'mph' : 'kmh'; }
         function dragDistance() { return DragRun.DISTANCES[settings.get('dragDistance')] || DragRun.DISTANCES.qm; }
+
+        // Demo history: two sample runs so DRAG HISTORY looks real in the
+        // emulator. They live only in memory — saveDragRuns() skips them and
+        // turning demo off purges them again.
+        let demoRunsSeeded = false;
+        function seedDemoDragRuns() {
+            if (settings.get('demo') !== 'on') {
+                warmup.clearDemo();
+                if (dragRuns.some((run) => run.demo)) {
+                    dragRuns = dragRuns.filter((run) => !run.demo);
+                    Object.keys(dragBest).forEach((key) => {
+                        if (dragBest[key] && dragBest[key].demo) delete dragBest[key];
+                    });
+                    if (dragSelectedAt != null
+                        && !dragRuns.some((run) => run.at === dragSelectedAt)) dragSelectedAt = null;
+                    demoRunsSeeded = false;
+                }
+                return;
+            }
+            if (dragRuns.length || demoRunsSeeded) return;
+            demoRunsSeeded = true;
+            const now = Date.now();
+            dragRuns = [
+                { at: now - 3600000, unit: 'kmh', demo: true,
+                    result: { '0-50': 1.90, '0-100': 4.62, '100-200': 6.35,
+                        '200-300': 10.20, qm: 12.40, em: 8.10 },
+                    trap: { qm: 191, em: 152 }, vmax: 240, peakG: 1.05,
+                    elapsed: 12.40, slope: -0.55,
+                    trace: [[0, 0], [1, 32], [2, 58], [3, 82], [4.62, 100],
+                        [6, 135], [8, 170], [10.97, 206], [12.4, 215]] },
+                { at: now - 7200000, unit: 'kmh', demo: true, rolling: true,
+                    result: { '100-200': 6.42 }, trap: {}, vmax: 200, dist: 421,
+                    slope: -0.94, peakG: null,
+                    trace: [[0, 100], [1, 112], [2, 128], [3, 146],
+                        [4, 165], [5, 182], [6.42, 200]] },
+            ];
+            const rollout = settings.get('dragRollout') === true;
+            dragRuns.forEach((run) => Object.keys(run.result).forEach((key) => {
+                const id = DragRun.bestKey(key, run.unit, rollout), old = dragBest[id];
+                if (!old || run.result[key] < old.s) {
+                    dragBest[id] = { s: run.result[key], at: run.at, trap: run.trap[key], demo: true };
+                }
+            }));
+            if (dragSelectedAt == null) dragSelectedAt = dragRuns[0].at;
+        }
         function dragSelectedRun() {
             const visible = dragRuns.filter((run) => (run.unit || 'kmh') === dragUnit());
             return visible.find((run) => run.at === dragSelectedAt) || visible[0] || null;
@@ -246,13 +324,14 @@ mgu.run({
 
         function makeDragTimer() {
             const unit = dragUnit(), distance = dragDistance(), rollout = settings.get('dragRollout') === true;
-            dragTimer = new RunTimer(DragRun.splits(unit, distance.key), {
+            dragTimer = new RunTimer(DragRun.allSplits(unit), {
                 rollout,
                 onLaunch: () => { dragPeakG = 0; dragWheelspin.launch(Date.now()); },
                 onDone: (event) => {
                     const run = Object.assign({}, event, {
                         unit, distanceKey: distance.key, distanceLabel: distance.label,
                         peakG: dragPeakG, elapsed: dragTimer && dragTimer.endAt,
+                        slope: slopeAt && Date.now() - slopeAt <= 5000 ? slopePct : null,
                         trace: dragTimer ? DragRun.compactTrace(dragTimer.trace) : [],
                         wheelspin: dragWheelspin.result(),
                     });
@@ -273,12 +352,38 @@ mgu.run({
                     if (page === 4) queueRender();
                 },
             });
+            rollingTimer = new DragRun.RollingSplits(DragRun.allSplits(unit));
             lastDragState = dragTimer.state;
         }
 
         function feedDragSpeed(speed, at) {
             if (!dragTimer || settings.get('demo') === 'on' || !finite(speed)) return;
             dragWheelspin.speed(at, speed);
+            const rollDone = rollingTimer ? rollingTimer.feed(at, speed) : {};
+            const keys = Object.keys(rollDone);
+            if (keys.length) {
+                const unit = dragUnit(), rollout = settings.get('dragRollout') === true;
+                const inRun = dragTimer.state === 'run';
+                keys.forEach((key) => {
+                    const rec = rollDone[key];
+                    rollingResult[key] = rec.s;
+                    if (inRun) return;  // the launch run records this split itself
+                    const bestId = DragRun.bestKey(key, unit, rollout), old = dragBest[bestId];
+                    if (!old || rec.s < old.s) dragBest[bestId] = { s: rec.s, at };
+                    dragRuns.unshift({
+                        at, unit, rolling: true, result: { [key]: rec.s }, trap: {},
+                        vmax: rec.vmax, dist: rec.dist, elapsed: rec.s,
+                        trace: DragRun.compactTrace(rec.trace || []),
+                        slope: slopeAt && at - slopeAt <= 2000 ? slopePct : null,
+                        peakG: DragRun.peakGFromTrace(rec.trace),
+                    });
+                    dragRuns = dragRuns.slice(0, 30);
+                    dragSelectedAt = at;
+                });
+                saveDragRuns();
+                log.info('rolling split ' + JSON.stringify(rollDone));
+                if (page === 4) queueRender();
+            }
             const previous = dragTimer.state;
             dragTimer.feed(at, speed);
             if (previous !== dragTimer.state) {
@@ -295,9 +400,58 @@ mgu.run({
             return render();
         }
 
+        // History drill-down: sections -> runs(within section) -> report.
+        let dragSection = null, dragRunsPage = 0;
+        function dragSectionRuns() {
+            const unit = dragUnit();
+            return dragRuns.filter((run) => (run.unit || 'kmh') === unit
+                && (!dragSection || (run.result && run.result[dragSection] != null)));
+        }
+        function openDragSection(key) {
+            dragSection = key;
+            dragView = 'runs';
+            dragRunsPage = 0;
+            dragListOffset = 0;
+            dragClearUntil = 0;
+            const first = dragSectionRuns()[0];
+            if (first) dragSelectedAt = first.at;
+            queueRender();
+            return render();
+        }
+        function openDragReport(at) {
+            if (!dragRuns.some((run) => run.at === at)) return null;
+            dragSelectedAt = at;
+            dragView = 'report';
+            saveDragRuns();
+            queueRender();
+            return render();
+        }
+        function dragBack() {
+            if (dragView === 'report') {
+                dragView = 'runs';
+                const list = dragSectionRuns(), idx = list.findIndex((run) => run.at === dragSelectedAt);
+                if (idx >= 0) dragRunsPage = Math.floor(idx / DragRunUi.RUNS_PER_PAGE);
+            } else if (dragView === 'runs') { dragView = 'history'; dragSection = null; dragRunsPage = 0; }
+            else dragView = 'live';
+            dragClearUntil = 0;
+            queueRender();
+            return render();
+        }
+
         function selectDragRun(at) {
             if (!dragRuns.some((run) => run.at === at)) return null;
             dragSelectedAt = at;
+            saveDragRuns();
+            queueRender();
+            return render();
+        }
+
+        function nextDragRun() {
+            const visible = dragSectionRuns();
+            if (!visible.length) return null;
+            const current = dragSelectedRun();
+            const index = current ? visible.findIndex((run) => run.at === current.at) : -1;
+            dragSelectedAt = visible[(index + 1) % visible.length].at;
             saveDragRuns();
             queueRender();
             return render();
@@ -311,10 +465,41 @@ mgu.run({
         }
 
         function resetDragTimer() {
-            if (settings.get('demo') === 'on' || !dragTimer) return null;
+            if (!dragTimer) return null;
+            if (settings.get('demo') === 'on') {
+                demoRollingCleared = true;
+                rollingResult = {};
+                queueRender();
+                return render();
+            }
             dragTimer.reset();
+            rollingResult = {};
             dragPeakG = 0;
             dragWheelspin.resetRun();
+            queueRender();
+            return render();
+        }
+
+        // Two-step clear of just one section (e.g. all 0-100 records): drops the
+        // split from every run that has it, removes emptied runs and the best.
+        function clearDragSection(key) {
+            if (!key) return null;
+            const now = Date.now();
+            if (now > dragClearUntil) {
+                dragClearUntil = now + 5000;
+                queueRender();
+                return render();
+            }
+            dragClearUntil = 0;
+            dragRuns.forEach((run) => { if (run.result) delete run.result[key]; });
+            dragRuns = dragRuns.filter((run) => run.result && Object.keys(run.result).length);
+            Object.keys(dragBest).forEach((id) => { if (id.split('@')[0] === key) delete dragBest[id]; });
+            if (!dragSectionRuns().some((run) => run.at === dragSelectedAt)) {
+                const first = dragSectionRuns()[0];
+                dragSelectedAt = first ? first.at : null;
+                dragRunsPage = 0;
+            }
+            saveDragRuns();
             queueRender();
             return render();
         }
@@ -330,6 +515,8 @@ mgu.run({
             dragRuns = [];
             dragBest = Object.create(null);
             dragSelectedAt = null;
+            dragSection = null;
+            dragRunsPage = 0;
             dragListOffset = 0;
             saveDragRuns();
             queueRender();
@@ -340,7 +527,7 @@ mgu.run({
 
         // Reuse Engine Config's per-DME controller and Drive Mode logic. The
         // installed app starts disarmed; only the explicit setting can arm it.
-        const valveKeys = { arm: 'valveControl', hold: 'valveHold', closeLimit: 'valveCloseLimit' };
+        const valveKeys = { arm: 'valveControl', hold: 'valveHold' };
         const valveSettings = {
             get(key) { return settings.get(valveKeys[key] || key); },
             set(key, value) { return settings.set(valveKeys[key] || key, value); },
@@ -349,7 +536,6 @@ mgu.run({
         const valveAuto = new AutoFlap({
             controller: valveController,
             get: (key) => valveSettings.get(key), set: (key, value) => valveSettings.set(key, value),
-            rpm: () => fresh(state.rpm, Date.now()) ? state.rpm.value : null,
             log, onChange: () => queueRender(),
         });
         function valveCanActuate() {
@@ -494,12 +680,27 @@ mgu.run({
             }
         }
 
+        function feedWarmup() {
+            const now = Date.now();
+            const rpm = fresh(state.rpm, now) ? state.rpm.value : null;
+            const tq = fresh(state.torqueFes, now) ? state.torqueFes.value : null;
+            warmup.sample({
+                rpm,
+                speed: fresh(state.speed, now) ? state.speed.value : null,
+                oil: cdNum('oilTemp'),
+                coolant: cdNum('coolantTemp'),
+                gearbox: cdNum('gearboxTemp'),
+                kw: finite(rpm) && finite(tq) ? tq * rpm / 9549 : null,
+            });
+        }
+
         function updateMetric(name, raw, value, unit, source, status) {
             state[name] = {
                 raw, value: finite(value) ? value : null, unit: unit || '', source: source || '',
                 at: Date.now(), status: status || (finite(value) ? 'live' : 'invalid'),
             };
             record(name, raw, finite(value) ? value : null, unit, source, state[name].status);
+            feedWarmup();
             // Engine Config shows valve state and a timed smoke animation, not
             // engine telemetry. Avoid rebuilding and sending the full screen
             // for every fast vehicle signal while that page is open.
@@ -570,8 +771,58 @@ mgu.run({
             const valid = finite(value) && value >= 0 && value <= 400;
             const at = Date.now();
             updateMetric('speed', raw, valid ? value : null, 'km/h', source, valid ? 'live' : 'invalid');
-            if (valid) feedDragSpeed(value, at);
+            if (valid) {
+                feedDragSpeed(value, at);
+                slopeSpeeds.push({ t: at, v: value });
+                while (slopeSpeeds.length && at - slopeSpeeds[0].t > 1600) slopeSpeeds.shift();
+            }
+            updateSlope(at);
             feedDyno();
+        }
+
+        function updateSlope(now) {
+            if (accelMps2 === null || now - accelAt > 800) return;
+            let dvdt = 0;
+            const newest = slopeSpeeds.length ? slopeSpeeds[slopeSpeeds.length - 1] : null;
+            if (newest) {
+                let old = null;
+                for (let i = slopeSpeeds.length - 1; i >= 0; i--) {
+                    if (newest.t - slopeSpeeds[i].t >= 320) { old = slopeSpeeds[i]; break; }
+                }
+                if (old && newest.t - old.t > 100) dvdt = (newest.v - old.v) / 3.6 / ((newest.t - old.t) / 1000);
+            }
+            const raw = Math.max(-30, Math.min(30, (accelMps2 - dvdt) / 9.80665 * 100));
+            slopePct = slopePct === null ? raw : slopePct + (raw - slopePct) * 0.25;
+            slopeAt = now;
+        }
+
+        // CDS engine temperatures: coolant drive + oil drive, deg C = raw - 48 (raw 0 / 255 = no data).
+        function setEngineTemps(payload, source) {
+            if (!payload) return;
+            const rawOil = payload.temperatureEngineOilDrive;
+            const oil = Calc.scale(rawOil, scaling.engineTemp);
+            updateMetric('oilTemp', rawOil, finite(oil) && rawOil > 0 ? oil : null, 'degC', source,
+                finite(oil) && rawOil > 0 ? 'live' : 'invalid');
+            const rawCool = payload.temperatureEngineDrive;
+            const cool = Calc.scale(rawCool, scaling.engineTemp);
+            updateMetric('coolantTemp', rawCool, finite(cool) && rawCool > 0 ? cool : null, 'degC', source,
+                finite(cool) && rawCool > 0 ? 'live' : 'invalid');
+        }
+
+        // BasicDataSet: EGS transmission oil temperature, same deg C = raw - 48 scale.
+        function setGearboxTemp(payload, source) {
+            const raw = payload && payload.valueTemperatureTransmissionOil;
+            const value = Calc.scale(raw, scaling.gearboxTemp);
+            updateMetric('gearboxTemp', raw, finite(value) && raw > 0 ? value : null, 'degC', source,
+                finite(value) && raw > 0 ? 'live' : 'invalid');
+            // xDrive torque split to the rear axle (%): valid when its qualifier says so
+            // or the car leaves the qualifier out entirely (same rules as car_vitals).
+            const rawSplit = payload && payload.valueDistributionLongitudinalTorqueRearAxisFrontAxis;
+            const q = payload && payload.qualifierValueDistributionLongitudinalTorqueRearAxisFrontAxis;
+            const splitOk = q === undefined || q === null || q === 2 || q === 10 ||
+                /SIGNALWERT_IST_GUELTIG/.test(String(q));
+            const split = splitOk ? Calc.scale(rawSplit, { factor: 0.01, invalid: 65535 }) : null;
+            if (finite(split) && split > 0) updateMetric('splitRear', rawSplit, split, '%', source, 'live');
         }
 
         function setGearboxStatus(payload) {
@@ -600,6 +851,9 @@ mgu.run({
             const value = finite(mps2) ? mps2 / 9.80665 : null;
             const valid = finite(value) && Math.abs(value) <= 8;
             updateMetric('gLong', raw, valid ? value : null, 'g', source, valid ? 'live' : 'invalid');
+            accelMps2 = valid ? mps2 : null;
+            accelAt = Date.now();
+            updateSlope(accelAt);
             if (settings.get('demo') !== 'on') {
                 dragWheelspin.accel(Date.now(), valid ? mps2 : null);
                 if (dragTimer && dragTimer.state === 'run' && valid) dragPeakG = Math.max(dragPeakG, value);
@@ -632,15 +886,113 @@ mgu.run({
             }
             updateMetric('boostFes', raw, value, 'bar', source,
                 value === null ? (raw === 255 ? 'invalid' : 'unit-unknown') : 'live');
+            const peakRaw = payload && payload.displayMaximumValueBoostPressure;
+            const peak = Calc.fesBoostBar(peakRaw, state.pressureUnit, scaling.boost);
+            if (finite(peak) && peak > 0) updateMetric('boostPeak', peakRaw, peak, 'bar', source, 'live');
         }
 
         function setPressureUnits(payload, source) {
             const raw = payload && payload.unitOfMeasurementAirPressure;
             const unit = pressureUnit(raw);
             state.pressureUnit = unit;
+            const tempRaw = payload && payload.unitOfMeasurementTemperature;
+            state.tempUnit = ({ 1: 'C', 2: 'F', C: 'C', F: 'F' })[typeof tempRaw === 'string' ? tempRaw.trim().toUpperCase() : tempRaw] || state.tempUnit || null;
             diagLog('pressure_units', { source, raw, unit: unit || 'unknown' });
             if (state.boostFes.at) setFesBoost({ displayBoostPressure: state.boostFes.raw }, 'reconvert');
             queueRender();
+        }
+
+        /* ---- CAR DATA tab decoders: enums become text metrics, numbers become metrics ---- */
+        const ENGINE_STATES = { MOTOR_AUS: 'ENGINE OFF', MOTOR_STARTET: 'STARTING', MOTOR_LAEUFT: 'RUNNING', 0: 'ENGINE OFF', 1: 'STARTING', 2: 'RUNNING' };
+        const MSA_STATES = { MSA_AKTIVIERT: 'ON', MSA_DEAKTIVIERT: 'OFF', 0: 'OFF', 1: 'ON' };
+        const BRAKE_STATES = { HANDBREMSE_ANGEZOGEN: 'APPLIED', HANDBREMSE_GELOEST: 'RELEASED', 1: 'RELEASED', 2: 'APPLIED' };
+        const OIL_LEVELS = { MOTOROELSTAND_UNTER_MINIMUM: 'BELOW MIN', MOTOROELSTAND_AM_MINIMUM: 'AT MINIMUM',
+            MOTOROELSTAND_1_4: '1/4', MOTOROELSTAND_2_4: '2/4', MOTOROELSTAND_3_4: '3/4', MOTOROELSTAND_4_4: 'FULL',
+            MOTOROELSTAND_5_4: 'ABOVE FULL', MOTOROELSTAND_UEBERFUELLT: 'OVERFILLED', MOTOROELSTAND_OK: 'OK',
+            SERVICEFUNKTION_AKTIV: 'MEASURING', 0: 'BELOW MIN', 1: 'AT MINIMUM', 2: '1/4', 3: '2/4',
+            4: '3/4', 5: 'FULL', 6: 'ABOVE FULL', 7: 'OVERFILLED', 13: 'OK', 14: 'MEASURING' };
+        const CONS_UNITS = { VERBRAUCH_IN_L_S_100KM: 'l/100km', VERBRAUCH_IN_MPG_UK: 'mpg', VERBRAUCH_IN_MPG_US: 'mpg US', VERBRAUCH_IN_KM_S_L: 'km/l', 1: 'l/100km', 2: 'mpg', 3: 'mpg US', 4: 'km/l' };
+
+        function textMetric(name, text, source) {
+            state[name] = { raw: text, value: null, text: text || null, unit: '', source: source || '', at: Date.now(), status: text ? 'live' : 'invalid' };
+            record(name, text, text, '', source, state[name].status);
+            if (page !== 1) queueRender();
+        }
+
+        function setAmbient(payload, source) {
+            const raw = payload && payload.temperatureExterior;
+            const value = Calc.scale(raw, { factor: 0.5, offset: -40, invalid: 255 });
+            updateMetric('ambientTemp', raw, value, 'degC', source, value === null ? 'invalid' : 'live');
+        }
+        function setEngineStatus(payload, source) { textMetric('engineState', ENGINE_STATES[payload && payload.statusEngineRunDrive], source); }
+        function setBattery(payload, source) {
+            const raw = payload && payload.conditionBatteryChargingCondition;
+            updateMetric('battCharge', raw, finite(raw) && raw >= 0 && raw <= 100 ? raw : null, '%', source, 'live');
+        }
+        function setHandBrake(payload, source) { textMetric('handBrake', BRAKE_STATES[payload && payload.statusContactHandBrake], source); }
+        function setMsa(payload, source) { textMetric('msaState', MSA_STATES[payload && payload.statusFunctionMSA], source); }
+        function setOilLevel(payload, source) { textMetric('oilLevel', OIL_LEVELS[payload && payload.fluidLevelEngineOilRelative], source); }
+        function setMass(payload, source) {
+            const raw = payload && payload.massVehicle;
+            updateMetric('vehicleMass', raw, finite(raw) && raw > 500 && raw < 5000 ? raw : null, 'kg', source, 'live');
+        }
+        function setTank(payload, source) {
+            if (!payload) return;
+            const tank = payload.fluidLevelFuelTank;
+            updateMetric('tankLitres', tank, finite(tank) && tank >= 0 && tank <= 200 ? tank : null, 'l', source, 'live');
+            const range = payload.range;
+            updateMetric('rangeKm', range, finite(range) && range >= 0 && range < 4095 ? range : null, 'km', source, 'live');
+            const odo = payload.mileageKilometre;
+            updateMetric('odoKm', odo, finite(odo) && odo >= 0 && odo < 16777215 ? odo : null, 'km', source, 'live');
+        }
+        function setBoardAvg(payload, source) {
+            const raw = payload && payload.consumptionAverage1BC1;
+            const unit = CONS_UNITS[payload && payload.statusUnitOfMeasurementConsumptionBC] || 'l/100km';
+            const value = Calc.scale(raw, { factor: 0.1, invalid: 65535 });
+            textMetric('avgCons', finite(value) ? formatNumber(value, 1) + ' ' + unit : null, source);
+        }
+        function setPedal(payload, source) {
+            const raw = payload && payload.actualValueAngleAcceleratorPedal;
+            const value = Calc.scale(raw, { factor: 0.025 });
+            updateMetric('pedalPct', raw, finite(value) && value >= 0 && value <= 105 ? value : null, '%', source, 'live');
+        }
+        // TPMS: 0.1 per bit in the car's pressure unit; temperatures are deg C + 40 (deg F on a car set so).
+        const PRESS_TO_BAR = { BAR: 1, KPA: 0.01, PSI: 1 / 14.5038 };
+        function setTyrePress(payload, source) {
+            if (!payload) return;
+            [['tyrePFL', 'actualValuePressureTyreFLH'], ['tyrePFR', 'actualValuePressureTyreFRH'],
+             ['tyrePRL', 'actualValuePressureTyreRLH'], ['tyrePRR', 'actualValuePressureTyreRRH']].forEach(([key, field]) => {
+                const raw = payload[field];
+                let value = null;
+                if (finite(raw) && raw < 65532) {
+                    const v = raw * 0.1, k = PRESS_TO_BAR[state.pressureUnit];
+                    value = k ? v * k : v >= 0.5 && v <= 6 ? v : v >= 7 && v < 60 ? v / 14.5038 : v >= 60 && v <= 600 ? v / 100 : v;
+                }
+                updateMetric(key, raw, finite(value) && value > 0 && value < 7 ? value : null, 'bar', source, 'live');
+            });
+        }
+        function setTyreTarget(payload, source) {
+            if (!payload) return;
+            [['tyrePtFL', 'targetPressureTyreFLH'], ['tyrePtFR', 'targetPressureTyreFRH'],
+             ['tyrePtRL', 'targetPressureTyreRLH'], ['tyrePtRR', 'targetPressureTyreRRH']].forEach(([key, field]) => {
+                const raw = payload[field];
+                let value = null;
+                if (finite(raw) && raw < 65532) {
+                    const v = raw * 0.1, k = PRESS_TO_BAR[state.pressureUnit];
+                    value = k ? v * k : v >= 0.5 && v <= 6 ? v : v >= 7 && v < 60 ? v / 14.5038 : v >= 60 && v <= 600 ? v / 100 : v;
+                }
+                updateMetric(key, raw, finite(value) && value > 0 && value < 7 ? value : null, 'bar', source, 'live');
+            });
+        }
+        function setTyreTemp(payload, source) {
+            if (!payload) return;
+            [['tyreTFL', 'actualValueTemperatureTyreFLH'], ['tyreTFR', 'actualValueTemperatureTyreFRH'],
+             ['tyreTRL', 'actualValueTemperatureTyreRLH'], ['tyreTRR', 'actualValueTemperatureTyreRRH']].forEach(([key, field]) => {
+                const raw = payload[field];
+                let value = finite(raw) && raw !== 65535 ? raw - 40 : null;
+                if (finite(value) && state.tempUnit === 'F') value = (value - 32) * 5 / 9;
+                updateMetric(key, raw, finite(value) && value > -40 && value < 120 ? value : null, 'degC', source, 'live');
+            });
         }
 
         function currentValveView() {
@@ -673,8 +1025,11 @@ mgu.run({
             const note = valveAuto.note();
             if (note && lines.length < 3) lines.push(note.text);
             const visualState = control.simulated ? 'UNKNOWN' : (control.confirmed || 'UNKNOWN');
-            const selectedMode = valveAuto.selected();
-            const effectiveMode = valveAuto.effective();
+            const demoPreview = settings.get('demo') === 'on' && !valveCanActuate() && demoSelectedMode;
+            const selectedMode = demoPreview || valveAuto.selected();
+            const effectiveMode = demoPreview
+                ? (demoPreview === 'DRIVE' ? (flapFor(drivingMode) || 'OEM') : demoPreview)
+                : valveAuto.effective();
             const modeLabel = selectedMode === 'DRIVE' ? 'DRIVE' : effectiveMode;
             let commandStatus;
             if (!valveReady) commandStatus = 'DIAGNOSTIC LINK STARTING';
@@ -693,11 +1048,11 @@ mgu.run({
                 ready: valveReady, armed, matched, status, lines, visualState, commandStatus,
                 // The exhaust art follows the requested mode as a visual cue only;
                 // the DME's reported position is separately labelled unverified.
-                exhaustMode: valveAuto.effective(),
+                exhaustMode: effectiveMode,
                 modeLabel,
                 drivingMode: modeName(drivingMode),
                 driveModeLoading,
-                page, selected: valveAuto.selected(),
+                page, selected: selectedMode,
                 requested: valveAuto.desired,
                 note: note && note.text,
                 bm3Rom: control.bm3 && control.bm3.rom,
@@ -774,6 +1129,7 @@ mgu.run({
         const valvePress = (mode) => () => {
             if (mode === 'DRIVE' && drivingMode === null) startDriveModePoll();
             if (!valveCanActuate()) {
+                if (settings.get('demo') === 'on') demoSelectedMode = mode;
                 const reason = valveBlockReason();
                 showValveNotice(mode + ' NOT SENT · ' + (reason || 'CONTROL UNAVAILABLE'));
                 diagLog('valve_command_blocked', { mode, ready: valveReady,
@@ -851,7 +1207,11 @@ mgu.run({
             }
         }
         const burbleActions = {
-            back() { engineConfigView = 'sections'; queueRender(); return render(); },
+            back() {
+                engineConfigView = 'sections';
+                queueRender();
+                return render();
+            },
             down() { burbleTarget = Math.max(0, Math.round((burbleTarget - 0.5) * 2) / 2); queueRender(); return render(); },
             up() { burbleTarget = Math.min(12, Math.round((burbleTarget + 0.5) * 2) / 2); queueRender(); return render(); },
             apply() { return sendBurbles(burbleTarget); },
@@ -894,17 +1254,20 @@ mgu.run({
             });
         };
         const sectionActions = {
-            open() {
+            exhaust() {
                 engineConfigView = 'exhaust';
-                if (!smokeTick) smokeTick = setInterval(queueRender, 180);
                 queueRender();
             },
             burbles() {
                 engineConfigView = 'burbles';
                 queueRender();
             },
+            sections() {
+                engineConfigView = 'sections';
+                queueRender();
+            },
         };
-        ui.onClick('BTN_SECTION', sectionActions.open);
+        ui.onClick('BTN_SECTION', sectionActions.sections);
         if (ctx.hideButton) ctx.hideButton('BTN_SECTION');
 
         const CDS = 'de.bmw.infotainment.vehicle.CDS';
@@ -913,10 +1276,25 @@ mgu.run({
         const VEHICLE2 = 'de.bmw.infotainment.vehicle.Vehicle2';
         const VEHICLE_INFO = 'de.bmw.infrastructure.VehicleInformation';
         const FES = 'de.bmw.infotainment.drivingexcitement.FES';
-        startWatch(CDS, { statusEngineSpeed2: setRpm });
-        startWatch(CDS2, { statusLongitudinalAccelerationMassCenter: setLongitudinalAcceleration });
+        const BASIC_DATA = 'de.bmw.infrastructure.analytics.BasicDataSet';
+        const ENV = 'de.bmw.infrastructure.EnvironmentalInformation';
+        const KOMBI = 'de.bmw.infotainment.KombiIF';
+        const PEDAL = 'de.bmw.powertrain.AcceleratorPedal';
+        const TPMS = 'de.bmw.infotainment.vehicle.TPMS';
+        startWatch(CDS, { statusEngineSpeed2: setRpm, statusEngineTemperature: setEngineTemps,
+            statusEngineStatus: setEngineStatus, statusBattery2: setBattery, statusHandBrake: setHandBrake });
+        startWatch(BASIC_DATA, { basicDataSet: setGearboxTemp });
+        startWatch(CDS2, { statusLongitudinalAccelerationMassCenter: setLongitudinalAcceleration,
+            statusPushButtonMSA2: setMsa });
         startWatch(VEHICLE, { statusNewCurrentUnitsStatusExt: setPressureUnits });
-        startWatch(VEHICLE2, { statusCarSpeed2: setVehicleSpeed });
+        startWatch(VEHICLE2, { statusCarSpeed2: setVehicleSpeed,
+            statusOilDipstick2: setOilLevel, statusVehicleMass: setMass });
+        startWatch(ENV, { ExteriorTemperature: setAmbient });
+        startWatch(KOMBI, { statusRangeTankStatus: setTank, statusBordcomputerAverage: setBoardAvg });
+        startWatch(PEDAL, { AngleAcceleratorPedal: setPedal });
+        // TPMS also needs a poll: BMW's own x_call only ever reads these, so a car may never notify them.
+        startWatch(TPMS, { statusTyrePressure: setTyrePress, statusTyreTemperature: setTyreTemp,
+            statusTargetTyrePressure: setTyreTarget }, { pollMs: 10000 });
         startWatch(VEHICLE_INFO, { statusGearboxDrive: setGearboxStatus, DataPowerTrain2: setGearSelection });
         startWatch(FES, {
             statusActualValueTorque2: setFesTorque,
@@ -944,17 +1322,82 @@ mgu.run({
             return dmeInit;
         }
 
+        // CAR DATA tab reads, two per pollDme cycle while the tab is open.
+        const dmeExtras = [
+            { name: 'iatTemp', cfg: dme.iat || [], unit: 'degC' },
+            { name: 'fuelHp', cfg: dme.hpfp || [], unit: 'bar' },
+            { name: 'fuelLp', cfg: dme.lpfp || [], unit: 'bar' },
+            { name: 'ignTiming', cfg: dme.timing || [], unit: 'deg' },
+            { name: 'battVolt', cfg: dme.battVolt || [], unit: 'V' },
+            { name: 'boostTargetKpa', cfg: dme.boostTarget || [], unit: 'kPa' },
+            { name: 'engineLoad', cfg: dme.loadActual || [], unit: '%' },
+            { name: 'dmePower', cfg: dme.dmePower || [], unit: 'kW' },
+            { name: 'airFlow', cfg: dme.airFlow || [], unit: 'kg/h' },
+            { name: 'throttleValve', cfg: dme.throttleValve || [], unit: '%' },
+            { name: 'chargePress', cfg: dme.chargePress || [], unit: 'hPa' },
+            { name: 'oilPress', cfg: dme.oilPress || [], unit: 'hPa' },
+        ].filter((item) => item.cfg.length > 0);
+        let dmeExtraIndex = 0;
         let lastDmeCycle = 0;
+        // OBD service 06 cylinder misfire counts (MIDs A2..AD), one MID per CAR DATA cycle
+        let misfireMids = null, misfireCounts = [], misfireCursor = 0, misfireRetryAt = 0;
+        async function pollMisfire(now) {
+            const cfg = dme.misfire || {};
+            const ecu = cfg.ecu == null ? dme.ecu : cfg.ecu;
+            const set = (value, status) => {
+                state.misfire = { raw: value, value, unit: 'counts', source: 'DME / OBD service 06', at: Date.now(), status };
+                queueRender();
+            };
+            if (!misfireMids || !misfireMids.length) {
+                if (now < misfireRetryAt) return;
+                let supported;
+                try { supported = await reader.supported(ecu, 0xA0, false); }
+                catch (e) {
+                    misfireMids = null;
+                    set(null, 'unavailable');
+                    misfireRetryAt = Date.now() + 30000;
+                    return;
+                }
+                misfireMids = (supported || []).filter((mid) => mid >= 0xA2 && mid <= 0xAD).slice(0, 12);
+                if (!misfireMids.length) {
+                    set(null, 'unavailable');
+                    misfireMids = null;
+                    misfireRetryAt = Date.now() + 300000;
+                    return;
+                }
+                misfireCounts = misfireMids.map(() => null);
+                misfireCursor = 0;
+            }
+            const mid = misfireMids[misfireCursor++ % misfireMids.length];
+            let rows;
+            try { rows = await reader.monitor(ecu, mid, false); }
+            catch (e) {
+                misfireMids = null;
+                set(null, 'unavailable');
+                misfireRetryAt = Date.now() + 30000;
+                return;
+            }
+            const tid = parseInt(cfg.tid || '0C', 16);
+            const row = rows && (rows.find((item) => item.tid === tid) || rows[0]);
+            if (!row || row.value >= 65535) return;
+            misfireCounts[misfireMids.indexOf(mid)] = row.value;
+            set(misfireCounts.slice(), 'live');
+        }
         async function pollDme() {
             const now = Date.now();
             if (state.stopped || state.dmeBusy || settings.get('demo') === 'on' ||
                 settings.get('readDmeCandidates') !== true || valveCommandActive || burbleCommandActive || valveScanBusy ||
                 valveController.state.busy || valveController.tune.busy || now < valvePriorityUntil) return;
-            if (!fresh(state.rpm, now) || state.rpm.value < 500 || now - lastDmeCycle < DME_POLL_MS) return;
+            // CAR DATA (page 5) also reads values that make sense with the engine off —
+            // battery voltage, intake temp, fuel pressures — so the rpm gate lifts on it.
+            if ((!fresh(state.rpm, now) || state.rpm.value < 500) && page !== 5) return;
+            if (now - lastDmeCycle < DME_POLL_MS) return;
             const boostSource = settings.get('boostSource') || 'auto';
             const needsDmeBoost = boostSource === 'dme' ||
-                (boostSource === 'auto' && !(fresh(state.boostFes, now) && fesBoostTrusted));
-            if (!needsDmeBoost || boostSource === 'fes') return;
+                (boostSource === 'auto' && !(fresh(state.boostFes, now) && fesBoostTrusted)) ||
+                (page === 5 && !(fresh(state.boostDme, now)));
+            const wantExtras = page === 5 && dmeExtras.length > 0;
+            if ((!needsDmeBoost || boostSource === 'fes') && !wantExtras) return;
             lastDmeCycle = now;
             state.dmeBusy = true;
             try {
@@ -971,30 +1414,45 @@ mgu.run({
                     });
                     diagLog('dme_baro', { kpa: state.baroKpa, measured: state.baroMeasured, attempts: baroAttempts });
                 }
-                const absoluteKpa = await reader.value('boost', dme.boost);
-                const candidate = dme.boost[reader.pick.boost || 0];
-                const result = candidate && reader.raws[reader.key(candidate)] || {};
-                const attempts = dme.boost.map((c) => {
-                    const r = reader.raws[reader.key(c)] || {};
-                    return { candidate: DidReader.label(c), ok: !!r.ok, reason: r.why || '', raw: r.bytes || '' };
-                });
-                if (absoluteKpa === null) {
-                    updateMetric('boostDme', attempts, null, 'bar', 'DME/OBD boost candidates', 'unavailable');
-                    diagLog('dme_boost_unavailable', { ecu: dme.ecu, attempts });
-                    return;
+                if (needsDmeBoost && boostSource !== 'fes') {
+                    const absoluteKpa = await reader.value('boost', dme.boost);
+                    const candidate = dme.boost[reader.pick.boost || 0];
+                    const result = candidate && reader.raws[reader.key(candidate)] || {};
+                    const attempts = dme.boost.map((c) => {
+                        const r = reader.raws[reader.key(c)] || {};
+                        return { candidate: DidReader.label(c), ok: !!r.ok, reason: r.why || '', raw: r.bytes || '' };
+                    });
+                    if (absoluteKpa === null) {
+                        updateMetric('boostDme', attempts, null, 'bar', 'DME/OBD boost candidates', 'unavailable');
+                        diagLog('dme_boost_unavailable', { ecu: dme.ecu, attempts });
+                    } else {
+                        const value = Calc.dmeBoostBar(absoluteKpa, state.baroKpa);
+                        if (finite(value)) {
+                            if (firstDmeBoost === null) firstDmeBoost = value;
+                            else if (Math.abs(value - firstDmeBoost) >= 0.03) dmeBoostTrusted = true;
+                        }
+                        const source = candidate ? 'DME ' + DidReader.label(candidate) : 'DME/OBD';
+                        updateMetric('boostDme', result.bytes || attempts, value, 'bar', source, value === null ? 'invalid' : 'live');
+                        diagLog('dme_boost_payload', {
+                            ecu: dme.ecu, candidate: candidate ? DidReader.label(candidate) : null,
+                            raw: result.bytes || '', absoluteKpa, baroKpa: state.baroKpa,
+                            baroMeasured: state.baroMeasured, boostBar: value, moving: dmeBoostTrusted,
+                        });
+                    }
                 }
-                const value = Calc.dmeBoostBar(absoluteKpa, state.baroKpa);
-                if (finite(value)) {
-                    if (firstDmeBoost === null) firstDmeBoost = value;
-                    else if (Math.abs(value - firstDmeBoost) >= 0.03) dmeBoostTrusted = true;
+                // CAR DATA tab: two round-robin engine-unit values per cycle while the tab is open.
+                if (wantExtras && !state.stopped) {
+                    for (let n = 0; n < 2; n++) {
+                        const item = dmeExtras[dmeExtraIndex % dmeExtras.length];
+                        dmeExtraIndex++;
+                        const value = await reader.value(item.name, item.cfg);
+                        updateMetric(item.name, value, value, item.unit, 'DME ' + item.name,
+                            value === null ? 'invalid' : 'live');
+                        if (state.stopped) return;
+                    }
+                    // ENGINE INFO also asks for the cylinder misfire counts — one MID a cycle.
+                    if (carDataView === 'engineInfo') await pollMisfire(now);
                 }
-                const source = candidate ? 'DME ' + DidReader.label(candidate) : 'DME/OBD';
-                updateMetric('boostDme', result.bytes || attempts, value, 'bar', source, value === null ? 'invalid' : 'live');
-                diagLog('dme_boost_payload', {
-                    ecu: dme.ecu, candidate: candidate ? DidReader.label(candidate) : null,
-                    raw: result.bytes || '', absoluteKpa, baroKpa: state.baroKpa,
-                    baroMeasured: state.baroMeasured, boostBar: value, moving: dmeBoostTrusted,
-                });
             } catch (e) {
                 diagLog('dme_poll_error', { error: shortError(e) });
                 log.warn('DME poll: ' + shortError(e));
@@ -1042,6 +1500,7 @@ mgu.run({
                     demo: true, rpm, torque, torqueSource: 'DEMO', power: powerFor(powerPct, torque, rpm), powerUnit,
                     powerPct, torquePct: Math.min(100, torque / 7),
                     boost,
+                    oil: 92 + 6 * Math.sin(sec * 0.11), gearbox: 84 + 5 * Math.sin(sec * 0.13 + 1.1),
                 };
                 result.peaks = peakValues('demo', result, now);
                 return result;
@@ -1058,9 +1517,240 @@ mgu.run({
                 gear: vehicleGearAt && now - vehicleGearAt <= FRESH_MS ? vehicleGear : null,
                 torquePct: fresh(state.torquePct, now) ? state.torquePct.value : null,
                 boost: boostValue(now),
+                oil: fresh(state.oilTemp, now) ? state.oilTemp.value : null,
+                gearbox: fresh(state.gearboxTemp, now) ? state.gearboxTemp.value : null,
             };
             result.peaks = peakValues('live', result, now);
             return result;
+        }
+
+        /* ---- CAR DATA tab: five headline values per section page ----
+           Numbers and texts only surface while their metric is fresh: engine-bus
+           values use FRESH_MS, slow cluster/TPMS values use CD_STALE. Anything
+           older or missing renders as an em dash rather than a made-up number. */
+        const CD_STALE = 120000;
+        function cdNum(name, maxAge) {
+            const m = state[name];
+            return m && m.status === 'live' && Date.now() - m.at <= (maxAge || CD_STALE) && finite(m.value) ? m.value : null;
+        }
+        function cdText(name, maxAge) {
+            const m = state[name];
+            return m && m.status === 'live' && Date.now() - m.at <= (maxAge || CD_STALE) && m.text ? m.text : null;
+        }
+        function cdFast(name) { return cdNum(name, FRESH_MS); }
+        const cdu = (v, digits, unit) => finite(v) ? formatNumber(v, digits) + ' ' + unit : null;
+        const cdt = (v) => v === null || v === undefined ? null : String(v);
+
+        /* ---- WARMUP page: ready-in estimates, status stamp, ribbon rows ---- */
+        function warmupEtaText(e) {
+            if (e.state === 'ready') return { v: 'READY', c: '#2fd27a' };
+            if (e.state === 'off') return { v: 'ENGINE OFF', c: '#8c94a0' };
+            if (e.state === 'stalled') return { v: 'NOT WARMING', c: '#ffb31a' };
+            if (e.state === 'warming') return { v: e.min > 60 ? '>60 min' : '~' + Math.max(1, Math.round(e.min)) + ' min' };
+            return { v: null };
+        }
+
+        function warmupView(demo, s) {
+            const now = Date.now();
+            const d = {
+                rpm: s.rpm, speed: s.speed,
+                oil: demo ? 82 + 10 * Math.sin(now / 50000) : cdNum('oilTemp'),
+                coolant: demo ? 86 + 6 * Math.sin(now / 50000 + 0.6) : cdNum('coolantTemp'),
+                gearbox: demo ? 74 + 6 * Math.sin(now / 50000 + 1.2) : cdNum('gearboxTemp'),
+            };
+            const warm = {
+                oil: settings.get('warmOil') || 90,
+                coolant: settings.get('warmCoolant') || 80,
+                gearbox: settings.get('warmGearbox') || 70,
+            };
+            const etas = {
+                oil: warmup.eta('oil', d.oil, warm.oil, d),
+                coolant: warmup.eta('coolant', d.coolant, warm.coolant, d),
+                gearbox: warmup.eta('gearbox', d.gearbox, warm.gearbox, d),
+            };
+            const cd = warmup.cooldown();
+            const cooling = settings.get('warmupCooldown') !== false && cd.needS > 0;
+            const gbCold = finite(d.gearbox) && d.gearbox < warm.gearbox;
+            const gbHot = finite(d.gearbox) && d.gearbox > 125;
+            const ready = finite(d.oil) && d.oil >= warm.oil && !gbCold;
+            const hot = finite(d.oil) && d.oil > 125;
+            let status;
+            if (!finite(d.oil)) status = { text: 'NO OIL TEMP', kind: 'dim' };
+            else if (hot) status = { text: 'OIL HOT — EASE OFF', kind: 'crit' };
+            else if (gbHot) status = { text: 'GEARBOX HOT — EASE OFF', kind: 'crit' };
+            else if (cooling) status = { text: cd.done ? 'READY — OK TO SWITCH OFF' : 'TURBO TIMER', kind: cd.done ? 'ready' : 'warn' };
+            else if (ready) status = { text: 'READY', kind: 'ready' };
+            else if (d.oil >= warm.oil && gbCold) status = { text: 'GEARBOX WARMING UP', kind: 'warn' };
+            else if (d.oil >= warm.oil - 20) status = { text: 'WARMING UP', kind: 'warn' };
+            else status = { text: 'COLD', kind: 'cold' };
+
+            const lim = warmup.limit(d.oil);
+            const eo = warmupEtaText(etas.oil), ec = warmupEtaText(etas.coolant), eg = warmupEtaText(etas.gearbox);
+            const rows = [
+                { label: 'OIL READY IN', value: eo.v, color: eo.c, lit: etas.oil.state === 'ready' },
+                { label: 'COOLANT READY IN', value: ec.v, color: ec.c, lit: etas.coolant.state === 'ready' },
+                { label: 'GEARBOX READY IN', value: eg.v, color: eg.c, lit: etas.gearbox.state === 'ready' },
+                { label: 'SAFE REV LIMIT', value: lim ? formatNumber(lim, 0) + ' rpm' : null,
+                    color: ready ? '#2fd27a' : undefined, lit: ready },
+                { label: 'TURBO TIMER', value: cooling ? (cd.done ? 'DONE' : Math.ceil(cd.left) + ' s') : 'OFF',
+                    color: cd.done ? '#2fd27a' : cooling ? '#ffb31a' : '#8c94a0', lit: cooling || cd.done },
+            ];
+            return {
+                temps: { oil: d.oil, coolant: d.coolant, gearbox: d.gearbox }, warm,
+                status, rows, trend: warmup.trend(), coldStarts: warmup.coldStarts(),
+                cooldown: { active: cooling, left: cd.left, done: cd.done, needS: cd.needS },
+            };
+        }
+
+        function carDataRows(view, demo, s) {
+            const now = Date.now();
+            if (demo) {
+                const sec = now / 1000;
+                const w = (a, b, f) => a + b * Math.sin(sec * f);
+                const demoRow = {
+                    engineInfo: [
+                        { label: 'MISFIRES', value: '0 · 0 · 0 · 0 · 0 · 0' },
+                        { label: 'COOLANT TEMP', value: '94 °C', detail: 'thermostat band' },
+                        { label: 'ENGINE OIL TEMP', value: cdu(s.oil, 0, '°C') },
+                        { label: 'OIL LEVEL', value: 'FULL' },
+                        { label: 'OIL PRESSURE', value: cdu(w(2.6, 1.1, 0.5), 1, 'bar') },
+                    ],
+                    powertrain: [
+                        { label: 'ENGINE POWER · DME', value: s.power ? cdu(s.power.value, 0, s.power.unit) : null, detail: 'engine unit · effective' },
+                        { label: 'AIR FLOW', value: cdu(200 + 420 * (0.5 + 0.5 * Math.sin(sec * 0.34)), 0, 'kg/h'), detail: 'mass through throttle' },
+                        { label: 'THROTTLE VALVE', value: cdu(32 + 30 * Math.max(0, Math.sin(sec * 0.34)), 0, '%'), detail: 'actual valve angle' },
+                        { label: 'CHARGE PRESSURE', value: cdu(1.05 + 1.35 * Math.max(0, Math.sin(sec * 0.34)), 2, 'bar'), detail: 'before throttle · absolute' },
+                        { label: 'THROTTLE PEDAL', value: cdu(30 + 25 * Math.max(0, Math.sin(sec * 0.34)), 0, '%'), detail: 'driver input' },
+                    ],
+                    boost: [
+                        { label: 'BOOST PRESSURE', value: s.boost ? cdu(s.boost.value, 2, 'bar') : null },
+                        { label: 'BOOST TARGET', value: cdu(0.4 + 0.9 * Math.max(0, Math.sin(sec * 0.34)), 2, 'bar') },
+                        { label: 'BOOST PEAK', value: '1.62 bar' },
+                        { label: 'INTAKE AIR TEMP', value: cdu(w(27, 4, 0.08), 0, '°C') },
+                        { label: 'ENGINE LOAD', value: cdu(45 + 30 * Math.max(0, Math.sin(sec * 0.34)), 0, '%') },
+                    ],
+                    fuel: [
+                        { label: 'FUEL IN TANK', value: '41.2 l' },
+                        { label: 'RANGE', value: '486 km' },
+                        { label: 'AVG CONSUMPTION', value: '9.8 l/100km' },
+                        { label: 'RAIL PRESSURE', value: cdu(w(121, 14, 0.4), 0, 'bar') },
+                        { label: 'LOW PRESSURE PUMP', value: cdu(w(5.1, 0.4, 0.5), 1, 'bar') },
+                    ],
+                    ignition: [
+                        { label: 'ENGINE STATE', value: 'RUNNING' },
+                        { label: 'IGNITION TIMING', value: cdu(w(12.5, 4, 0.6), 1, '°'), detail: 'BTDC · cyl 1' },
+                        { label: 'AUTO START-STOP', value: 'OFF' },
+                        { label: 'FUEL IN TANK', value: '41.2 l' },
+                        { label: 'RANGE', value: '486 km' },
+                    ],
+                    drivetrain: [
+                        { label: 'GEAR', value: s.gear || 'D3' },
+                        { label: 'GEARBOX OIL TEMP', value: cdu(s.gearbox, 0, '°C') },
+                        { label: 'XDRIVE REAR SPLIT', value: cdu(w(72, 12, 0.3), 0, '%'), detail: 'rear axle torque' },
+                        { label: 'TYRE PRESSURE', value: '2.4 · 2.4 · 2.5 · 2.5', detail: 'FL · FR · RL · RR · bar' },
+                        { label: 'TYRE TEMP', value: '24 · 24 · 26 · 26', detail: 'FL · FR · RL · RR · °C' },
+                    ],
+                    electrical: [
+                        { label: 'BATTERY VOLTAGE', value: cdu(w(14.1, 0.4, 0.2), 1, 'V') },
+                        { label: 'BATTERY CHARGE', value: '86 %' },
+                        { label: 'AUTO START-STOP', value: 'OFF' },
+                        { label: 'PARKING BRAKE', value: 'RELEASED' },
+                        { label: 'ODOMETER', value: '47,812 km' },
+                    ],
+                    tyres: [
+                        { label: 'FRONT LEFT', value: '2.42 bar (26 °C)' },
+                        { label: 'FRONT RIGHT', value: '2.41 bar (26 °C)' },
+                        { label: 'REAR LEFT', value: '2.55 bar (27 °C)' },
+                        { label: 'REAR RIGHT', value: '2.56 bar (28 °C)' },
+                        { label: 'TARGET PRESSURE', value: '2.4 · 2.4 · 2.6 · 2.6 bar' },
+                    ],
+                };
+                return demoRow[view] || [];
+            }
+            const gear = vehicleGearAt && now - vehicleGearAt <= FRESH_MS ? vehicleGear : null;
+            const boost = boostValue(now);
+            const baro = finite(state.baroKpa) ? state.baroKpa : 101.3;
+            const targetKpa = cdNum('boostTargetKpa');
+            const tyreQuad = (names, digits) => {
+                const parts = names.map((name) => cdNum(name));
+                return parts.every(finite) ? parts.map((v) => formatNumber(v, digits)).join(' · ') : null;
+            };
+            const tyreWheel = (pKey, tKey) => {
+                const p = cdNum(pKey), tt = cdNum(tKey);
+                if (!finite(p)) return null;
+                return finite(tt) ? formatNumber(p, 2) + ' bar (' + formatNumber(tt, 0) + ' °C)'
+                    : formatNumber(p, 2) + ' bar';
+            };
+            const tyreTarget = tyreQuad(['tyrePtFL', 'tyrePtFR', 'tyrePtRL', 'tyrePtRR'], 1);
+            const rows = {
+                engineInfo: [
+                    { label: 'MISFIRES', value: (() => {
+                        const m = state.misfire;
+                        if (!m || m.status !== 'live' || !Array.isArray(m.value) || now - m.at > CD_STALE) return null;
+                        return m.value.map((v) => (v === null || v === undefined ? '-' : String(v))).join(' · ');
+                    })() },
+                    { label: 'COOLANT TEMP', value: cdu(cdFast('coolantTemp'), 0, '°C') },
+                    { label: 'ENGINE OIL TEMP', value: cdu(cdFast('oilTemp'), 0, '°C') },
+                    { label: 'OIL LEVEL', value: cdt(cdText('oilLevel')) },
+                    { label: 'OIL PRESSURE', value: (() => {
+                        const op = cdNum('oilPress');
+                        return finite(op) ? cdu(op / 1000, 1, 'bar') : null;
+                    })() },
+                ],
+                powertrain: [
+                    { label: 'ENGINE POWER · DME', value: (() => {
+                        const kw = cdNum('dmePower');
+                        return finite(kw) ? cdu(Calc.powerValue(kw, settings.get('powerUnit') || 'hp'), 0, Calc.powerUnit(settings.get('powerUnit') || 'hp')) : null;
+                    })(), detail: 'engine unit · effective' },
+                    { label: 'AIR FLOW', value: cdu(cdNum('airFlow'), 0, 'kg/h'), detail: 'mass through throttle' },
+                    { label: 'THROTTLE VALVE', value: cdu(cdNum('throttleValve'), 0, '%'), detail: 'actual valve angle' },
+                    { label: 'CHARGE PRESSURE', value: cdu(cdNum('chargePress') / 1000, 2, 'bar'), detail: 'before throttle · absolute' },
+                    { label: 'THROTTLE PEDAL', value: cdu(cdFast('pedalPct'), 0, '%'), detail: 'driver input' },
+                ],
+                boost: [
+                    { label: 'BOOST PRESSURE', value: boost ? (boost.approximate ? '~' : '') + cdu(boost.value, 2, 'bar') : null, detail: boost ? boost.source : '' },
+                    { label: 'BOOST TARGET', value: finite(targetKpa) ? (state.baroMeasured ? '' : '~') + cdu((targetKpa - baro) / 100, 2, 'bar') : null },
+                    { label: 'BOOST PEAK', value: finite(cdNum('boostPeak')) ? '~' + cdu(cdNum('boostPeak'), 2, 'bar') : null, detail: 'since ignition on · Sport Display scale' },
+                    { label: 'INTAKE AIR TEMP', value: cdu(cdNum('iatTemp'), 0, '°C') },
+                    { label: 'ENGINE LOAD', value: cdu(cdNum('engineLoad'), 0, '%') },
+                ],
+                fuel: [
+                    { label: 'FUEL IN TANK', value: cdu(cdNum('tankLitres'), 1, 'l') },
+                    { label: 'RANGE', value: cdu(cdNum('rangeKm'), 0, 'km') },
+                    { label: 'AVG CONSUMPTION', value: cdt(cdText('avgCons')) },
+                    { label: 'RAIL PRESSURE', value: cdu(cdNum('fuelHp'), 0, 'bar') },
+                    { label: 'LOW PRESSURE PUMP', value: cdu(cdNum('fuelLp'), 1, 'bar') },
+                ],
+                ignition: [
+                    { label: 'ENGINE STATE', value: cdt(cdText('engineState')) },
+                    { label: 'IGNITION TIMING', value: cdu(cdNum('ignTiming'), 1, '°'), detail: 'BTDC · cyl 1' },
+                    { label: 'AUTO START-STOP', value: cdt(cdText('msaState')) },
+                    { label: 'FUEL IN TANK', value: cdu(cdNum('tankLitres'), 1, 'l') },
+                    { label: 'RANGE', value: cdu(cdNum('rangeKm'), 0, 'km') },
+                ],
+                drivetrain: [
+                    { label: 'GEAR', value: cdt(gear) },
+                    { label: 'GEARBOX OIL TEMP', value: cdu(cdFast('gearboxTemp'), 0, '°C') },
+                    { label: 'XDRIVE REAR SPLIT', value: cdu(cdFast('splitRear'), 0, '%'), detail: 'rear axle torque' },
+                    { label: 'TYRE PRESSURE', value: tyreQuad(['tyrePFL', 'tyrePFR', 'tyrePRL', 'tyrePRR'], 2), detail: 'FL · FR · RL · RR · bar' },
+                    { label: 'TYRE TEMP', value: tyreQuad(['tyreTFL', 'tyreTFR', 'tyreTRL', 'tyreTRR'], 0), detail: 'FL · FR · RL · RR · °C' },
+                ],
+                electrical: [
+                    { label: 'BATTERY VOLTAGE', value: cdu(cdNum('battVolt'), 1, 'V') },
+                    { label: 'BATTERY CHARGE', value: cdu(cdNum('battCharge'), 0, '%') },
+                    { label: 'AUTO START-STOP', value: cdt(cdText('msaState')) },
+                    { label: 'PARKING BRAKE', value: cdt(cdText('handBrake')) },
+                    { label: 'ODOMETER', value: cdu(cdNum('odoKm'), 0, 'km') },
+                ],
+                tyres: [
+                    { label: 'FRONT LEFT', value: tyreWheel('tyrePFL', 'tyreTFL') },
+                    { label: 'FRONT RIGHT', value: tyreWheel('tyrePFR', 'tyreTFR') },
+                    { label: 'REAR LEFT', value: tyreWheel('tyrePRL', 'tyreTRL') },
+                    { label: 'REAR RIGHT', value: tyreWheel('tyrePRR', 'tyreTRR') },
+                    { label: 'TARGET PRESSURE', value: tyreTarget ? tyreTarget + ' bar' : null },
+                ],
+            };
+            return rows[view] || [];
         }
 
         function peakValues(group, values, now) {
@@ -1081,7 +1771,7 @@ mgu.run({
             };
         }
 
-        function drawDynoCurve(cv, t, run, x, y, w, h, comfortMode) {
+        function drawDynoCurve(cv, t, run, x, y, w, h, modeColor) {
             if (!run || !Array.isArray(run.curve) || run.curve.length < 2) return;
             const r0 = run.curve[0].rpm, r1 = run.curve[run.curve.length - 1].rpm;
             const pMax = Math.max(1, ...run.curve.map((point) => point.powerW));
@@ -1093,20 +1783,21 @@ mgu.run({
                 torqueLine.push([px, y + h - point.torqueNm / tMax * h]);
             });
             cv.fillRect(x, y + h, w, 1, G.withAlpha(t.tick, 0.45));
-            cv.polyline(powerLine, 3, comfortMode ? '#55a9ff' : t.accent);
-            cv.polyline(torqueLine, 2, comfortMode ? '#8bc6ff' : t.accent2);
+            cv.polyline(powerLine, 3, modeColor || t.accent);
+            cv.polyline(torqueLine, 2, modeColor ? G.mix(modeColor, '#ffffff', 0.3) : t.accent2);
             const peakX = x + (run.peakPrpm - r0) / Math.max(1, r1 - r0) * w;
-            cv.circle(peakX, y + h - run.peakP / pMax * h, 4, comfortMode ? '#55a9ff' : t.accent);
+            cv.circle(peakX, y + h - run.peakP / pMax * h, 4, modeColor || t.accent);
         }
 
-        function drawDynoPanel(cv, t, s, comfortMode) {
+        function drawDynoPanel(cv, t, s, modeColor) {
             const x = 1110, y = G.TOP, w = 466;
-            const readingColor = comfortMode ? '#55a9ff' : '#f32635';
+            const readingColor = modeColor || '#f32635';
             G.panel(cv, t, x, y, w, 160, 'DYNO RUN');
             const run = s.demo || dynoDisplayCleared ? null : dynoRuns[0];
             const runDate = run && finite(run.at) ? new Date(run.at) : null;
             const dateText = runDate && finite(runDate.getTime())
                 ? String(runDate.getDate()).padStart(2, '0') + '.' + String(runDate.getMonth() + 1).padStart(2, '0') + '.' + runDate.getFullYear()
+                    + ' ' + String(runDate.getHours()).padStart(2, '0') + ':' + String(runDate.getMinutes()).padStart(2, '0')
                 : '--';
             if (run) {
                 const titleWidth = cv.textWidth('DYNO RUN', 26, { font: 'bold' });
@@ -1123,7 +1814,8 @@ mgu.run({
                 const zeroWidth = cv.textWidth('0', 36, { font: 'num' });
                 cv.text(Calc.powerUnit(s.powerUnit), x + 27 + zeroWidth, y + 121, 18, t.dim);
                 cv.text('0', split + 20, y + 121, 36, readingColor, { font: 'num' });
-                cv.text('Nm', split + 23 + zeroWidth, y + 121, 18, t.dim);
+                const torqueZeroWidth = cv.textWidth('0', 36, { font: 'num' });
+                cv.text('Nm', split + 23 + torqueZeroWidth, y + 121, 18, t.dim);
                 return;
             }
 
@@ -1143,78 +1835,113 @@ mgu.run({
             cv.text('Nm', split + 23 + torqueWidth, y + 116, 18, t.dim);
             cv.text('@ ' + formatNumber(run.peakPrpm, 0) + ' rpm', x + 24, y + 136, 13, t.dim);
             cv.text('@ ' + formatNumber(run.peakTrpm, 0) + ' rpm', split + 20, y + 136, 13, t.dim);
-            drawDynoCurve(cv, t, run, x + 24, y + 143, w - 48, 11, comfortMode);
+            drawDynoCurve(cv, t, run, x + 24, y + 143, w - 48, 11, modeColor);
+        }
+
+        function drawOilTemps(cv, t, s, modeColor, gaugeColor, y) {
+            const w = 216, gap = 34;
+            const reading = modeColor || '#f32635';
+            const one = (bx, label, value) => {
+                const valid = finite(value);
+                cv.text(label, bx, y + 20, 16, t.dim, { font: 'bold', spacing: 1.5, literal: true });
+                const text = valid ? formatNumber(value, 0) : '--';
+                const uw = cv.textWidth(' °C', 19);
+                cv.text(text, bx + w - uw, y + 22, 32, valid ? reading : t.dim, { align: 'right', font: 'num' });
+                cv.text(' °C', bx + w, y + 22, 19, t.dim, { align: 'right' });
+                G.bar(cv, t, bx, y + 34, w, 32, {
+                    head: false, value, min: 0, max: 150,
+                    color: modeColor ? gaugeColor : undefined, hang: modeColor ? gaugeColor : undefined,
+                    ramp: modeColor ? undefined : 'hot',
+                });
+            };
+            one(1110, 'ENGINE OIL', s.oil);
+            one(1110 + w + gap, 'GEARBOX OIL', s.gearbox);
         }
 
         function drawMSoundButton(cv, t, enabled, active, run) {
-            const x = 1110, y = G.TOP + 392, w = 466, h = 70;
+            const x = 1110, w = 466, h = 50;
+            // Anchor the bottom to the stretched page bottom so it stays level with
+            // the TORQUE panel, without growing thick itself.
+            const y = G.pageBottom(cv) - h, cy = y + h / 2;
             const red = '#f32635';
             const edge = active ? red : G.withAlpha('#c7cbd1', enabled ? 0.42 : 0.2);
             cv.roundRect(x, y, w, h, 8, active ? G.withAlpha(red, 0.88) : G.withAlpha('#c7cbd1', 0.07));
             cv.strokeRoundRect(x, y, w, h, 8, 2, edge);
-            cv.fillRect(x + 1, y + 12, 4, h - 24, active ? red : G.withAlpha('#c7cbd1', enabled ? 0.48 : 0.24));
-            cv.text('M SOUND MODE', x + 24, y + 44, 23, active ? '#ffffff' : (enabled ? t.text : t.dim),
+            cv.fillRect(x + 1, cy - 17, 4, 34, active ? red : G.withAlpha('#c7cbd1', enabled ? 0.48 : 0.24));
+            cv.text('M SOUND MODE', x + 24, cy + 7, 20, active ? '#ffffff' : (enabled ? t.text : t.dim),
                 { font: 'bold', spacing: 1.2, literal: true });
-            cv.circle(x + w - 28, y + h / 2, 7, active ? '#ffffff' : G.withAlpha('#c7cbd1', 0.34));
+            cv.circle(x + w - 28, cy, 7, active ? '#ffffff' : G.withAlpha('#c7cbd1', 0.34));
             if (cv.own && run) cv.target(x, y, w, h, run, 'performance_m_sound_mode');
         }
 
-        function drawEngine(cv, t, s, comfortMode) {
+        function drawEngine(cv, t, s, modeColor) {
             const room = G.pageBottom(cv) - G.BOTTOM;
             const half = Math.round(room / 2);
-            const gaugeColor = comfortMode ? '#55a9ff' : '#f32635';
+            const gaugeColor = modeColor || '#f32635';
             const powerGaugeKw = settings.get('powerGaugeMax');
             const powerMax = Calc.powerValue(finite(powerGaugeKw) && powerGaugeKw > 0 ? powerGaugeKw : 223.7, s.powerUnit);
             const torqueGaugeMax = settings.get('torqueGaugeMax');
             const torqueMax = finite(torqueGaugeMax) && torqueGaugeMax > 0 ? torqueGaugeMax : 800;
-            const powerText = !s.power ? '0' : (s.power.approximate ? '~' : '') + formatNumber(s.power.value, 0);
-            const torqueText = s.torque === null ? '0' : formatNumber(s.torque, 0);
+            const powerText = !s.power ? '--' : formatNumber(s.power.value, 0);
+            const torqueText = s.torque === null ? '--' : formatNumber(s.torque, 0);
 
             G.segBar(cv, t, 24, G.TOP, 1062, 226 + half, {
-                label: 'HORSE POWER', value: s.power ? s.power.value : 0, valueText: powerText, valueColor: gaugeColor,
+                label: 'HORSE POWER', value: s.power ? s.power.value : 0, valueText: powerText, valueColor: s.power ? gaugeColor : t.dim,
                 unit: Calc.powerUnit(s.powerUnit), decimals: 0,
                 min: 0, max: powerMax, step: powerMax / 20,
-                scale: { every: powerMax / 4, div: 1, labelColor: comfortMode ? gaugeColor : null, tickColor: comfortMode ? gaugeColor : null },
-                color: comfortMode ? gaugeColor : undefined, hang: comfortMode ? gaugeColor : undefined,
-                ramp: comfortMode ? undefined : 'hot', peak: s.peaks.power,
+                scale: { every: powerMax / 4, div: 1, labelColor: modeColor ? gaugeColor : null, tickColor: modeColor ? gaugeColor : null },
+                color: modeColor ? gaugeColor : undefined, hang: modeColor ? gaugeColor : undefined,
+                ramp: modeColor ? undefined : 'hot', peak: s.peaks.power,
             });
             G.segBar(cv, t, 24, G.TOP + 242 + half, 1062, 226 - half, {
-                label: 'TORQUE', value: s.torque === null ? 0 : s.torque, valueText: torqueText, valueColor: gaugeColor, unit: 'Nm', decimals: 0,
+                label: 'TORQUE', value: s.torque === null ? 0 : s.torque, valueText: torqueText, valueColor: s.torque === null ? t.dim : gaugeColor, unit: 'Nm', decimals: 0,
                 min: 0, max: torqueMax, step: torqueMax / 20,
-                scale: { every: torqueMax / 4, div: 1, labelColor: comfortMode ? gaugeColor : null, tickColor: comfortMode ? gaugeColor : null },
-                color: comfortMode ? gaugeColor : undefined, hang: comfortMode ? gaugeColor : undefined,
-                ramp: comfortMode ? undefined : 'hot', peak: s.peaks.torque,
+                scale: { every: torqueMax / 4, div: 1, labelColor: modeColor ? gaugeColor : null, tickColor: modeColor ? gaugeColor : null },
+                color: modeColor ? gaugeColor : undefined, hang: modeColor ? gaugeColor : undefined,
+                ramp: modeColor ? undefined : 'hot', peak: s.peaks.torque,
             });
 
-            drawDynoPanel(cv, t, s, comfortMode);
+            drawDynoPanel(cv, t, s, modeColor);
 
-            const speedX = 1110, speedY = G.TOP + 172, speedW = 466;
-            const speedTicks = [0, 60, 120, 210, 270, 330];
-            G.bar(cv, t, speedX, speedY, speedW, 96, {
-                label: 'VEHICLE SPEED', value: s.speed, text: s.speed === null ? '--' : formatNumber(s.speed, 0), unit: 'km/h',
-                min: 0, max: 330, step: 30, ticks: speedTicks,
-                labels: [0, 120, 210, 330].map((value) => ({ value, text: String(value), align: value === 0 ? 'left' : value === 330 ? 'right' : 'center', color: comfortMode ? gaugeColor : undefined })),
-                decimals: 0, valueColor: comfortMode ? gaugeColor : undefined,
-                color: comfortMode ? gaugeColor : undefined, hang: comfortMode ? gaugeColor : undefined, ramp: comfortMode ? undefined : 'hot',
+            // G.bar only draws its built-in scale labels for h >= 80; in this compact
+            // layout the bars get h = 76 and the scale text is drawn manually below.
+            const barLabels = (x, y, w, min, max, ticks, fmt) => {
+                const bw = w - 18;
+                ticks.forEach((v) => {
+                    const align = v <= min ? 'left' : v >= max ? 'right' : 'center';
+                    cv.text(fmt(v), x + (v - min) / (max - min) * bw, y + 81, 14,
+                        modeColor ? gaugeColor : G.withAlpha(t.text, 0.85), { align, font: 'bold' });
+                });
+            };
+            // Distribute the screen's spare vertical height (cv.extra) evenly across
+            // the three bar rows so they breathe instead of crowding each other.
+            const extra = Math.max(0, G.pageBottom(cv) - G.BOTTOM);
+            const speedX = 1110, speedY = G.TOP + 168 + Math.round(extra * 0.14), speedW = 466;
+            const speedTicks = [0, 50, 100, 150, 200, 250, 300];
+            G.bar(cv, t, speedX, speedY, speedW, 76, {
+                label: 'VEHICLE SPEED', value: s.speed, text: formatNumber(finite(s.speed) ? s.speed : 0, 0), unit: 'km/h',
+                min: 0, max: 300, step: 30, ticks: speedTicks,
+                decimals: 0, valueColor: gaugeColor,
+                color: modeColor ? gaugeColor : undefined, hang: modeColor ? gaugeColor : undefined, ramp: modeColor ? undefined : 'hot',
             });
-            const speedScaleX = speedX + 18;
-            [60, 270].forEach((value) => cv.text(String(value), speedScaleX + value / 330 * (speedW - 18),
-                speedY + 92, 14, t.dim, { align: 'center', font: 'bold' }));
+            barLabels(speedX, speedY, speedW, 0, 300, speedTicks, (v) => String(v));
             const gear = s.gear || '--';
             const gearX = speedX + cv.textWidth('VEHICLE SPEED', 22, { font: 'bold', spacing: 2 }) + 18;
-            cv.text('GEAR ' + gear, gearX, speedY + 26, 16, comfortMode ? gaugeColor : t.accent, { font: 'bold', spacing: 1, literal: true });
+            cv.text('GEAR ' + gear, gearX, speedY + 26, 16, modeColor ? gaugeColor : t.accent, { font: 'bold', spacing: 1, literal: true });
             const boostLabel = 'Turbo Boost';
+            const boostY = G.TOP + 258 + Math.round(extra * 0.48);
             const boostTicks = Calc.scaleTicks(BOOST_MAX_BAR, 5);
-            G.bar(cv, t, 1110, G.TOP + 280, 466, 96, {
+            G.bar(cv, t, 1110, boostY, 466, 76, {
                 label: boostLabel, value: s.boost ? s.boost.value : null,
                 text: s.boost ? formatNumber(s.boost.value, 2) : '--', unit: 'bar',
                 min: 0, max: BOOST_MAX_BAR, step: Calc.scaleStep(BOOST_MAX_BAR, 5), ticks: boostTicks,
                 decimals: 2, scaleDecimals: 1, peak: s.peaks.boost, peakText: true,
-                valueColor: comfortMode ? gaugeColor : undefined, color: comfortMode ? gaugeColor : undefined,
-                hang: comfortMode ? gaugeColor : undefined,
-                labels: boostTicks.map((value) => ({ value, text: formatNumber(value, 1), color: comfortMode ? gaugeColor : undefined })),
-                ramp: comfortMode ? undefined : 'hot',
+                valueColor: gaugeColor, color: modeColor ? gaugeColor : undefined,
+                hang: modeColor ? gaugeColor : undefined,
+                ramp: modeColor ? undefined : 'hot',
             });
+            barLabels(1110, boostY, 466, 0, BOOST_MAX_BAR, boostTicks, (v) => formatNumber(v, 1));
+            drawOilTemps(cv, t, s, modeColor, gaugeColor, G.TOP + 346 + Math.round(extra * 0.80));
             if (mSoundEnabled && !valveCanActuate()) resetMSound();
             const mSoundReady = valveCanActuate() && !valveController.state.busy && !mSoundBusy;
             drawMSoundButton(cv, t, mSoundReady, mSoundActive(), toggleMSoundMode);
@@ -1232,18 +1959,23 @@ mgu.run({
             G.pageBottom(cv);
             if (page === 0) {
                 const activeMode = modeName(drivingMode) || '';
-                const comfortMode = /COMFORT/i.test(activeMode);
+                const modeColor = /COMFORT/i.test(activeMode) ? '#55a9ff'
+                    : /ECO/i.test(activeMode) ? '#3ddb7f'
+                    : /ADAPTIVE/i.test(activeMode) ? '#b07cff' : null;
                 const modeBadge = activeMode.toUpperCase().replace(/\+/g, ' PLUS');
-                drawEngine(cv, t, s, comfortMode);
-                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES'], 0, demo
+                const vehicleDataReady = s.rpm !== null && s.speed !== null;
+                drawEngine(cv, t, s, modeColor);
+                const notice = valveActionNotice && Date.now() < valveActionNoticeUntil ? valveActionNotice : '';
+                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 0, (demo
                     ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
-                    : comfortMode ? [{ text: modeBadge, color: '#55a9ff' }]
+                    : modeColor ? [{ text: modeBadge, color: modeColor }]
                     : /^SPORT(?:\b| PLUS| INDIVIDUAL)/i.test(modeBadge)
                         ? [{ text: modeBadge, color: '#f32635' }]
-                        : [{ text: 'LIVE DATA', color: 'dim' }]);
+                        : [{ text: vehicleDataReady ? 'LIVE DATA' : 'WAITING FOR SIGNALS', color: vehicleDataReady ? 'dim' : 'crit' }])
+                    .concat(notice ? [{ text: notice, color: 'crit' }] : []));
             } else if (page === 1) {
                 FlapUi.draw(cv, G, t, currentValveView(), Object.assign({}, valveActions, burbleActions),
-                    selectedCarVisual(t), Date.now(), engineConfigView, sectionActions);
+                    selectedCarVisual({ bg: FlapUi.CAR_TILE_BG || t.bg }), Date.now(), engineConfigView, sectionActions);
             } else if (page === 2) {
                 RaceModesUi.draw(cv, G, t, {
                     dyno() { dynoView = 'sheet'; dynoDisplayCleared = false; return setPage(3); },
@@ -1265,12 +1997,16 @@ mgu.run({
                     loss: dynoSetup().loss,
                     ecuTorque: settings.get('dynoEcuTorque') !== false,
                     graphMaxRpm: settings.get('dynoGraphMaxRpm') || 0,
-                }, selectedCarSideVisual(t), {
+                    flashAt: dynoFlashAt, flashKey: dynoFlashKey,
+                }, selectedCarSideVisual({ bg: '#000000' }), {
                     toggleView: toggleDynoView, toggleBaseline: toggleDynoBaseline,
                     clear: clearDynoRuns, nextRun: nextDynoRun, select: selectDynoRun,
+                    flash: dynoFlash,
+                    back: () => setPage(2),
                 });
-            } else {
+            } else if (page === 4) {
                 const now = Date.now(), demoMode = settings.get('demo') === 'on';
+                seedDemoDragRuns();
                 const selected = dragSelectedRun();
                 const isRunning = !!(dragTimer && dragTimer.state === 'run' && !demoMode);
                 const run = isRunning ? {
@@ -1281,24 +2017,70 @@ mgu.run({
                 const unit = dragUnit(), distance = dragDistance();
                 DragRunUi.draw(cv, G, t, {
                     view: dragView, runs: dragRuns, selectedAt: dragSelectedAt, selectedRun: selected,
+                    section: dragSection, runsPage: dragRunsPage,
                     currentRun: run, listOffset: dragListOffset, best: dragBest,
                     splits: DragRun.splits(unit, distance.key), speedUnit: unit, distanceLabel: distance.label,
-                    rollout: settings.get('dragRollout') === true, timerState: demoMode ? 'wait' : dragTimer.state,
+                    rolling: demoMode ? (demoRollingCleared ? {}
+                        : { '100-200': 6.42, '200-300': 7.18 }) : rollingResult,
+                    rollout: settings.get('dragRollout') === true, timerState: demoMode ? 'ready' : dragTimer.state,
                     elapsed: isRunning ? dragTimer.elapsed(now) : null,
                     speed: !demoMode && fresh(state.speed, now) ? state.speed.value : null,
                     vmax: dragTimer && dragTimer.vmax, trace: dragTimer && dragTimer.trace,
                     peakG: dragPeakG, demo: demoMode, clearArmed: now <= dragClearUntil,
-                }, selectedCarSideVisual(t), {
+                    slope: demoMode ? -0.52 + 0.06 * Math.sin(now / 3000)
+                        : (slopeAt && now - slopeAt <= 2000 ? slopePct : null),
+                    flashAt: dynoFlashAt, flashKey: dynoFlashKey,
+                }, selectedCarSideVisual({ bg: '#000000' }), {
                     toggleView: toggleDragView, reset: resetDragTimer, clear: clearDragHistory,
-                    select: selectDragRun, prevList: () => shiftDragRunList(-1), nextList: () => shiftDragRunList(1),
+                    select: selectDragRun, nextRun: nextDragRun, flash: dynoFlash,
+                    openSection: openDragSection, openReport: openDragReport, up: dragBack,
+                    clearSection: () => clearDragSection(dragSection),
+                    runsPage: (d) => {
+                        const max = Math.max(0, Math.ceil(dragSectionRuns().length / DragRunUi.RUNS_PER_PAGE) - 1);
+                        dragRunsPage = Math.max(0, Math.min(max, dragRunsPage + (d || 0)));
+                        queueRender(); return render();
+                    },
+                    prevList: () => shiftDragRunList(-1), nextList: () => shiftDragRunList(1),
+                    back: () => setPage(2),
                     live: () => { dragView = 'live'; dragClearUntil = 0; queueRender(); return render(); },
                 });
+            } else if (page === 5) {
+                const sectionActions = {};
+                CarDataUi.SECTIONS.forEach((sec) => {
+                    sectionActions[sec.key] = () => { carDataView = sec.key; queueRender(); return render(); };
+                });
+                CarDataUi.draw(cv, G, t, {
+                    view: carDataView, demo, rows: carDataRows(carDataView, demo, s),
+                    // Composite onto the slab's pure black, not theme.bg, so no grey frame shows.
+                    side: selectedCarSideVisual({ bg: '#000000' }),
+                }, Object.assign({
+                    back: () => { carDataView = 'menu'; queueRender(); return render(); },
+                }, sectionActions));
+            } else if (page === 6) {
+                if (demo) {
+                    // Demo feed: plausible temperatures climbing so the page animates.
+                    warmup.seedDemo();
+                    const sec = Date.now() / 1000;
+                    warmup.sample({
+                        rpm: 900 + 400 * Math.max(0, Math.sin(sec * 0.3)),
+                        speed: 0,
+                        oil: 82 + 10 * Math.sin(sec * 0.05),
+                        coolant: 86 + 6 * Math.sin(sec * 0.05 + 0.6),
+                        gearbox: 74 + 6 * Math.sin(sec * 0.05 + 1.2),
+                        kw: 0,
+                    }, false);
+                }
+                const wv = warmupView(demo, s);
+                wv.demo = demo;
+                WarmupUi.draw(cv, G, t, wv);
             }
             return ui.image('MAIN_GFX', cv);
         }
 
         function queueRender() {
-            if (state.stopped || renderQueued) return;
+            if (state.stopped) return;
+            if (mainLoop) { mainLoop.kick(); return; }
+            if (renderQueued) return;
             renderQueued = true;
             renderTimer = setTimeout(() => {
                 renderQueued = false;
@@ -1310,13 +2092,13 @@ mgu.run({
         function cleanup() {
             if (state.stopped) return;
             state.stopped = true;
+            if (mainLoop) { mainLoop.stop(); mainLoop = null; }
             if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
             if (freshnessTimer) { clearInterval(freshnessTimer); freshnessTimer = null; }
             if (dragPulse) { clearInterval(dragPulse); dragPulse = null; }
             if (dmeTimer) { clearInterval(dmeTimer); dmeTimer = null; }
             if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
             if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
-            if (valveTick) { clearInterval(valveTick); valveTick = null; }
             if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
             if (valveNoticeTimer) { clearTimeout(valveNoticeTimer); valveNoticeTimer = null; }
             stopDriveModePoll();
@@ -1345,9 +2127,7 @@ mgu.run({
             if (key === 'dynoWeight' || key === 'dynoBody' || key === 'dynoLoss' || (key === 'demo' && settings.get('demo') === 'on')) {
                 dynoRecorder.reset();
             }
-            if (key === 'demo' && settings.get('demo') === 'on' && !demoTimer) demoTimer = setInterval(queueRender, 250);
-            if (key === 'demo' && settings.get('demo') !== 'on' && demoTimer) { clearInterval(demoTimer); demoTimer = null; }
-            const valveSetting = { valveControl: 'arm', valveHold: 'hold', valveCloseLimit: 'closeLimit' }[key];
+            const valveSetting = { valveControl: 'arm', valveHold: 'hold' }[key];
             if (valveSetting === 'arm') {
                 valveReady = false;
                 valveScanBusy = true;
@@ -1370,7 +2150,6 @@ mgu.run({
             }
             queueRender();
         });
-        if (settings.get('demo') === 'on') demoTimer = setInterval(queueRender, 250);
         dragPulse = setInterval(() => {
             if (settings.get('demo') === 'on' || !dragTimer) return;
             const previous = dragTimer.state;
@@ -1394,17 +2173,19 @@ mgu.run({
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, DME_POLL_MS);
 
         function setPage(next) {
-            page = Math.max(0, Math.min(4, Math.trunc(next)));
-            if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
+            page = Math.max(0, Math.min(6, Math.trunc(next)));
             if (page === 1) {
                 engineConfigView = 'sections';
+            }
+            if (page === 5) {
+                carDataView = 'menu';
             }
             updateDynoActionLabel();
             queueRender();
             return render();
         }
         function topPageStep(direction) {
-            const pages = [0, 1, 2];
+            const pages = [0, 1, 2, 5, 6];
             let index = pages.indexOf(page);
             if (index < 0) index = 2;
             return setPage(pages[(index + direction + pages.length) % pages.length]);
@@ -1431,7 +2212,7 @@ mgu.run({
         });
         ui.onClick('BTN_DRAG_ACTION', () => {
             if (page !== 4) return setPage(4);
-            return dragView === 'history' ? clearDragHistory() : resetDragTimer();
+            return dragView === 'live' ? resetDragTimer() : clearDragHistory();
         });
         ui.onClick('BTN_DRAG_VIEW', () => {
             if (page !== 4) { dragView = 'history'; return setPage(4); }
@@ -1442,6 +2223,8 @@ mgu.run({
         updateDynoActionLabel();
         if (ctx.onTab) ctx.onTab((index) => {
             if (index >= 0 && index <= 2) return setPage(index);
+            if (index === 3) return setPage(5);
+            if (index === 4) return setPage(6);
             return null;
         });
 
@@ -1463,10 +2246,6 @@ mgu.run({
                     valveAuto.linkUp().then(queueRender).catch((e) => log.warn('exhaust drive mode: ' + shortError(e)));
                 } else valveAuto.drive = drivingMode;
             }
-            valveTick = setInterval(() => {
-                if (!valveCanActuate() || valveScanBusy || valveController.tune.busy || burbleCommandActive) return;
-                valveAuto.tick().catch((e) => log.warn('exhaust rpm guard: ' + shortError(e)));
-            }, 250);
             // Like Engine Config, retry read-only DME detection while the engine is
             // running. The retry never sends a valve command.
             valveRescanTimer = setInterval(() => {
@@ -1516,6 +2295,8 @@ mgu.run({
         diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', engineMonitorReadOnly: true,
             exhaustControlDisarmed: !valveController.armedSetting,
             rawDiagnostics: diagnostics(), dmeCandidates: settings.get('readDmeCandidates') === true });
+        // Every screen refresh (60 fps) with the GPU renderer; 10 fps in software (PNG frames)
+        if (ctx.loop) mainLoop = ctx.loop('MAIN', 10, render);
         render().catch((e) => log.warn('first render: ' + shortError(e)));
     },
 });

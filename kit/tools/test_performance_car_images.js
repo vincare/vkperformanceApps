@@ -23,9 +23,9 @@ const hashes = {
 const setting = app.settings.find((entry) => entry.key === 'carModel');
 assert(setting && setting.label === 'Car Model' && setting.type === 'choice', 'Car Model is a choice setting');
 assert.strictEqual(setting.default, 'M340i_Blue', 'default is the original M340i Blue PNG');
-assert.deepStrictEqual(setting.options.map((entry) => entry[0]), Cars.MODELS.map((entry) => entry.key), 'six model choices');
+assert.deepStrictEqual(setting.options.map((entry) => entry[0]), Cars.MODELS.map((entry) => entry.key), 'all model choices match the loader');
 assert.strictEqual(Cars.model(undefined).key, 'M340i_Blue', 'missing choice falls back to M340i Blue');
-assert.strictEqual(Cars.MODELS.length, 6, 'six supported source images');
+assert.strictEqual(Cars.MODELS.length, 12, 'twelve supported model and paint choices');
 
 // Exercise the exact MGU Settings class used in the car: changing Car Model
 // writes settings.json, and a new Settings instance reads that selection back.
@@ -41,6 +41,15 @@ try {
     firstRun.set('carModel', 'M440i_Red');
     const afterRestart = new exported.Settings(app.settings);
     assert.strictEqual(afterRestart.get('carModel'), 'M440i_Red', 'selected model persists after app restart');
+    const settingsFile = path.join(dataDir, 'settings.json');
+    const legacySettings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+    legacySettings.valveControl = 'on';
+    legacySettings._reset_valveControl = 1;
+    fs.writeFileSync(settingsFile, JSON.stringify(legacySettings));
+    const safetyReset = new exported.Settings(app.settings);
+    assert.strictEqual(safetyReset.get('valveControl'), 'off', 'upgrade resets a previously armed exhaust control to Off');
+    safetyReset.set('valveControl', 'on');
+    assert.strictEqual(new exported.Settings(app.settings).get('valveControl'), 'on', 'user can explicitly arm and keep the exhaust control');
 } finally {
     try { fs.unlinkSync(path.join(dataDir, 'settings.json')); } catch (e) {}
     try { fs.rmdirSync(dataDir); } catch (e) {}
@@ -49,19 +58,31 @@ try {
 const sourceDir = path.join(__dirname, '..', '..', 'apps', 'performance', 'assets', 'car-models');
 const outputHashes = [];
 for (const model of Cars.MODELS) {
-    const source = fs.readFileSync(path.join(sourceDir, model.file));
-    assert.strictEqual(crypto.createHash('sha256').update(source).digest('hex'), hashes[model.key], model.file + ' remains byte-for-byte original');
+    const source = model.file.indexOf('CARS/') === 0
+        ? Cars.readDesignAsset(model.file) : fs.readFileSync(path.join(sourceDir, model.file));
+    assert.strictEqual(source.toString('hex', 0, 8), '89504e470d0a1a0a', model.key + ' rear artwork is a valid PNG');
+    if (hashes[model.key]) {
+        assert.strictEqual(crypto.createHash('sha256').update(source).digest('hex'), hashes[model.key], model.file + ' remains byte-for-byte original');
+    }
     const loaded = Cars.load(model.key, '#050506');
     const image = Record.imageById.get(loaded.id);
     assert(image, model.key + ' registers a renderer image');
-    assert.strictEqual(image.w, 1023, model.key + ' is downscaled below renderer width limit');
-    assert.strictEqual(image.h, 682, model.key + ' keeps the exact original aspect ratio');
+    assert(image.w <= 1023 && image.h <= 1023, model.key + ' fits the renderer image limit');
+    assert(Math.abs(image.w / image.h - loaded.width / loaded.height) < 1e-9, model.key + ' loaded rear art preserves its aspect ratio');
     assert.strictEqual(image.data.length, image.w * image.h * 4, model.key + ' RGBA data is complete');
-    assert.strictEqual(model.tips.length, 4, model.key + ' has four source-specific exhaust anchors');
+    assert.strictEqual(model.tips.length, model.chassis === 'G30' ? 2 : 4, model.key + ' has the correct exhaust-tip count');
     const tips = loaded.exhaustTips;
     assert(tips.every((p) => p.length === 2 && p[0] > 0 && p[0] < 1 && p[1] > 0 && p[1] < 1), model.key + ' anchors are normalized within its PNG');
-    assert.strictEqual(loaded.model.chassis, model.key.indexOf('M440i') === 0 ? 'G22' : 'G20', model.key + ' title uses the selected chassis');
+    assert.strictEqual(loaded.model.chassis, model.chassis, model.key + ' title uses the selected chassis');
     outputHashes.push(crypto.createHash('sha256').update(Buffer.from(image.data.buffer, image.data.byteOffset, image.data.byteLength)).digest('hex'));
+
+    const sideSource = model.sideFile.indexOf('CARS/') === 0
+        ? Cars.readDesignAsset(model.sideFile) : fs.readFileSync(path.join(sourceDir, model.sideFile));
+    assert.strictEqual(sideSource.toString('hex', 0, 8), '89504e470d0a1a0a', model.key + ' paired side-view artwork is a valid PNG');
+    const side = Cars.loadSide(model.key, '#050506');
+    const sideImage = Record.imageById.get(side.id);
+    assert(sideImage && sideImage.w <= 1023 && sideImage.h <= 1023, model.key + ' side view registers within renderer limits');
+    assert.strictEqual(side.model.key, model.key, model.key + ' uses its paired side-view variant');
 
     const fit = FlapUi.contain({ x: 20, y: 30, w: 900, h: 240 }, loaded.width, loaded.height);
     assert(fit.x >= 20 && fit.y >= 30 && fit.x + fit.w <= 920 && fit.y + fit.h <= 270, model.key + ' contain fit stays inside panel');
@@ -71,6 +92,6 @@ for (const model of Cars.MODELS) {
     FlapUi.drawSmoke(recorder, { withAlpha }, {}, { exhaustTips: tips }, fit, 1500);
     assert(recorder.words().length > 0, model.key + ' smoke overlay draws from configured tips');
 }
-assert.strictEqual(new Set(outputHashes).size, 6, 'each model choice loads a distinct supplied image');
-assert.strictEqual(app.version, '0.6.23', 'app version matches the update');
-console.log('PERFORMANCE car images: ' + (6 * 11 + 10) + ' checks passed');
+assert.strictEqual(new Set(outputHashes).size, 12, 'each model choice loads a distinct supplied image');
+assert.strictEqual(app.version, '0.6.33', 'app version matches the update');
+console.log('PERFORMANCE car images: 12 variants passed');

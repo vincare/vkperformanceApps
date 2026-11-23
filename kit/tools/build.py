@@ -247,6 +247,11 @@ def build_ui(spec, language='en', hmi='ID7'):
         for s in spec['settings']:
             if s.get('hidden'):
                 continue
+            if s.get('type') == 'section':
+                # a group heading inside the settings list: a plain two-row component, never wired up
+                items.append(comp('tworow', 'SET_' + s['key'].upper(), rows=[{'Text1stRow': {'value': hmi_text(s['label']), 'type': 'Text'},
+                                                                            'Text2ndRow': {'value': '', 'type': 'Text'}}]))
+                continue
             name = 'SET_' + s['key'].upper()
             if s['type'] == 'bool':
                 row = text_row('SET_' + s['key'], s['label'])
@@ -590,9 +595,9 @@ def build(app_id, language='en', preview_only=False):
     app_id = spec['id']
     shutil.rmtree(stage, ignore_errors=True)
     src = os.path.join(stage, 'source')
-    os.makedirs(os.path.join(src, 'javascript', 'kit'))
-    os.makedirs(os.path.join(src, 'config'))
-    os.makedirs(os.path.join(src, 'node_modules', 'oap-sdk'))
+    os.makedirs(os.path.join(src, 'javascript', 'kit'), exist_ok=True)
+    os.makedirs(os.path.join(src, 'config'), exist_ok=True)
+    os.makedirs(os.path.join(src, 'node_modules', 'oap-sdk'), exist_ok=True)
 
     manifest = manifest_for(json.loads(json.dumps(spec)))
     missing = fit_to_unit(manifest, spec)
@@ -665,7 +670,7 @@ def build(app_id, language='en', preview_only=False):
     for f in os.listdir(kr):
         p = os.path.join(kr, f)
         if os.path.isdir(p):
-            shutil.copytree(p, os.path.join(src, 'javascript', 'kit', f))
+            shutil.copytree(p, os.path.join(src, 'javascript', 'kit', f), dirs_exist_ok=True)
         else:
             shutil.copy(p, os.path.join(src, 'javascript', 'kit', f))
     if missing:

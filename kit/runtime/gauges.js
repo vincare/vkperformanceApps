@@ -321,7 +321,7 @@ function bar(cv, t, x, y, w, h, g) {
         if (g.peakText && isNum(g.peak)) {
             const ps = localizeLabel('PEAK') + ' ' + fmt(g.peak, g.decimals), po = { font: 'label', spacing: 1, literal: true };
             const px = x + cv.textWidth(label, 22, { font: 'bold', spacing: 2 }) + 22;
-            if (px + cv.textWidth(ps, 20, po) <= x + w - uw - cv.textWidth(vs, 44, { font: 'num' }) - 18) cv.text(ps, px, y + 26, 20, t.hang || t.accent2 || t.dim, po);
+            if (px + cv.textWidth(ps, 20, po) <= x + w - uw - cv.textWidth(vs, 44, { font: 'num' }) - 18) cv.text(ps, px, y + 26, 20, (g.hang && (t[g.hang] || g.hang)) || t.hang || t.accent2 || t.dim, po);
         }
     }
     const bh = 22, by = y + (head ? 44 : 0), SL = 18, bw = w - SL;
@@ -352,7 +352,7 @@ function bar(cv, t, x, y, w, h, g) {
     }
     if (g.origin != null) cv.line(xo + SL + 5, by - 6, xo - 5, by + bh + 6, 3, t.text);
     if (isNum(g.peak) && (g.peak - min) / (max - min) > 0.02) {
-        const px = X(g.peak), hc = t.hang || (stops ? ramp(stops, (px - x) / bw) : c);
+        const px = X(g.peak), hc = (g.hang && (t[g.hang] || g.hang)) || t.hang || (stops ? ramp(stops, (px - x) / bw) : c);
         cv.fillRect(x + SL, by - 2, px - x, 5, hc);
         if (!isNum(sv) || g.peak > sv) cv.line(px + SL, by, px, by + bh, 4, hc);
     }

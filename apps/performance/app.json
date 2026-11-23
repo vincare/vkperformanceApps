@@ -2,29 +2,45 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
-  "version": "0.6.31",
+  "version": "0.6.33",
   "maxDiskUsage": 33554432,
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
-  "mguHmi": ["ID7"],
-  "requires": { "idrive7-renderd": "2.1.18", "mgu-inputgate": "1.1.0" },
+  "mguHmi": [
+    "ID7"
+  ],
+  "requires": {
+    "idrive7-renderd": "2.1.18",
+    "mgu-inputgate": "1.1.0"
+  },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
-      "statusEngineSpeed2": "rs"
+      "statusEngineSpeed2": "rs",
+      "statusEngineTemperature": "rs",
+      "statusEngineStatus": "rs",
+      "statusBattery2": "rs",
+      "statusHandBrake": "rs"
     },
     "de.bmw.infotainment.vehicle.Vehicle": {
       "_optional": "display pressure units used by the Sport Display boost signal",
       "statusNewCurrentUnitsStatusExt": "rs"
     },
     "de.bmw.infotainment.vehicle.Vehicle2": {
-      "statusCarSpeed2": "rs"
+      "statusCarSpeed2": "rs",
+      "statusOilDipstick2": "rs",
+      "statusVehicleMass": "rs"
     },
     "de.bmw.infrastructure.VehicleInformation": {
       "statusGearboxDrive": "s",
       "DataPowerTrain2": "s"
     },
     "de.bmw.infotainment.vehicle.CDS2": {
-      "statusLongitudinalAccelerationMassCenter": "rs"
+      "statusLongitudinalAccelerationMassCenter": "rs",
+      "statusPushButtonMSA2": "rs"
+    },
+    "de.bmw.infrastructure.analytics.BasicDataSet": {
+      "_optional": "EGS oil temperature and xDrive torque split used by CAR DATA",
+      "basicDataSet": "rs"
     },
     "de.bmw.infotainment.drivingexcitement.FES": {
       "statusActualValueTorque2": "rs",
@@ -32,22 +48,48 @@
       "statusSwitchDriveDynamicSport2": "rs",
       "statusFESVehicleDynamicSwitchHMI": "rs"
     },
+    "de.bmw.infrastructure.EnvironmentalInformation": {
+      "ExteriorTemperature": "s"
+    },
+    "de.bmw.infotainment.KombiIF": {
+      "statusRangeTankStatus": "rs",
+      "statusBordcomputerAverage": "rs"
+    },
+    "de.bmw.powertrain.AcceleratorPedal": {
+      "AngleAcceleratorPedal": "s"
+    },
+    "de.bmw.infotainment.vehicle.TPMS": {
+      "statusTyrePressure": "rs",
+      "statusTyreTemperature": "rs",
+      "statusTargetTyrePressure": "rs"
+    },
     "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
       "_instances": "SystemFunctionsInternalTasuInst1",
-      "_methods": ["sendTasuRequest"],
-      "_broadcasts": ["sendTasuResponse"]
+      "_methods": [
+        "sendTasuRequest"
+      ],
+      "_broadcasts": [
+        "sendTasuResponse"
+      ]
     }
   },
   "settings": [
     {
       "key": "valveControl",
-      "label": "Exhaust valve control",
+      "label": "Car exhaust control",
+      "desc": "Off by default. Turn on to allow the matched DME controls to send valve commands after you select a control in the app.",
       "type": "choice",
-      "default": "on",
-      "reset": 1,
+      "default": "off",
+      "reset": 2,
       "options": [
-        ["off", "Disarmed · no car commands"],
-        ["on", "Armed · sends commands to a matched DME"]
+        [
+          "off",
+          "Disarmed · no car commands"
+        ],
+        [
+          "on",
+          "Armed · sends commands to a matched DME"
+        ]
       ]
     },
     {
@@ -58,220 +100,605 @@
       "hidden": true,
       "reset": 1,
       "options": [
-        ["off", "Off"],
-        ["on", "On"]
+        [
+          "off",
+          "Off"
+        ],
+        [
+          "on",
+          "On"
+        ]
       ]
+    },
+    {
+      "key": "sec_exhaust",
+      "label": "EXHAUST",
+      "type": "section"
     },
     {
       "key": "valveHold",
       "label": "Hold exhaust valve request",
+      "desc": "Repeats the last OPEN / CLOSED / OEM valve command every 15 seconds so the flaps cannot quietly revert to the drive mode.",
       "type": "choice",
       "default": "off",
       "options": [
-        ["off", "Off · do not repeat commands"],
-        ["on", "On · resend every 15 seconds"]
-      ]
-    },
-    {
-      "key": "valveCloseLimit",
-      "label": "Close: return to BMW above",
-      "type": "choice",
-      "default": "4000",
-      "options": [
-        ["2500", "2,500 rpm"],
-        ["3000", "3,000 rpm"],
-        ["3500", "3,500 rpm"],
-        ["4000", "4,000 rpm"],
-        ["4500", "4,500 rpm"],
-        ["5000", "5,000 rpm"],
-        ["5500", "5,500 rpm"],
-        ["off", "No RPM limit · not recommended"]
+        [
+          "off",
+          "Off · do not repeat commands"
+        ],
+        [
+          "on",
+          "On · resend every 15 seconds"
+        ]
       ]
     },
     {
       "key": "performanceDiagnostics",
       "label": "Raw diagnostics (troubleshooting)",
       "type": "bool",
-      "default": false
+      "default": false,
+      "hidden": true
     },
     {
       "key": "readDmeCandidates",
       "label": "Read DME candidates (read-only)",
       "type": "bool",
-      "default": true
+      "default": true,
+      "hidden": true
     },
     {
       "key": "powerSource",
-      "label": "Power from",
+      "label": "Engine power estimate from",
+      "desc": "Sport Display power is a percentage scaled by Max engine power. Torque × RPM is also an estimate.",
       "type": "choice",
       "default": "sport",
       "options": [
-        ["sport", "Sport Display"],
-        ["calc", "Torque x RPM"]
+        [
+          "sport",
+          "Sport Display"
+        ],
+        [
+          "calc",
+          "Torque x RPM"
+        ]
       ]
+    },
+    {
+      "key": "sec_gauges",
+      "label": "GAUGES & DISPLAY",
+      "type": "section"
     },
     {
       "key": "powerUnit",
       "label": "Power unit",
+      "desc": "The unit every power figure is shown in — engine data, dyno results and saved runs.",
       "type": "choice",
       "default": "hp",
       "options": [
-        ["kw", "kW"],
-        ["hp", "hp"],
-        ["ps", "PS"]
+        [
+          "kw",
+          "kW"
+        ],
+        [
+          "hp",
+          "hp"
+        ],
+        [
+          "ps",
+          "PS"
+        ]
       ]
     },
     {
       "key": "maxPower",
-      "label": "Max power (100% on Sport Display)",
+      "label": "Max engine power (100% on Sport Display)",
+      "desc": "The Sport Display reports a percentage, not horsepower. Set this to your verified engine output to calibrate the live estimate.",
       "type": "number",
       "unit": "kW",
       "unitBy": "powerUnit",
       "units": {
-        "hp": {"unit": "hp", "mul": 1.34102},
-        "ps": {"unit": "PS", "mul": 1.35962}
+        "hp": {
+          "unit": "hp",
+          "mul": 1.34102
+        },
+        "ps": {
+          "unit": "PS",
+          "mul": 1.35962
+        }
       },
       "default": 215,
-      "steps": [100, 120, 135, 140, 150, 160, 170, 185, 190, 200, 215, 230, 240, 250, 260, 275, 285, 300, 320, 340, 360, 375, 390, 405, 420, 450, 460, 480, 500, 530, 550, 600]
+      "steps": [
+        100,
+        120,
+        135,
+        140,
+        150,
+        160,
+        170,
+        185,
+        190,
+        200,
+        215,
+        230,
+        240,
+        250,
+        260,
+        275,
+        285,
+        300,
+        320,
+        340,
+        360,
+        375,
+        390,
+        405,
+        420,
+        450,
+        460,
+        480,
+        500,
+        530,
+        550,
+        600
+      ]
     },
     {
       "key": "powerGaugeMax",
       "label": "HORSE POWER scale max",
+      "desc": "The top of the power gauge — set it just above your car's real output so the needle uses the whole dial.",
       "type": "number",
       "unit": "kW",
       "unitBy": "powerUnit",
       "units": {
-        "hp": {"unit": "hp", "mul": 1.34102},
-        "ps": {"unit": "PS", "mul": 1.35962}
+        "hp": {
+          "unit": "hp",
+          "mul": 1.34102
+        },
+        "ps": {
+          "unit": "PS",
+          "mul": 1.35962
+        }
       },
       "default": 223.7,
-      "steps": [149.1, 186.4, 223.7, 261.0, 298.3, 335.6, 372.9, 447.4, 522.0, 596.6, 671.1, 745.7]
+      "steps": [
+        149.1,
+        186.4,
+        223.7,
+        261.0,
+        298.3,
+        335.6,
+        372.9,
+        447.4,
+        522.0,
+        596.6,
+        671.1,
+        745.7
+      ]
     },
     {
       "key": "torqueGaugeMax",
       "label": "TORQUE scale max",
+      "desc": "The top of the torque gauge — set it just above the engine's peak torque so the bar uses the whole range.",
       "type": "number",
       "unit": "Nm",
       "default": 800,
-      "steps": [300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600]
+      "steps": [
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900,
+        1000,
+        1200,
+        1400,
+        1600
+      ]
+    },
+    {
+      "key": "boostSource",
+      "label": "Boost from",
+      "desc": "Where the boost readout comes from — Auto prefers the BMW Sport Display signal and falls back to a read-only DME/OBD read.",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        [
+          "auto",
+          "Auto (Sport Display, then DME)"
+        ],
+        [
+          "fes",
+          "Sport Display"
+        ],
+        [
+          "dme",
+          "Engine unit (OBD)"
+        ]
+      ]
+    },
+    {
+      "key": "sec_dynodrag",
+      "label": "DYNO & DRAG RUN",
+      "type": "section"
     },
     {
       "key": "dynoWeight",
       "label": "Dyno vehicle weight with driver + fuel",
+      "desc": "Total weight of the car with you and fuel aboard — the dyno estimate divides your acceleration by it, so weigh the car as you drive it.",
       "type": "number",
       "unit": "kg",
       "default": 1750,
-      "steps": [1300, 1400, 1500, 1550, 1600, 1650, 1700, 1750, 1800, 1850, 1900, 1950, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 3200, 3300, 3400, 3500]
+      "steps": [
+        1300,
+        1400,
+        1500,
+        1550,
+        1600,
+        1650,
+        1700,
+        1750,
+        1800,
+        1850,
+        1900,
+        1950,
+        2000,
+        2100,
+        2200,
+        2300,
+        2400,
+        2500,
+        2600,
+        2700,
+        2800,
+        2900,
+        3000,
+        3100,
+        3200,
+        3300,
+        3400,
+        3500
+      ]
     },
     {
       "key": "dynoBody",
       "label": "Dyno body shape (air drag)",
+      "desc": "Your car's body shape — it sets the aerodynamic drag the dyno estimate subtracts at high speed.",
       "type": "choice",
       "default": "coupe",
       "options": [
-        ["coupe", "Coupe / sedan"],
-        ["wagon", "Touring / hatch"],
-        ["suv", "SUV"]
+        [
+          "coupe",
+          "Coupe / sedan"
+        ],
+        [
+          "wagon",
+          "Touring / hatch"
+        ],
+        [
+          "suv",
+          "SUV"
+        ]
       ]
     },
     {
       "key": "dynoLoss",
       "label": "Dyno drivetrain loss",
+      "desc": "The power lost between the engine and the wheels — added back so the dyno shows crank figures, not wheel figures.",
       "type": "number",
       "unit": "%",
       "default": 15,
-      "steps": [0, 10, 12, 15, 18, 20, 25]
+      "steps": [
+        0,
+        10,
+        12,
+        15,
+        18,
+        20,
+        25
+      ]
     },
     {
       "key": "dynoTorqueUnit",
       "label": "Dyno torque unit",
+      "desc": "The unit torque is drawn in on the dyno curve and in the saved runs.",
       "type": "choice",
       "default": "nm",
       "options": [
-        ["nm", "Nm"],
-        ["lbft", "lb-ft"],
-        ["kgm", "kgm"]
+        [
+          "nm",
+          "Nm"
+        ],
+        [
+          "lbft",
+          "lb-ft"
+        ],
+        [
+          "kgm",
+          "kgm"
+        ]
       ]
     },
     {
       "key": "dynoEcuTorque",
       "label": "Overlay ECU torque on DYNO graph",
+      "desc": "Draws the engine's own reported torque as a second curve so measured and ECU torque can be compared.",
       "type": "bool",
       "default": true
     },
     {
       "key": "dynoGraphMaxRpm",
       "label": "DYNO graph up to",
+      "desc": "The highest rpm shown on the dyno graph — Auto follows your revs, or cap it so the curve always fills the chart.",
       "type": "number",
       "unit": "rpm",
       "default": 0,
-      "labels": {"0": "Auto"},
+      "labels": {
+        "0": "Auto"
+      },
       "reset": 1,
-      "steps": [0, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 9000]
+      "steps": [
+        0,
+        4500,
+        5000,
+        5500,
+        6000,
+        6500,
+        7000,
+        7500,
+        8000,
+        9000
+      ]
     },
     {
       "key": "dragSpeedUnit",
       "label": "DRAG RUN speed unit",
+      "desc": "km/h or mph for every drag split and trap speed — changes the section names too (100-200 becomes 60-130).",
       "type": "choice",
       "default": "kmh",
-      "options": [["kmh", "km/h"], ["mph", "mph"]]
+      "options": [
+        [
+          "kmh",
+          "km/h"
+        ],
+        [
+          "mph",
+          "mph"
+        ]
+      ]
     },
     {
       "key": "dragDistance",
       "label": "DRAG RUN distance split",
+      "desc": "The standing-distance split the timer measures — quarter mile, eighth mile or 1000 m.",
       "type": "choice",
       "default": "qm",
-      "options": [["qm", "1/4 mile"], ["em", "1/8 mile"], ["m1000", "1000 m"]]
+      "options": [
+        [
+          "qm",
+          "1/4 mile"
+        ],
+        [
+          "em",
+          "1/8 mile"
+        ],
+        [
+          "m1000",
+          "1000 m"
+        ]
+      ]
     },
     {
       "key": "dragRollout",
       "label": "DRAG RUN one-foot rollout",
+      "desc": "Starts the clock one foot after the car moves, the way Dragy measures — shaves a few tenths off every run.",
       "type": "bool",
       "default": false
-    },
-    {
-      "key": "boostSource",
-      "label": "Boost from",
-      "type": "choice",
-      "default": "auto",
-      "options": [
-        ["auto", "Auto (Sport Display, then DME)"],
-        ["fes", "Sport Display"],
-        ["dme", "Engine unit (OBD)"]
-      ]
     },
     {
       "key": "demo",
       "label": "Demo data",
       "type": "choice",
       "default": "off",
+      "hidden": true,
       "options": [
-        ["off", "Never"],
-        ["on", "Always"]
+        [
+          "off",
+          "Never"
+        ],
+        [
+          "on",
+          "Always"
+        ]
       ]
+    },
+    {
+      "key": "sec_warmup",
+      "label": "WARM-UP",
+      "type": "section"
+    },
+    {
+      "key": "warmOil",
+      "label": "Engine oil is warm at",
+      "desc": "Below this the engine counts as cold — the safe rev limit stays low and the page shows WARMING UP instead of READY.",
+      "type": "number",
+      "unit": "°C",
+      "default": 90,
+      "steps": [
+        60,
+        70,
+        75,
+        80,
+        85,
+        90,
+        95,
+        100,
+        105,
+        110
+      ]
+    },
+    {
+      "key": "warmCoolant",
+      "label": "Coolant is warm at",
+      "desc": "The coolant warms faster than the oil — its own ready point for the WARMUP page.",
+      "type": "number",
+      "unit": "°C",
+      "default": 80,
+      "steps": [
+        50,
+        60,
+        65,
+        70,
+        75,
+        80,
+        85,
+        90,
+        95
+      ]
+    },
+    {
+      "key": "warmGearbox",
+      "label": "Gearbox oil is warm at",
+      "desc": "READY waits for the gearbox oil to reach this too, on a car that reports it.",
+      "type": "number",
+      "unit": "°C",
+      "default": 70,
+      "steps": [
+        40,
+        50,
+        55,
+        60,
+        65,
+        70,
+        75,
+        80,
+        90
+      ]
+    },
+    {
+      "key": "warmupColdLimit",
+      "label": "Rev limit when cold",
+      "desc": "The safe rev limit with cold oil — it climbs to the redline as the oil warms.",
+      "type": "number",
+      "unit": "rpm",
+      "default": 3500,
+      "steps": [
+        2500,
+        3000,
+        3500,
+        4000,
+        4500,
+        5000
+      ]
+    },
+    {
+      "key": "warmupRedline",
+      "label": "WARM-UP redline",
+      "desc": "The top of the safe rev limit once the oil is warm — set it to your engine’s real redline.",
+      "type": "number",
+      "unit": "rpm",
+      "default": 7000,
+      "steps": [
+        5000,
+        5500,
+        6000,
+        6500,
+        7000,
+        7500,
+        8000,
+        8500
+      ]
+    },
+    {
+      "key": "warmupCooldown",
+      "label": "Turbo timer",
+      "desc": "Turbo timer — after hard driving the engine needs a gentle minute or two so the turbo can cool before you switch it off.",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "coldStarts",
+      "label": "Cold starts data",
+      "type": "bool",
+      "default": false,
+      "hidden": true
+    },
+    {
+      "key": "sec_other",
+      "label": "OTHER",
+      "type": "section"
     },
     {
       "key": "carModel",
       "label": "Car Model",
+      "desc": "Which car the app draws on its pages — model and paint.",
       "type": "choice",
       "default": "M340i_Blue",
       "options": [
-        ["M340i_Blue", "M340i G20 BLUE"],
-        ["M340i_Red", "M340i G20 RED"],
-        ["M340i_Black", "M340i G20 BLACK"],
-        ["M440i_Blue", "M440i G22 BLUE"],
-        ["M440i_Red", "M440i G22 RED"],
-        ["M440i_Black", "M440i G22 BLACK"]
+        [
+          "M340i_Blue",
+          "M340i G20 BLUE"
+        ],
+        [
+          "M340i_Red",
+          "M340i G20 RED"
+        ],
+        [
+          "M340i_Black",
+          "M340i G20 BLACK"
+        ],
+        [
+          "M440i_Blue",
+          "M440i G22 BLUE"
+        ],
+        [
+          "M440i_Red",
+          "M440i G22 RED"
+        ],
+        [
+          "M440i_Black",
+          "M440i G22 BLACK"
+        ],
+        [
+          "M760Li_Blue",
+          "M760Li G11/G12 BLUE"
+        ],
+        [
+          "M760Li_Red",
+          "M760Li G11/G12 RED"
+        ],
+        [
+          "M760Li_Black",
+          "M760Li G11/G12 BLACK"
+        ],
+        [
+          "M550i_G30_Blue",
+          "M550i G30 BLUE"
+        ],
+        [
+          "M550i_G30_Red",
+          "M550i G30 RED"
+        ],
+        [
+          "M550i_G30_Black",
+          "M550i G30 BLACK"
+        ]
       ]
     },
     {
       "key": "theme",
       "label": "Colour theme",
+      "desc": "The app's colour scheme — VKP-RED DESIGN is the signature red look.",
       "type": "choice",
       "default": "m_red",
+      "aliases": {
+        "m_tricolour": "m_red"
+      },
       "options": [
-        ["m_red", "M Red"],
-        ["m_tricolour", "M Tricolour"]
+        [
+          "m_red",
+          "VKP-RED DESIGN"
+        ]
       ]
     }
   ],
@@ -281,18 +708,54 @@
       "kind": "canvas",
       "title": "Engine Data",
       "buttons": [
-        ["BTN_OPEN", "Open valves"],
-        ["BTN_CLOSE", "Close valves"],
-        ["BTN_OEM", "OEM control"],
-        ["BTN_DRIVE", "By drive mode"],
-        ["BTN_PAGE", "Next page"],
-        ["BTN_PREV", "Previous page"],
-        ["BTN_DYNO_ACTION", "Set baseline"],
-        ["BTN_DYNO_VIEW", "Saved runs"],
-        ["BTN_DRAG_ACTION", "Reset timer"],
-        ["BTN_DRAG_VIEW", "Run history"],
-        ["BTN_SECTION", "Open exhaust section"],
-        ["BTN_SETTINGS", "Settings"]
+        [
+          "BTN_OPEN",
+          "Open valves"
+        ],
+        [
+          "BTN_CLOSE",
+          "Close valves"
+        ],
+        [
+          "BTN_OEM",
+          "OEM control"
+        ],
+        [
+          "BTN_DRIVE",
+          "By drive mode"
+        ],
+        [
+          "BTN_PAGE",
+          "Next page"
+        ],
+        [
+          "BTN_PREV",
+          "Previous page"
+        ],
+        [
+          "BTN_DYNO_ACTION",
+          "Set baseline"
+        ],
+        [
+          "BTN_DYNO_VIEW",
+          "Saved runs"
+        ],
+        [
+          "BTN_DRAG_ACTION",
+          "Reset timer"
+        ],
+        [
+          "BTN_DRAG_VIEW",
+          "Run history"
+        ],
+        [
+          "BTN_SECTION",
+          "Open exhaust section"
+        ],
+        [
+          "BTN_SETTINGS",
+          "Settings"
+        ]
       ]
     }
   ],
@@ -300,24 +763,387 @@
     "comment": "The RPM, torque, Sport Display percentage, FES boost and DME boost candidates use the same conversions and candidate order as M Vitals (MIT).",
     "bm3MarkerAddress": "807FFE50",
     "scaling": {
-      "rpm": {"factor": 0.25, "offset": 0, "invalid": 65535},
-      "speed": {"factor": 0.015625, "offset": 0, "invalid": 65535},
-      "accel": {"factor": 0.002, "offset": -65, "invalid": 65535},
-      "torque": {"factor": 0.5, "offset": -1023.5, "invalid": 65535, "invalidFrom": 4095},
-      "sportPct": {"factor": 1, "offset": 0, "invalid": 255},
-      "boost": {"factor": 0.01, "offset": 0, "invalid": 255}
+      "rpm": {
+        "factor": 0.25,
+        "offset": 0,
+        "invalid": 65535
+      },
+      "speed": {
+        "factor": 0.015625,
+        "offset": 0,
+        "invalid": 65535
+      },
+      "accel": {
+        "factor": 0.002,
+        "offset": -65,
+        "invalid": 65535
+      },
+      "torque": {
+        "factor": 0.5,
+        "offset": -1023.5,
+        "invalid": 65535,
+        "invalidFrom": 4095
+      },
+      "sportPct": {
+        "factor": 1,
+        "offset": 0,
+        "invalid": 255
+      },
+      "boost": {
+        "factor": 0.01,
+        "offset": 0,
+        "invalid": 255
+      },
+      "engineTemp": {
+        "factor": 1,
+        "offset": -48,
+        "invalid": 255
+      },
+      "gearboxTemp": {
+        "factor": 1,
+        "offset": -48,
+        "invalid": 255
+      }
     },
     "dme": {
       "ecu": 18,
       "boost": [
-        {"did": "F470", "bytes": 2, "at": 3, "factor": 0.03125, "min": 20, "max": 600, "note": "M Vitals OBD PID 0x70 actual absolute pressure, 1/32 kPa"},
-        {"did": "F487", "bytes": 2, "at": 1, "factor": 0.03125, "min": 20, "max": 600, "note": "M Vitals OBD PID 0x87 manifold absolute pressure, 1/32 kPa"},
-        {"did": "F40B", "bytes": 1, "at": 0, "factor": 1, "min": 20, "max": 255, "note": "M Vitals OBD PID 0x0B manifold absolute pressure, kPa"},
-        {"obd": "0B", "bytes": 1, "at": 0, "factor": 1, "min": 20, "max": 255, "note": "M Vitals OBD service 01 PID 0x0B"}
+        {
+          "did": "F470",
+          "bytes": 2,
+          "at": 3,
+          "factor": 0.03125,
+          "min": 20,
+          "max": 600,
+          "note": "M Vitals OBD PID 0x70 actual absolute pressure, 1/32 kPa"
+        },
+        {
+          "did": "F487",
+          "bytes": 2,
+          "at": 1,
+          "factor": 0.03125,
+          "min": 20,
+          "max": 600,
+          "note": "M Vitals OBD PID 0x87 manifold absolute pressure, 1/32 kPa"
+        },
+        {
+          "did": "F40B",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "min": 20,
+          "max": 255,
+          "note": "M Vitals OBD PID 0x0B manifold absolute pressure, kPa"
+        },
+        {
+          "obd": "0B",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "min": 20,
+          "max": 255,
+          "note": "M Vitals OBD service 01 PID 0x0B"
+        }
       ],
       "baro": [
-        {"did": "F433", "bytes": 1, "at": 0, "factor": 1, "min": 50, "max": 115, "note": "M Vitals OBD PID 0x33 barometric pressure, kPa"},
-        {"obd": "33", "bytes": 1, "at": 0, "factor": 1, "min": 50, "max": 115, "note": "M Vitals OBD service 01 PID 0x33 barometric pressure"}
+        {
+          "did": "F433",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "min": 50,
+          "max": 115,
+          "note": "M Vitals OBD PID 0x33 barometric pressure, kPa"
+        },
+        {
+          "obd": "33",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "min": 50,
+          "max": 115,
+          "note": "M Vitals OBD service 01 PID 0x33 barometric pressure"
+        }
+      ],
+      "iat": [
+        {
+          "did": "F40F",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 150,
+          "note": "intake air temperature, deg C + 40"
+        },
+        {
+          "did": "F477",
+          "bytes": 1,
+          "at": 1,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 150,
+          "note": "charge air cooler temperature, bank 1 sensor 1"
+        },
+        {
+          "obd": "0F",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 150,
+          "note": "OBD service 01 PID 0x0F for units that refuse F40F"
+        }
+      ],
+      "hpfp": [
+        {
+          "did": "F423",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.1,
+          "offset": 0,
+          "min": 0,
+          "max": 500,
+          "note": "fuel rail gauge pressure (direct injection), 10 kPa per bit -> bar"
+        },
+        {
+          "did": "F459",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.1,
+          "offset": -1,
+          "min": 0,
+          "max": 500,
+          "note": "fuel rail absolute pressure, 10 kPa per bit -> bar"
+        },
+        {
+          "obd": "23",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.1,
+          "offset": 0,
+          "min": 0,
+          "max": 500,
+          "note": "OBD service 01 PID 0x23 (same as F423)"
+        }
+      ],
+      "lpfp": [
+        {
+          "did": "F40A",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.03,
+          "offset": 0,
+          "min": 0.5,
+          "max": 8,
+          "note": "fuel pressure (gauge), 3 kPa per bit -> bar"
+        },
+        {
+          "did": "F422",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.00079,
+          "offset": 0,
+          "min": 0.5,
+          "max": 15,
+          "note": "fuel rail pressure relative to manifold, 0.079 kPa per bit -> bar"
+        },
+        {
+          "obd": "0A",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.03,
+          "offset": 0,
+          "min": 0.5,
+          "max": 8,
+          "note": "OBD service 01 PID 0x0A (same as F40A)"
+        }
+      ],
+      "timing": [
+        {
+          "obd": "0E",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.5,
+          "offset": -64,
+          "min": -64,
+          "max": 63.5,
+          "note": "OBD service 01 PID 0x0E timing advance, deg before TDC"
+        },
+        {
+          "did": "F40E",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.5,
+          "offset": -64,
+          "min": -64,
+          "max": 63.5,
+          "note": "the same PID over UDS 0x22"
+        }
+      ],
+      "battVolt": [
+        {
+          "did": "5853",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.001,
+          "min": 5,
+          "max": 18,
+          "note": "BMW control module voltage, mV -> V"
+        },
+        {
+          "obd": "42",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.001,
+          "min": 5,
+          "max": 18,
+          "note": "OBD service 01 PID 0x42 control module voltage"
+        }
+      ],
+      "boostTarget": [
+        {
+          "did": "4AB0",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.00390625,
+          "offset": 0,
+          "min": 20,
+          "max": 400,
+          "note": "BMW boost pressure setpoint (absolute), hPa -> kPa/10"
+        },
+        {
+          "did": "F470",
+          "bytes": 2,
+          "at": 1,
+          "factor": 0.03125,
+          "offset": 0,
+          "min": 20,
+          "max": 600,
+          "note": "OBD PID 0x70: commanded boost pressure A (absolute), 1/32 kPa"
+        },
+        {
+          "obd": "70",
+          "bytes": 2,
+          "at": 1,
+          "factor": 0.03125,
+          "offset": 0,
+          "min": 20,
+          "max": 600,
+          "note": "OBD service 01 PID 0x70 (same as F470)"
+        }
+      ],
+      "dmePower": [
+        {
+          "did": "4520",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.015258789062,
+          "min": 0,
+          "max": 1200,
+          "note": "DME8 MOTORLEISTUNG_EFFEKTIV: the engine unit's own effective power, kW"
+        }
+      ],
+      "airFlow": [
+        {
+          "did": "4206",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.03125,
+          "min": 0,
+          "max": 2500,
+          "note": "DME8 MASSENSTROM_DK_BANK1: air mass flow through throttle bank 1, kg/h"
+        }
+      ],
+      "throttleValve": [
+        {
+          "did": "4600",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.0078125,
+          "signed": true,
+          "min": -10,
+          "max": 105,
+          "note": "DME8 IWDKL: throttle valve angle above lower stop, %"
+        },
+        {
+          "obd": "11",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.39216,
+          "min": 0,
+          "max": 100,
+          "note": "OBD service 01 PID 0x11 throttle position"
+        }
+      ],
+      "chargePress": [
+        {
+          "did": "4205",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.078125,
+          "min": 100,
+          "max": 5120,
+          "note": "DME8 IPLAD: pressure before throttle, hPa absolute"
+        }
+      ],
+      "oilPress": [
+        {
+          "did": "4436",
+          "bytes": 2,
+          "at": 0,
+          "factor": 1,
+          "min": 0,
+          "max": 10000,
+          "note": "DME8 I_DRUCK_OEL_IST_ABS: oil pressure, hPa absolute"
+        },
+        {
+          "did": "586F",
+          "bytes": 2,
+          "at": 0,
+          "factor": 1,
+          "signed": true,
+          "min": 0,
+          "max": 10000,
+          "note": "DME8 OELDRUCK: oil pressure, hPa"
+        }
+      ],
+      "misfire": {
+        "tid": "0C"
+      },
+      "loadActual": [
+        {
+          "did": "5813",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.75,
+          "offset": 0,
+          "min": 0,
+          "max": 191.25,
+          "note": "BMW actual relative air charge, % = raw * 0.75"
+        },
+        {
+          "did": "F404",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.39216,
+          "offset": 0,
+          "min": 0,
+          "max": 100,
+          "note": "OBD PID 0x04 calculated engine load, 100/255 per bit"
+        },
+        {
+          "obd": "04",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.39216,
+          "offset": 0,
+          "min": 0,
+          "max": 100,
+          "note": "OBD service 01 PID 0x04 (same as F404)"
+        }
       ]
     }
   }

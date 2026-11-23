@@ -28,7 +28,13 @@ const scaling = {
 };
 
 equal(app.id, 'performance', 'app id');
-equal(app.version, '0.6.25', 'app version');
+equal(app.version, '0.6.33', 'app version');
+const valveControl = app.settings.find((setting) => setting.key === 'valveControl');
+equal(valveControl.default, 'off', 'real exhaust control defaults disarmed');
+equal(valveControl.hidden, undefined, 'exhaust arming is visible in Settings');
+equal(valveControl.reset, 2, 'saved exhaust arming resets to the safer default once');
+equal(app.settings.find((setting) => setting.key === 'maxPower').hidden, undefined, 'power calibration is visible in Settings');
+equal(app.settings.find((setting) => setting.key === 'powerSource').hidden, undefined, 'power source is visible in Settings');
 equal(app.settings.find((setting) => setting.key === 'demo').default, 'off', 'demo defaults off');
 equal(app.settings.find((setting) => setting.key === 'powerGaugeMax').default, 223.7, 'power scale defaults to 300 hp');
 equal(app.settings.find((setting) => setting.key === 'torqueGaugeMax').default, 800, 'torque scale default');
@@ -68,7 +74,7 @@ equal(Calc.dmeBoostBar(250, Infinity), null, 'invalid DME pressure');
 const sportPower = Calc.powerKw(50, 300, 3000, 'sport', 215);
 close(sportPower.kw, 107.5, 'Sport Display percentage times configured maximum');
 equal(sportPower.source, 'BMW SPORT DISPLAY', 'Sport Display power source');
-equal(sportPower.approximate, false, 'Sport Display power quality');
+equal(sportPower.approximate, true, 'Sport Display power is labeled as a calibrated estimate');
 const calculated = Calc.powerKw(50, 300, 3000, 'calc', 215);
 close(calculated.kw, 300 * 3000 / 9549, 'torque times RPM fallback');
 equal(calculated.approximate, true, 'calculated power marked approximate');

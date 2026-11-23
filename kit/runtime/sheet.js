@@ -74,9 +74,14 @@ function list(r, t, key, rows, focus, y0, controller) {
         const y = y0 + i * (ROW_H + GAP) - sy;
         if (y + ROW_H < y0 || y > bottom) return;
         const x = 40, w = W - 80, on = i === focus && controller;
+        const cy = y + ROW_H / 2;
+        if (row.kind === 'head') {      // a group heading: no box, nothing to choose
+            r.text(fit(r, row.label, 24, w - 8), x + 4, cy + 9, 24, t.dim, { font: 'bold' });
+            rects.push({ i, x, y: Math.max(y, y0), w, h: Math.min(y + ROW_H, bottom) - Math.max(y, y0) });
+            return;
+        }
         r.roundRect(x, y, w, ROW_H, 14, on ? withAlpha(S, 0.22) : withAlpha('#ffffff', 0.05));
         if (on) r.strokeRoundRect(x, y, w, ROW_H, 14, 2, S);
-        const cy = y + ROW_H / 2;
         let right = x + w - 28;
         if (row.kind === 'toggle') { toggle(r, t, right - 76, cy - 19, row.on); right -= 100; } else if (row.kind === 'more') { chevron(r, t, right - 9, cy, t.dim); right -= 34; } else if (row.kind === 'radio') {
             r.circle(right - 15, cy, 15, row.on ? S : withAlpha('#ffffff', 0.25));
@@ -85,7 +90,13 @@ function list(r, t, key, rows, focus, y0, controller) {
         }
         const vw = row.value != null ? Math.min(560, r.textWidth(String(row.value), 26)) : 0;
         if (row.value != null) r.text(fit(r, row.value, 26, 560), right, cy + 9, 26, row.on && row.kind === 'radio' ? t.text : t.dim, { align: 'right' });
-        r.text(fit(r, row.label, 28, right - vw - 40 - (x + 28)), x + 28, cy + 10, 28, t.text);
+        const lw = right - vw - 40 - (x + 28);
+        if (row.desc) {     // a "what it does" line under the title, as BMW's own two-row settings
+            r.text(fit(r, row.label, 24, lw), x + 28, cy - 6, 24, t.text);
+            r.text(fit(r, row.desc, 15, lw), x + 28, cy + 22, 15, t.dim);
+        } else {
+            r.text(fit(r, row.label, 28, lw), x + 28, cy + 10, 28, t.text);
+        }
         rects.push({ i, x, y: Math.max(y, y0), w, h: Math.min(y + ROW_H, bottom) - Math.max(y, y0) });
     });
     r.noclip();
@@ -140,10 +151,11 @@ function listSheet(settings, title, opts) {
                 const cur = settings.get(this.open.key);
                 return values(this.open, settings).map((v) => ({ label: v[1], kind: 'radio', on: v[0] === cur }));
             }
-            return entries(this.group).map((s) => (s.extra ? { label: s.extra.label, value: valueOf(s.extra), kind: 'more' }
+            return entries(this.group).map((s) => (s.extra ? { label: s.extra.label, value: valueOf(s.extra), kind: 'more', desc: s.extra.desc }
+                : s.type === 'section' ? { label: s.label, kind: 'head' }
                 : s.group && !s.key ? { label: s.group, kind: 'more' }
-                : s.type === 'bool' ? { label: s.label, kind: 'toggle', on: !!settings.get(s.key) }
-                    : { label: s.label, value: settings.display(s.key), kind: values(s) ? 'more' : null }));
+                : s.type === 'bool' ? { label: s.label, kind: 'toggle', on: !!settings.get(s.key), desc: s.desc }
+                    : { label: s.label, value: settings.display(s.key), kind: values(s) ? 'more' : null, desc: s.desc }));
         },
         draw(r, t) {
             // (its taps through fromChild too, so its Back / 'close' comes back here)
@@ -157,8 +169,13 @@ function listSheet(settings, title, opts) {
             // a switch that hid settings below the focus ("when"): the focus stays on the list
             if (!this.open) this.focus = Math.min(this.focus, rows.length - 1);
             // the header's tab names the sheet; a value list names its setting here
-            if (this.open || this.group) r.text(this.open ? this.open.label : this.group, 44, TOP + 40, 32, t.text, { font: 'bold' });
-            else if (version) r.text('Version ' + version, 44, TOP + 38, 24, t.dim);
+            if (this.open || this.group) {
+                r.text(this.open ? this.open.label : this.group, 44, TOP + 40, 32, t.text, { font: 'bold' });
+                // the setting's own "what it does" line under its title, in the accent colour
+                if (this.open && this.open.desc) {
+                    r.text(fit(r, this.open.desc, 15, W - 88 - 280), 44, TOP + 66, 15, t.sel || t.accent);
+                }
+            } else if (version) r.text('Version ' + version, 44, TOP + 38, 24, t.dim);
             const targets = [];
             // Back (a value list) / Done (the settings): top right
             const bw = 150, bx = W - 40 - bw, by = TOP + 8;
@@ -184,9 +201,12 @@ function listSheet(settings, title, opts) {
         move(d) {
             if (this.child) { this.child.move(d); return; }
             this.controller = true;
-            const n = this.rows().length;
-            if (this.open) this.sub = Math.max(-1, Math.min(n - 1, this.sub + d));
-            else this.focus = Math.max(-1, Math.min(n - 1, this.focus + d));
+            const rows = this.rows(), n = rows.length;
+            if (this.open) { this.sub = Math.max(-1, Math.min(n - 1, this.sub + d)); return; }
+            let f = this.focus + d;
+            while (f >= 0 && f < n && rows[f].kind === 'head') f += d;   // headings are not a stop
+            if (f < 0) f = -1; else if (f >= n || rows[f].kind === 'head') f = this.focus;
+            this.focus = f;
         },
         press() {
             if (this.child) return this.fromChild(this.child.press());
@@ -202,7 +222,7 @@ function listSheet(settings, title, opts) {
                 return null;
             }
             const s = entries(this.group)[this.focus];
-            if (!s) return null;
+            if (!s || s.type === 'section') return null;
             // (an open() that throws leaves the settings as they are; display.js logs it)
             if (s.extra) { const c = s.extra.open && s.extra.open(); if (c) this.child = c; return null; }
             if (s.group && !s.key) { this.group = s.group; this.gfocus = this.focus; this.focus = 0; return null; }
