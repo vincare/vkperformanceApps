@@ -25,10 +25,10 @@ const SECTIONS = [
 
 function sectionOf(key) { return SECTIONS.find((s) => s.key === key) || SECTIONS[0]; }
 
-function menuCard(cv, G, t, x, y, w, h, def, action) {
-    // CAR DATA's eight badges are decoded a little at a time after the menu
-    // appears. Drawing must never synchronously decode the whole image set.
-    const art = Sheet.cachedSectionArt(def.key, t.bg);
+function menuCard(cv, G, t, x, y, w, h, def, action, artReady) {
+    // Keep the menu visually consistent while the badges are being prepared:
+    // display either all eight images or the full set of vector fallbacks.
+    const art = artReady ? Sheet.cachedSectionArt(def.key, t.bg) : null;
     if (art) {
         // The supplied badge already carries the section's name; the badge itself is the button.
         const ih = 180, iw = Math.round(ih * art.w / art.h);
@@ -50,13 +50,14 @@ function menuCard(cv, G, t, x, y, w, h, def, action) {
 function drawMenu(cv, G, t, actions) {
     // Eight sections: 4 cards on each of two rows.
     const w = 370, h = 196, gap = 20, y1 = (G.TOP || 44) + 30, y2 = y1 + h + gap;
+    const artReady = SECTIONS.every((def) => Sheet.cachedSectionArt(def.key, t.bg));
     const row = SECTIONS.slice(0, 4), row2 = SECTIONS.slice(4);
     row.forEach((def, i) => {
-        menuCard(cv, G, t, 24 + i * (w + gap), y1, w, h, def, actions && actions[def.key]);
+        menuCard(cv, G, t, 24 + i * (w + gap), y1, w, h, def, actions && actions[def.key], artReady);
     });
     const x0 = row2.length >= 4 ? 24 : (W - (row2.length * w + (row2.length - 1) * gap)) / 2;
     row2.forEach((def, i) => {
-        menuCard(cv, G, t, x0 + i * (w + gap), y2, w, h, def, actions && actions[def.key]);
+        menuCard(cv, G, t, x0 + i * (w + gap), y2, w, h, def, actions && actions[def.key], artReady);
     });
 }
 

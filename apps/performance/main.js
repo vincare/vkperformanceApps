@@ -1434,18 +1434,23 @@ mgu.run({
         let misfireRetryAt = 0, misfireNextAt = 0, misfireDid = false, misfireScanComplete = false, misfireProbeMid = 0xA3;
 
         function warmCarDataArt() {
-            if (state.stopped || page !== 5 || carDataView !== 'menu') {
+            if (state.stopped) {
                 carDataArtTimer = null;
                 return;
             }
             const sections = CarDataUi.SECTIONS;
             if (carDataArtIndex >= sections.length) {
                 carDataArtTimer = null;
-                queueRender();
+                if (page === 5 && carDataView === 'menu') queueRender();
                 return;
             }
             CarDataUi.prepareArt(sections[carDataArtIndex++].key, carDataArtBg);
-            carDataArtTimer = setTimeout(warmCarDataArt, 140);
+            if (carDataArtIndex >= sections.length) {
+                carDataArtTimer = null;
+                if (page === 5 && carDataView === 'menu') queueRender();
+                return;
+            }
+            carDataArtTimer = setTimeout(warmCarDataArt, 40);
         }
 
         function scheduleCarDataArtWarmup(bg) {
@@ -1454,9 +1459,9 @@ mgu.run({
                 carDataArtIndex = 0;
             }
             if (carDataArtTimer || carDataArtIndex >= CarDataUi.SECTIONS.length) return;
-            // Draw the menu first; decode one badge between frames instead of
-            // blocking the CAR DATA tab while all eight PNGs are prepared.
-            carDataArtTimer = setTimeout(warmCarDataArt, 120);
+            // Prepare the badges in short slices while the app is already
+            // displaying its first page, then reveal the complete menu together.
+            carDataArtTimer = setTimeout(warmCarDataArt, 0);
         }
 
         async function pollMisfire(now) {
@@ -2187,6 +2192,7 @@ mgu.run({
             const s = current(demo);
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
+            scheduleCarDataArtWarmup(t.bg);
             // Engine Data keeps its tuned dashboard sizing; every other page
             // uses larger, measured text so labels and values stay readable.
             cv.fontSizeScale = page === 0 ? 1 : PAGE_TEXT_SCALE;
@@ -2293,7 +2299,6 @@ mgu.run({
                 }, Object.assign({
                     back: () => { carDataView = 'menu'; queueRender(); return render(); },
                 }, sectionActions));
-                if (carDataView === 'menu') scheduleCarDataArtWarmup(t.bg);
             } else if (page === 6) {
                 if (demo) {
                     // Demo feed: plausible temperatures climbing so the page animates.
