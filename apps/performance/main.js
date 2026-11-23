@@ -37,6 +37,7 @@ const RENDER_MS = 100;
 const DME_POLL_MS = 1200;
 const PEAK_HOLD_MS = 15000;
 const CD_STALE = 120000;
+const GEARBOX_STALE_MS = 30000;
 const RPM_MAX = 8000;
 const BOOST_MAX_BAR = 2.5;
 const PRESSURE_UNITS = { 1: 'BAR', 2: 'KPA', 3: 'PSI', BAR: 'BAR', KPA: 'KPA', PSI: 'PSI' };
@@ -44,6 +45,7 @@ const DRIVE_STAGES = { P: 'P', R: 'R', N: 'N', D: 'D', 1: 'P', 2: 'R', 3: 'N', 4
 const GEAR_NAMES = { G1: 1, G2: 2, G3: 3, G4: 4, G5: 5, G6: 6, G7: 7, G8: 8, G9: 9, G10: 10 };
 
 function finite(value) { return typeof value === 'number' && isFinite(value); }
+function metricStaleMs(name) { return name === 'gearboxTemp' ? GEARBOX_STALE_MS : CD_STALE; }
 function json(value) {
     try { return JSON.stringify(value); } catch (e) { return '[unserializable]'; }
 }
@@ -704,10 +706,10 @@ mgu.run({
         function updateMetric(name, raw, value, unit, source, status) {
             const previous = state[name];
             const nextStatus = status || (finite(value) ? 'live' : 'invalid');
-            // Transient empty replies and quiet getters should not blank a good
-            // sample. Keep it briefly, using the same limit as CAR DATA.
+            // Ignore short invalid replies, but do not let an old gearbox value
+            // look current: gearboxTemp has its own shorter freshness window.
             if ((!finite(value) || nextStatus !== 'live') && previous && previous.status === 'live' &&
-                finite(previous.value) && Date.now() - previous.at <= CD_STALE) return;
+                finite(previous.value) && Date.now() - previous.at <= metricStaleMs(name)) return;
             state[name] = {
                 raw, value: finite(value) ? value : null, unit: unit || '', source: source || '',
                 at: Date.now(), status: status || (finite(value) ? 'live' : 'invalid'),
@@ -1524,7 +1526,8 @@ mgu.run({
                 valveController.state.busy || valveController.tune.busy || now < valvePriorityUntil) return;
             wakeSilentDiagUnits(now);
             const gearbox = state.gearboxTemp;
-            const gearboxSignalFresh = gearbox && gearbox.status === 'live' && finite(gearbox.value) && now - gearbox.at <= 120000;
+            const gearboxSignalFresh = gearbox && gearbox.status === 'live' && finite(gearbox.value) &&
+                now - gearbox.at <= GEARBOX_STALE_MS;
             const needsEgsTemp = (page === 0 || page === 5) && (dme.egs || []).length > 0 && !gearboxSignalFresh &&
                 now - lastEgsTryAt >= 15000;
             // CAR DATA (page 5) also reads values that make sense with the engine off —
@@ -1696,13 +1699,14 @@ mgu.run({
            older or missing renders as an em dash rather than a made-up number. */
         function cdNum(name, maxAge) {
             const m = state[name];
-            return m && m.status === 'live' && Date.now() - m.at <= (maxAge || CD_STALE) && finite(m.value) ? m.value : null;
+            const ageLimit = finite(maxAge) ? maxAge : metricStaleMs(name);
+            return m && m.status === 'live' && Date.now() - m.at <= ageLimit && finite(m.value) ? m.value : null;
         }
         function cdText(name, maxAge) {
             const m = state[name];
             return m && m.status === 'live' && Date.now() - m.at <= (maxAge || CD_STALE) && m.text ? m.text : null;
         }
-        function heldNum(name) { return cdNum(name, CD_STALE); }
+        function heldNum(name) { return cdNum(name, metricStaleMs(name)); }
         function cdFast(name) { return cdNum(name, FRESH_MS); }
         const cdu = (v, digits, unit) => finite(v) ? formatNumber(v, digits) + ' ' + unit : null;
         const cdt = (v) => v === null || v === undefined ? null : String(v);
@@ -2077,7 +2081,7 @@ mgu.run({
                 const bw = w - 18;
                 ticks.forEach((v) => {
                     const align = v <= min ? 'left' : v >= max ? 'right' : 'center';
-                    cv.text(fmt(v), x + (v - min) / (max - min) * bw, y + 81, 14,
+                    cv.text(fmt(v), x + (v - min) / (max - min) * bw, y + 81 + Math.round(H * 0.01), 14,
                         modeColor ? gaugeColor : G.withAlpha(t.text, 0.85), { align, font: 'bold' });
                 });
             };
@@ -2297,7 +2301,7 @@ mgu.run({
                 if (!m || typeof m !== 'object' || !finite(m.at) || !m.status) return;
                 if (page === 3) parts.push(freshWithin(m, now, DYNO_FRESH_MS) ? '1' : '0');
                 parts.push(fresh(m, now) ? '1' : '0');
-                parts.push(m.status === 'live' && finite(m.value) && now - m.at <= CD_STALE ? '1' : '0');
+                parts.push(m.status === 'live' && finite(m.value) && now - m.at <= metricStaleMs(name) ? '1' : '0');
             });
             return parts.join('');
         }

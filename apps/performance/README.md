@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.45 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.46 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER · EST.** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run. The two gauge limits can be changed
@@ -57,11 +57,16 @@ keeps the last valid reading until it expires, instead of briefly clearing it.
 ## CAR DATA readings
 
 Cluster and status values that may not send change events are refreshed through
-their read getters every 10 seconds. Valid engine, speed and gearbox samples are
-kept for up to two minutes so a quiet parked car does not make the display flash
-to dashes; explicit zero readings remain zero. A known engine-off state sets
-engine RPM, torque and power to zero. Gearbox oil temperature is read from the
-gearbox control unit (EGS) if the cluster's `BasicDataSet` does not provide it.
+their read getters every 10 seconds. Most valid slow-reading values are kept for
+up to two minutes so a quiet parked car does not make the display flash to dashes;
+explicit zero readings remain zero. Gearbox oil temperature has a shorter
+30-second freshness limit, and the EGS fallback is retried when the cluster's
+`BasicDataSet` has no fresh value while Engine Data or Car Data is open. Its
+displayed value is the vehicle-reported temperature converted to °C, not an
+estimate. The signal is optional and the
+configured EGS identifiers are vehicle-dependent, so exact sensor accuracy and
+availability cannot be guaranteed without checking that car's live data.
+A known engine-off state sets engine RPM, torque and power to zero.
 The drivetrain page now shows engine RPM and torque in place of tyre pressure
 and tyre temperature. Set **Drivetrain type** to **Rear-wheel drive** to show
 `NOT SUPPORTED ON RWD`; Auto leaves the split blank until a valid xDrive signal
