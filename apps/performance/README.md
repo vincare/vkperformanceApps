@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.39 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.40 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER · EST.** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run. The two gauge limits can be changed
@@ -18,6 +18,11 @@ The Engine Data header shows the active drive mode: COMFORT in blue, and SPORT,
 SPORT PLUS, or SPORT INDIVIDUAL in red.
 
 ## Live engine readings
+
+Misfire counts now use the read-only OBD monitor service directly, including
+DMEs that do not advertise the monitor list. When all reported cylinders are
+at zero, the Engine Info row shows a single `0`. A failed oil-pressure poll
+keeps the last valid reading until it expires, instead of briefly clearing it.
 
 - **RPM** comes from BMW SOME/IP `CDS.statusEngineSpeed2`, field
   `actualValueRPMEngineCrankshaft`, scaled by 0.25 rpm per raw count.

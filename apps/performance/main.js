@@ -1362,61 +1362,105 @@ mgu.run({
         let dmeExtraIndex = 0;
         let lastDmeCycle = 0;
         let lastEgsTryAt = 0;
-        // OBD service 06 cylinder misfire counts (MIDs A2..AD), one MID per CAR DATA cycle
-        let misfireMids = null, misfireCounts = [], misfireCursor = 0, misfireRetryAt = 0, misfireDid = false;
+        // OBD service 06 cylinder misfire counts (MIDs A2..AD), one MID per CAR DATA cycle.
+        // Probe A2 directly first: some DMEs answer the monitor but do not publish the A0 list.
+        let misfireEcu = null, misfireMids = null, misfireCounts = [], misfireCursor = 0;
+        let misfireRetryAt = 0, misfireNextAt = 0, misfireDid = false, misfireScanComplete = false, misfireProbeMid = 0xA3;
         async function pollMisfire(now) {
             const cfg = dme.misfire || {};
-            const ecu = cfg.ecu == null ? dme.ecu : cfg.ecu;
             const set = (value, status) => {
+                // A missed reply must not erase a recent, good count set.
+                if (status === 'unavailable' && state.misfire && state.misfire.status === 'live' &&
+                    Date.now() - state.misfire.at <= 120000) return;
                 state.misfire = { raw: value, value, unit: 'counts', source: 'DME / OBD service 06', at: Date.now(), status };
                 queueRender();
             };
             if (!misfireMids || !misfireMids.length) {
                 if (now < misfireRetryAt) return;
-                let supported = null;
-                try { supported = await reader.supported(ecu, 0xA0, false); } catch (e) { /* try BMW's UDS form below */ }
-                misfireMids = (supported || []).filter((mid) => mid >= 0xA2 && mid <= 0xAD).slice(0, 12);
-                misfireDid = false;
-                // Some BMW DMEs expose the OBD monitor table only through the equivalent
-                // UDS F6xx identifiers. Fall back to that read-only form when service 06
-                // does not advertise the cylinder misfire monitors.
-                if (!misfireMids.length) {
-                    try { supported = await reader.supported(ecu, 0xA0, true); } catch (e) { supported = null; }
-                    misfireMids = (supported || []).filter((mid) => mid >= 0xA2 && mid <= 0xAD).slice(0, 12);
-                    misfireDid = true;
+                const ownEcu = cfg.ecu == null ? dme.ecu : cfg.ecu;
+                const units = cfg.ecu == null && ownEcu !== 0x13 ? [ownEcu, 0x13] : [ownEcu];
+                let first = null;
+                // Ask the first cylinder directly instead of relying on MID A0 being advertised.
+                for (const ecu of units) {
+                    try {
+                        const rows = await reader.monitor(ecu, 0xA2, false);
+                        if (rows && rows.length) { first = { ecu, did: false, rows }; break; }
+                    } catch (e) { /* try the other engine unit / UDS form */ }
                 }
-                if (!misfireMids.length) {
+                // Some BMW DMEs expose the same monitor only as UDS F6A2.
+                if (!first) {
+                    for (const ecu of units) {
+                        try {
+                            const rows = await reader.monitor(ecu, 0xA2, true);
+                            if (rows && rows.length) { first = { ecu, did: true, rows }; break; }
+                        } catch (e) { /* keep checking the configured engine units */ }
+                    }
+                }
+                if (!first) {
                     set(null, 'unavailable');
                     misfireMids = null;
+                    misfireEcu = null;
                     misfireRetryAt = Date.now() + 300000;
                     return;
                 }
-                misfireCounts = misfireMids.map(() => null);
+
+                misfireEcu = first.ecu;
+                misfireDid = first.did;
+                let supported = null;
+                try { supported = await reader.supported(misfireEcu, 0xA0, misfireDid); } catch (e) { /* use direct MID probing */ }
+                const advertised = (supported || []).filter((mid) => mid >= 0xA2 && mid <= 0xAD).slice(0, 12);
+                if (advertised.length) {
+                    misfireMids = advertised.indexOf(0xA2) >= 0 ? advertised : [0xA2].concat(advertised);
+                    misfireCounts = misfireMids.map(() => null);
+                    misfireScanComplete = true;
+                } else {
+                    // Keep scanning contiguous cylinder monitors until the DME explicitly refuses one.
+                    misfireMids = [0xA2];
+                    misfireCounts = [null];
+                    misfireProbeMid = 0xA3;
+                    misfireScanComplete = false;
+                }
                 misfireCursor = 0;
+                const tid = parseInt(cfg.tid || '0C', 16);
+                const row = first.rows.find((item) => item.tid === tid) || first.rows[0];
+                if (row && row.value < 65535) {
+                    misfireCounts[misfireMids.indexOf(0xA2)] = row.value;
+                    set(misfireCounts.slice(), 'live');
+                }
+                misfireRetryAt = 0;
+                return;
             }
-            const mid = misfireMids[misfireCursor++ % misfireMids.length];
+
+            if (now < misfireNextAt) return;
+            misfireNextAt = 0;
+            const probing = !misfireScanComplete;
+            const mid = probing ? misfireProbeMid : misfireMids[misfireCursor++ % misfireMids.length];
+            if (mid > 0xAD) { misfireScanComplete = true; return; }
             let rows;
-            try { rows = await reader.monitor(ecu, mid, misfireDid); }
+            try { rows = await reader.monitor(misfireEcu, mid, misfireDid); }
             catch (e) {
                 rows = null;
             }
-            // A DME may advertise service 06 but refuse its result request. Try the
-            // BMW UDS F6 form once and keep using it if it answers.
-            if ((!rows || !rows.length) && !misfireDid) {
-                try { rows = await reader.monitor(ecu, mid, true); } catch (e) { rows = null; }
-                if (rows && rows.length) misfireDid = true;
-            }
             if (!rows || !rows.length) {
-                misfireMids = null;
-                misfireRetryAt = Date.now() + 30000;
-                set(null, 'unavailable');
+                const raw = reader.raws[reader.monitorKey(misfireEcu, mid, misfireDid)];
+                if (probing && raw && (/^NRC/.test(raw.why) || raw.why === 'no test results')) {
+                    misfireScanComplete = true;
+                    return;
+                }
+                // A timeout is a missed sample, not evidence that the cylinder has no monitor.
+                misfireNextAt = Date.now() + 30000;
                 return;
             }
             const tid = parseInt(cfg.tid || '0C', 16);
-            const row = rows && (rows.find((item) => item.tid === tid) || rows[0]);
-            if (!row || row.value >= 65535) return;
-            misfireCounts[misfireMids.indexOf(mid)] = row.value;
-            set(misfireCounts.slice(), 'live');
+            const row = rows.find((item) => item.tid === tid) || rows[0];
+            if (!row) return;
+            if (probing) {
+                misfireMids.push(mid);
+                misfireCounts.push(null);
+                misfireProbeMid++;
+            }
+            if (row.value < 65535) misfireCounts[misfireMids.indexOf(mid)] = row.value;
+            if (misfireCounts.some((value) => value !== null)) set(misfireCounts.slice(), 'live');
         }
         async function pollDme() {
             const now = Date.now();
@@ -1503,8 +1547,12 @@ mgu.run({
                         const item = dmeExtras[dmeExtraIndex % dmeExtras.length];
                         dmeExtraIndex++;
                         const value = await reader.value(item.name, item.cfg);
-                        updateMetric(item.name, value, value, item.unit, 'DME ' + item.name,
-                            value === null ? 'invalid' : 'live');
+                        // Keep the last valid DME sample through a transient no-reply. cdNum()
+                        // expires it after CD_STALE, so the UI does not flash a dash each poll.
+                        if (value !== null || !state[item.name] || state[item.name].status !== 'live') {
+                            updateMetric(item.name, value, value, item.unit, 'DME ' + item.name,
+                                value === null ? 'invalid' : 'live');
+                        }
                         if (state.stopped) return;
                     }
                     // ENGINE INFO also asks for the cylinder misfire counts — one MID a cycle.
@@ -1744,6 +1792,7 @@ mgu.run({
                     { label: 'MISFIRES', value: (() => {
                         const m = state.misfire;
                         if (!m || m.status !== 'live' || !Array.isArray(m.value) || now - m.at > CD_STALE) return null;
+                        if (m.value.length && m.value.every((v) => v === 0)) return '0';
                         return m.value.map((v) => (v === null || v === undefined ? '-' : String(v))).join(' · ');
                     })() },
                     { label: 'COOLANT TEMP', value: cdu(cdFast('coolantTemp'), 0, '°C') },

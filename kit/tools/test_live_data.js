@@ -34,7 +34,7 @@ function fakeTransport(answer) {
 
 async function main() {
     /* ---------- check(): only reading gets through ---------- */
-    assert.deepStrictEqual(Object.keys(READ).map(Number).sort((a, b) => a - b), [0x01, 0x09, 0x22]);
+    assert.deepStrictEqual(Object.keys(READ).map(Number).sort((a, b) => a - b), [0x01, 0x06, 0x09, 0x22]);
     for (let sid = 0; sid < 256; sid++) {
         const data = sid === 0x22 ? [0xF1, 0x90] : [0x0C];
         if (READ[sid]) assert.doesNotThrow(() => check(0x12, sid, data, false), 'service ' + sid);
