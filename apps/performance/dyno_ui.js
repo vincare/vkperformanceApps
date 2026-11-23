@@ -201,13 +201,13 @@ function drawSheet(cv, G, t, s, car, current, actions) {
     drawCar(cv, G, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
 
     // 3. Title tag + back chip
-    const tagX = 40, tagY = y0 + 24, tagW = 196, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DYNO RUN', 24, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('DYNO RUN', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'ALL DYNO RUNS',
         { icon: 'fwd', run: actions && actions.toggleView, key: 'performance_dyno_runs' });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_dyno_back', 48);
+    Sheet.drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_dyno_back', 54);
 
     // 4. Smooth diagonal panel on the right (same ribbon as EXHAUST SYSTEM)
     const ribX = 1128;
@@ -247,11 +247,11 @@ function drawSheet(cv, G, t, s, car, current, actions) {
             hasData ? G.withAlpha('#c8ced8', 0.9) : G.withAlpha('#c8ced8', 0.5));
         cv.text(label, rx + 44, ry, 12, G.withAlpha('#e8c8ce', 0.55),
             { font: 'bold', spacing: 1.0, literal: true });
-        cv.text(value, rx + 44, ry + 26, 24, hasData ? color : G.withAlpha('#8c94a0', 0.5),
+        cv.text(value, rx + 44, ry + 30, 24, hasData ? color : G.withAlpha('#8c94a0', 0.5),
             { font: 'num', spacing: 0.5, literal: true });
-        cv.text(detail, rx + 44, ry + 46, 10.5, G.withAlpha('#e8c8ce', 0.42),
+        cv.text(detail, rx + 44, ry + 53, 10.5, G.withAlpha('#e8c8ce', 0.42),
             { font: 'bold', spacing: 0.4, literal: true });
-        Sheet.drawBarSegs(cv, G, rx + 44, ry + 56, hasData);
+        Sheet.drawBarSegs(cv, G, rx + 44, ry + 62, hasData);
     });
 
     // 6. Lower status block: pull state, last run stamp and gate hint
@@ -319,7 +319,7 @@ function drawRuns(cv, G, t, s, actions) {
     });
 
     // Tag + back chip (back returns to the dyno sheet)
-    const tagX = 40, tagY = y0 + 24, tagW = 216, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'SAVED RUNS', 24, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('SAVED RUNS', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });

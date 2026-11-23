@@ -119,7 +119,7 @@ function draw(cv, G, t, s, actions) {
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
 
     // title tag (top-level page: no back chip)
-    const tagX = 40, tagY = y0 + 24, tagW = 196, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'WARM UP', 20, 196, 1.4), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('WARM UP', tagX + (tagW - tagSlant) / 2, tagY + 32, 20, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.4, literal: true });
@@ -190,7 +190,7 @@ function draw(cv, G, t, s, actions) {
         cv.text(row.label, rx + 44, ry + 21, 13, G.withAlpha('#e8c8ce', 0.55),
             { font: 'bold', spacing: 1.0, literal: true });
         const vcol = row.color || (live ? RED : G.withAlpha('#8c94a0', 0.5));
-        cv.text(text, rx + 44, ry + 46, row.font || 25, vcol,
+        cv.text(text, rx + 44, ry + 50, row.font || 25, vcol,
             { font: 'num', spacing: 0.5, literal: true });
         Sheet.drawBarSegs(cv, G, rx + 44, ry + 72, !!row.lit);
     }

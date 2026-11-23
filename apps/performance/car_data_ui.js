@@ -31,7 +31,7 @@ function menuCard(cv, G, t, x, y, w, h, def, action) {
     const art = Sheet.cachedSectionArt(def.key, t.bg);
     if (art) {
         // The supplied badge already carries the section's name; the badge itself is the button.
-        const ih = 150, iw = Math.round(ih * art.w / art.h);
+        const ih = 180, iw = Math.round(ih * art.w / art.h);
         const ix = x + (w - iw) / 2, iy = y + (h - ih) / 2;
         cv.image(art.id, ix, iy, iw, ih);
         if (cv.own && action) cv.target(ix, iy, iw, ih, action, 'performance_cardata_' + def.key, 30);
@@ -123,7 +123,7 @@ function drawSheet(cv, G, t, s, car, actions) {
 
 
     // 3. Title tag + back chip (same as DYNO RUN)
-    const tagX = 40, tagY = y0 + 24, tagW = 196, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, def.title, 20, 196, 1.4), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text(def.title, tagX + (tagW - tagSlant) / 2, tagY + 32, 20, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.4, literal: true });
@@ -148,7 +148,7 @@ function drawSheet(cv, G, t, s, car, actions) {
         cv.fillRect(rx + 12, ry + 56, 4, 8, live ? '#f32635' : G.withAlpha('#c8ced8', 0.3));
         cv.text(row.label, rx + 44, ry + 21, 13, G.withAlpha('#e8c8ce', 0.55),
             { font: 'bold', spacing: 1.0, literal: true });
-        cv.text(text, rx + 44, ry + 46, 25, live ? RED : G.withAlpha('#8c94a0', 0.5),
+        cv.text(text, rx + 44, ry + 50, 25, live ? RED : G.withAlpha('#8c94a0', 0.5),
             { font: 'num', spacing: 0.5, literal: true });
         Sheet.drawBarSegs(cv, G, rx + 44, ry + 72, live);
     }

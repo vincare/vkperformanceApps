@@ -161,7 +161,7 @@ function drawConfigCard(cv, G, t, x, y, w, h, title, subtitle, kind, action) {
     const art = sectionArt(kind, t.bg);
     if (art) {
         // Every badge at the same on-screen height: the badge itself is the button.
-        const ih = 200, iw = Math.round(ih * art.w / art.h);
+        const ih = 230, iw = Math.round(ih * art.w / art.h);
         const ix = x + (w - iw) / 2, iy = y + (h - ih) / 2;
         cv.image(art.id, ix, iy, iw, ih);
         if (cv.own && action) { cv.target(ix, iy, iw, ih, action, 'performance_' + kind + '_section', 30); return; }
@@ -217,28 +217,51 @@ function drawSectionMenu(cv, G, t, car, actions) {
 }
 
 function drawChip(cv, G, x, y, w, label, opts) {
-    const bkH = 36;
+    opts = opts || {};
+    const lines = Array.isArray(opts.lines) && opts.lines.length ? opts.lines : [label];
+    const spacing = 1.4;
+    const iconSpace = opts.icon === 'fwd' || opts.icon === 'reset' || opts.icon === 'back' ? 48 : 28;
+    const labelW = lines.reduce((max, line) => Math.max(max,
+        cv.textWidth(line, 15, { font: 'bold', spacing, literal: true })), 0);
+    w = Math.max(w, Math.ceil(labelW + iconSpace));
+    const bkH = lines.length > 1 ? 52 : 42;
     para(cv, x, y, w, y + bkH, 12, G.withAlpha('#ffffff', 0.08));
-    if (opts && opts.icon === 'fwd') {
+    if (opts.icon === 'fwd') {
         cv.line(x + w - 24, y + 10, x + w - 16, y + bkH / 2, 2.4, '#ffffff');
         cv.line(x + w - 16, y + bkH / 2, x + w - 24, y + bkH - 10, 2.4, '#ffffff');
-        cv.text(label, x + (w - 16) / 2, y + bkH / 2 + 6, 15, '#ffffff',
-            { align: 'center', font: 'bold', spacing: 1.4, literal: true });
     } else if (opts && opts.icon === 'reset') {
         const cx0 = x + 20, cy0 = y + bkH / 2;
         cv.arc(cx0, cy0, 6.5, 8, 70, 390, '#ffffff', { round: true });
         const a = 30 * Math.PI / 180, tx = cx0 + Math.sin(a) * 7, ty = cy0 - Math.cos(a) * 7;
         cv.line(tx, ty, tx - 2.2, ty - 4.3, 2.4, '#ffffff');
         cv.line(tx, ty, tx - 4.8, ty + 0.3, 2.4, '#ffffff');
-        cv.text(label, x + w / 2 + 7, y + bkH / 2 + 6, 15, '#ffffff',
-            { align: 'center', font: 'bold', spacing: 1.4, literal: true });
-    } else {
+    } else if (opts.icon === 'back') {
         cv.line(x + 22, y + 10, x + 14, y + bkH / 2, 2.4, '#ffffff');
         cv.line(x + 14, y + bkH / 2, x + 22, y + bkH - 10, 2.4, '#ffffff');
-        cv.text(label, x + w / 2 + 7, y + bkH / 2 + 6, 15, '#ffffff',
-            { align: 'center', font: 'bold', spacing: 1.4, literal: true });
     }
-    if (cv.own && opts && opts.run) cv.target(x - 6, y - 4, w + 12, bkH + 8, opts.run, opts.key, 10);
+    const lineHeight = 19;
+    const firstY = y + bkH / 2 + 6 - (lines.length - 1) * lineHeight / 2;
+    lines.forEach((line, i) => {
+        const textY = firstY + i * lineHeight;
+        if (opts.icon === 'fwd') {
+            cv.text(line, x + (w - 16) / 2, textY, 15, '#ffffff',
+                { align: 'center', font: 'bold', spacing, literal: true });
+        } else if (opts.icon === 'reset' || opts.icon === 'back') {
+            cv.text(line, x + w / 2 + 7, textY, 15, '#ffffff',
+                { align: 'center', font: 'bold', spacing, literal: true });
+        } else {
+            cv.text(line, x + w / 2, textY, 15, '#ffffff',
+                { align: 'center', font: 'bold', spacing, literal: true });
+        }
+    });
+    if (cv.own && opts.run) cv.target(x - 6, y - 4, w + 12, bkH + 8, opts.run, opts.key, 10);
+}
+
+function titleTagWidth(cv, label, size, minWidth, spacing, font) {
+    const width = cv.textWidth(label, size, {
+        font: font || 'num', spacing: spacing === undefined ? 1.6 : spacing, literal: true,
+    });
+    return Math.max(minWidth || 0, Math.ceil(width + 42));
 }
 
 function drawBackChip(cv, G, tagX, tagY, tagH, actions, targetKey, dy) {
@@ -269,7 +292,7 @@ function drawBurbles(cv, G, t, valve, car, actions, now) {
     drawCar(cv, G, t, valve, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, 'flames');
 
     // 3. Title tag + back chip
-    const tagX = 40, tagY = y0 + 24, tagW = 300, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST BURBLES', 24, 300), tagH = 46, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('EXHAUST BURBLES', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
@@ -493,7 +516,7 @@ function drawExhaustSheet(cv, G, t, valve, car, actions, now) {
     // 3. Car centered on the slab
     drawCar(cv, G, t, valve, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, true);
 
-    const tagX = 40, tagY = y0 + 24, tagW = 264, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST SYSTEM', 24, 264), tagH = 46, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('EXHAUST SYSTEM', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
@@ -612,4 +635,4 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     return cv;
 }
 
-module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, drawBackChip };
+module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, drawBackChip, titleTagWidth };

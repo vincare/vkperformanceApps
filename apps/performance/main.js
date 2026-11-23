@@ -30,6 +30,7 @@ const fs = require('fs');
 const path = require('path');
 
 const W = 1600, H = 520;
+const PAGE_TEXT_SCALE = 1.3;
 const FRESH_MS = 4500;
 const DYNO_FRESH_MS = 500;
 // Vehicle readings do not need a new screen frame more than 10 times a second.
@@ -2186,6 +2187,9 @@ mgu.run({
             const s = current(demo);
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
+            // Engine Data keeps its tuned dashboard sizing; every other page
+            // uses larger, measured text so labels and values stay readable.
+            cv.fontSizeScale = page === 0 ? 1 : PAGE_TEXT_SCALE;
             // Keep the shared page header at the same screen y on pages whose content does not
             // reach the bottom. The renderer otherwise vertically centres those pages, moving
             // their x=24, y=44 red-and-grey rule below Engine Data.

@@ -137,6 +137,7 @@ function ribbonRows(cv, G, s, actions, ribX, y0, xAt, rows) {
 
 function tagChips(cv, G, y0, tagText, tagW, backAction, backKey, extra) {
     const tagX = 40, tagY = y0 + 24, tagH = 46, tagSlant = 15;
+    tagW = Sheet.titleTagWidth(cv, tagText, 24, tagW);
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text(tagText, tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
@@ -257,14 +258,14 @@ function drawSheet(cv, G, t, s, car, actions) {
     drawCar(cv, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
 
     // 3. Title tag + chips (all-runs, back, reset)
-    const tagX = 40, tagY = y0 + 24, tagW = 196, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUN', 24, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('DRAG RUN', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'DRAG HISTORY',
         { icon: 'fwd', run: actions && actions.toggleView, key: 'performance_drag_runs' });
-    Sheet.drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_drag_back', 48);
-    Sheet.drawChip(cv, G, tagX, tagY + tagH + 110, 118, 'RESET',
+    Sheet.drawBackChip(cv, G, tagX, tagY, tagH, actions, 'performance_drag_back', 54);
+    Sheet.drawChip(cv, G, tagX, tagY + tagH + 122, 118, 'RESET',
         { icon: 'reset', run: actions && actions.reset, key: 'performance_drag_reset' });
 
     // 4. Right ribbon — same diagonal bands as DYNO RUN
@@ -280,7 +281,7 @@ function drawSheet(cv, G, t, s, car, actions) {
         typeof s.rolling[key] === 'number' && isFinite(s.rolling[key]) && s.rolling[key] > 0);
     const liveStamp = hasLiveTimes ? stampArt(s.slope == null || s.slope >= -1.0, '#1b070c') : null;
     if (liveStamp) {
-        const ih = 96, iw = Math.round(ih * liveStamp.w / liveStamp.h);
+        const ih = 120, iw = Math.round(ih * liveStamp.w / liveStamp.h);
         const iy = y0 + 26;
         cv.image(liveStamp.id, xAt(ribX + 266, iy + ih / 2) - iw / 2, iy, iw, ih);
     }
@@ -397,7 +398,7 @@ function drawSections(cv, G, t, s, actions) {
     });
 
     // Tag + CLEAR HISTORY above BACK
-    const tagX = 40, tagY = y0 + 24, tagW = 216, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 24, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
@@ -405,7 +406,7 @@ function drawSections(cv, G, t, s, actions) {
         s.clearArmed ? 'CONFIRM CLEAR' : 'CLEAR HISTORY',
         { icon: 'reset', run: actions && actions.clear, key: 'performance_dragsecs_clear' });
     Sheet.drawBackChip(cv, G, tagX, tagY, tagH,
-        { back: actions && actions.toggleView }, 'performance_dragsecs_back', 48);
+        { back: actions && actions.toggleView }, 'performance_dragsecs_back', 54);
 
     // Right ribbon — the five best results
     const ribX = ribbon(cv, G, y0, y1);
@@ -536,15 +537,16 @@ function drawRuns(cv, G, t, s, actions) {
 
     // Tag + CLEAR <SECTION> HISTORY above BACK
     const shortName = sec.label.replace(/ KM\/H| MPH/g, '');
-    const tagX = 40, tagY = y0 + 24, tagW = 216, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 24, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    const clearLines = s.clearArmed ? ['CONFIRM CLEAR'] : ['CLEAR ' + shortName, 'HISTORY'];
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 242,
-        s.clearArmed ? 'CONFIRM CLEAR' : 'CLEAR ' + shortName + ' HISTORY',
-        { icon: 'reset', run: actions && actions.clearSection, key: 'performance_dragruns_clear' });
+        clearLines.join(' '),
+        { icon: 'reset', run: actions && actions.clearSection, key: 'performance_dragruns_clear', lines: clearLines });
     Sheet.drawBackChip(cv, G, tagX, tagY, tagH,
-        { back: actions && actions.up }, 'performance_dragruns_back', 48);
+        { back: actions && actions.up }, 'performance_dragruns_back', s.clearArmed ? 54 : 60);
 
     // Right ribbon — TOP 3 RUNS leaderboard (crown on #1)
     const ribX = ribbon(cv, G, y0, y1);
@@ -674,14 +676,14 @@ function drawReport(cv, G, t, s, actions) {
     });
 
     // Left tag + NEXT RUN above BACK
-    const tagX = 40, tagY = y0 + 24, tagW = 196, tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'REPORT', 24, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('REPORT', tagX + (tagW - tagSlant) / 2, tagY + 32, 24, '#ffffff',
         { align: 'center', font: 'num', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 156, 'NEXT RUN',
         { icon: 'fwd', run: actions && actions.nextRun, key: 'performance_dragreport_next' });
     Sheet.drawBackChip(cv, G, tagX, tagY, tagH,
-        { back: actions && actions.up }, 'performance_dragreport_back', 48);
+        { back: actions && actions.up }, 'performance_dragreport_back', 54);
 
     // Right ribbon — VALID/INVALID stamp sticker + 2-column sub-split breakdown
     const ribX = ribbon(cv, G, y0, y1);
@@ -689,7 +691,7 @@ function drawReport(cv, G, t, s, actions) {
     const hasTimes = hasTimedResults(run);
     const stamp = hasTimes ? stampArt(valid) : null;
     if (stamp) {
-        const ih = 112, iw = Math.round(ih * stamp.w / stamp.h);
+        const ih = 140, iw = Math.round(ih * stamp.w / stamp.h);
         const iy = y0 + 22;
         cv.image(stamp.id, xAt(ribX + 105, iy + ih / 2) - iw / 2, iy, iw, ih);
     } else if (hasTimes) {

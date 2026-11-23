@@ -81,6 +81,7 @@ class Recorder {
     constructor(w, h, opts) {
         this.w = w | 0; this.h = h | 0;
         this.textScale = (opts && opts.textScale) || 1;
+        this.fontSizeScale = 1;
         this.buf = new ArrayBuffer(65536);
         this.f = new Float32Array(this.buf);
         this.u = new Uint32Array(this.buf);
@@ -247,9 +248,12 @@ class Recorder {
     text(str, x, y, size, c, opts) {
         opts = opts || {};
         const s = opts.literal ? String(str) : t(str), family = opts.font || 'label';
-        const f = fonts.get(family, size * this.textScale, s);
+        const fontSizeScale = typeof this.fontSizeScale === 'number' && isFinite(this.fontSizeScale) && this.fontSizeScale > 0
+            ? this.fontSizeScale : 1;
+        const drawSize = size * fontSizeScale, sp = (opts.spacing || 0) * fontSizeScale;
+        const f = fonts.get(family, drawSize * this.textScale, s);
         if (!f) return 0;
-        const sc = size / f.size, sp = opts.spacing || 0;
+        const sc = drawSize / f.size;
         const w = fonts.measure(f, s) * sc + sp * Math.max(0, s.length - 1);
         let pen = opts.align === 'center' ? x - w / 2 : opts.align === 'right' ? x - w : x;
         // One GLYPHS op per run of glyphs from the same atlas: a tall atlas (Korean) goes to the
@@ -278,8 +282,11 @@ class Recorder {
         return w;
     }
     textWidth(str, size, opts) {
-        const s = opts && opts.literal ? String(str) : t(str), f = fonts.get((opts && opts.font) || 'label', size * this.textScale, s);
-        return f ? fonts.measure(f, s) * (size / f.size) + ((opts && opts.spacing) || 0) * Math.max(0, s.length - 1) : 0;
+        const fontSizeScale = typeof this.fontSizeScale === 'number' && isFinite(this.fontSizeScale) && this.fontSizeScale > 0
+            ? this.fontSizeScale : 1;
+        const drawSize = size * fontSizeScale;
+        const s = opts && opts.literal ? String(str) : t(str), f = fonts.get((opts && opts.font) || 'label', drawSize * this.textScale, s);
+        return f ? fonts.measure(f, s) * (drawSize / f.size) + ((opts && opts.spacing) || 0) * fontSizeScale * Math.max(0, s.length - 1) : 0;
     }
 
     /** Draw a cached layer (see layer()) at x, y. Canvas layers (old code) are not supported. */

@@ -6,7 +6,7 @@ function card(cv, G, t, x, y, w, h, title, subtitle, kind, onOpen) {
     const art = require('./flap_ui').sectionArt(kind, t.bg);
     if (art) {
         // Every badge at the same on-screen height: the badge itself is the button.
-        const ih = 200, iw = Math.round(ih * art.w / art.h);
+        const ih = 230, iw = Math.round(ih * art.w / art.h);
         const ix = x + (w - iw) / 2, iy = y + (h - ih) / 2;
         cv.image(art.id, ix, iy, iw, ih);
         if (cv.own && onOpen) cv.target(ix, iy, iw, ih, onOpen, 'performance_race_' + kind, 26);
@@ -36,7 +36,7 @@ function card(cv, G, t, x, y, w, h, title, subtitle, kind, onOpen) {
     }
 
     cv.text(title, cx, y + 201, 27, '#ffffff', { align: 'center', font: 'bold', spacing: 1.5, literal: true });
-    cv.text(subtitle, cx, y + 232, 14, t.dim, { align: 'center', font: 'label' });
+    cv.text(subtitle, cx, y + 238, 14, t.dim, { align: 'center', font: 'label' });
     const bx = x + 34, by = y + h - 76, bw = w - 68, bh = 50;
     cv.roundRect(bx, by, bw, bh, 6, G.withAlpha(t.accent, 0.84));
     cv.strokeRoundRect(bx, by, bw, bh, 6, 1.5, G.withAlpha(t.accent, 0.95));
