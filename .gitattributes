@@ -6,3 +6,7 @@
 *.mgu binary
 kit/renderd/prebuilt/mgu-renderd binary
 *.pack binary
+
+# PERFORMANCE art stays in GitHub but is fetched and checksum-verified during the Store build.
+apps/performance/assets/** export-ignore
+apps/performance/designs/**/*.png export-ignore

@@ -198,6 +198,7 @@ def fetch_assets(adir, assets):
             data = zipfile.ZipFile(io.BytesIO(data)).read(a['zipMember'])
         if sha(data) != a['sha256']:
             sys.exit('%s: file does not match its SHA-256' % a['file'])
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
         open(dst, 'wb').write(data)
 
 

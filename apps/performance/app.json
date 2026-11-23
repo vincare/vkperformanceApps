@@ -2,7 +2,209 @@
   "id": "performance",
   "title": "PERFORMANCE",
   "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
-  "version": "0.6.34",
+  "version": "0.6.35",
+  "assets": [
+    {
+      "file": "assets/car-models/M340i_Black.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M340i_Black.png",
+      "sha256": "ec636801caeae0216236b86c91739f04272a67dbbd6dd040a40aeca118a3ed01"
+    },
+    {
+      "file": "assets/car-models/M340i_Blue.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M340i_Blue.png",
+      "sha256": "6dc733f7ee023ef8e7f1083943c9f06fe0884ff65edbe2a538f282f68ab7f6a4"
+    },
+    {
+      "file": "assets/car-models/M340i_Red.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M340i_Red.png",
+      "sha256": "b4b685a11ca1dd1836932d841f9ecb032ef4644ed44021b963c60d91072d8458"
+    },
+    {
+      "file": "assets/car-models/M340i_SideView_Black.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M340i_SideView_Black.png",
+      "sha256": "f99ef86cc57876a751cb88ad1cacc4472f936ed4789e200f6c4be1379f1614f2"
+    },
+    {
+      "file": "assets/car-models/M340i_SideView_Blue.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M340i_SideView_Blue.png",
+      "sha256": "ca1e3beab05cd61d9aa7d9d7f1d555826683cc80454ccb7b488935b5bfc636d1"
+    },
+    {
+      "file": "assets/car-models/M340i_SideView_Red.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M340i_SideView_Red.png",
+      "sha256": "22e83326b5c821bc0f503e5f36c25fc0bf4a7d12cd695ef7acc3115402422173"
+    },
+    {
+      "file": "assets/car-models/M440i_Black.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M440i_Black.png",
+      "sha256": "25f906b4b2292593b9b4bda030414d5bb6063d3b59852b20b2fbe276b1fd163c"
+    },
+    {
+      "file": "assets/car-models/M440i_Blue.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M440i_Blue.png",
+      "sha256": "4ed71ced8cceb1f8454d6e2e905dda0a3693de427b4f7ae5234640b92401d6fa"
+    },
+    {
+      "file": "assets/car-models/M440i_Red.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M440i_Red.png",
+      "sha256": "51bb0f788220ce37bbfb98f8e9523db62683c5ba3d9132e66f3f9df0b92c1b84"
+    },
+    {
+      "file": "assets/car-models/M440i_SideView_Black.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M440i_SideView_Black.png",
+      "sha256": "2c8ecdfd56cdd18b4970ae970493850e02b37e4c4da7bd5c57d9af516a41c0e6"
+    },
+    {
+      "file": "assets/car-models/M440i_SideView_Blue.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M440i_SideView_Blue.png",
+      "sha256": "8c2845cc02c0b1cbd3a6ecfe5018c5a6403849dbf2e36baa5a5574ae3c748eca"
+    },
+    {
+      "file": "assets/car-models/M440i_SideView_Red.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/car-models/M440i_SideView_Red.png",
+      "sha256": "bb0469c3b4f04ebaaae31b3698ea08bf497bce1c1e7d1030c5fbd0eade6f9a4b"
+    },
+    {
+      "file": "assets/ui/boost-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/boost-badge.png",
+      "sha256": "fbf339613e89b1e2edf57dc64d2259df3f0fd1c54578680b2169edc281c4a8f1"
+    },
+    {
+      "file": "assets/ui/drag-invalid-stamp.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/drag-invalid-stamp.png",
+      "sha256": "cdcb55a17af6e4ee7081155b2628c172587bbc34d1649fa1d54ec037258cc0a8"
+    },
+    {
+      "file": "assets/ui/drag-run-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/drag-run-badge.png",
+      "sha256": "08dc0b299f772eec56b9e60435f0ce4259ff466377dab522c9f6dab52f30808a"
+    },
+    {
+      "file": "assets/ui/drag-valid-stamp.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/drag-valid-stamp.png",
+      "sha256": "f0b6426fb0676e236a0052667734019a489933dca38672f9e54754e186a2939f"
+    },
+    {
+      "file": "assets/ui/drivetrain-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/drivetrain-badge.png",
+      "sha256": "44bf8a5a67e33040d21d07a938191679b4df24fc34609c3c55cb0c8301f2d2a7"
+    },
+    {
+      "file": "assets/ui/dyno-run-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/dyno-run-badge.png",
+      "sha256": "49febb6f95f2249511e9c567fe4d83f65a3568b99ac0803dcfc4d0faf0cf43c6"
+    },
+    {
+      "file": "assets/ui/electrical-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/electrical-badge.png",
+      "sha256": "7cc45d9181f446dac6105e2b4840af659815e4eab94e5839ca97c42d118d43c1"
+    },
+    {
+      "file": "assets/ui/engine-info-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/engine-info-badge.png",
+      "sha256": "77eafff58f5c157d532c453d915f842debfb20caa56e4b9fc586361ee3cd0ad9"
+    },
+    {
+      "file": "assets/ui/exhaust-burbles-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/exhaust-burbles-badge.png",
+      "sha256": "0e6ad9be04cfad40e0e30f9de0880f46a85ec861dc429035993b384a12857ca9"
+    },
+    {
+      "file": "assets/ui/exhaust-system-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/exhaust-system-badge.png",
+      "sha256": "16a6726a27a05455cd4dff004cd2b04b6c80b745ac5ca5c5950f8f2e41148589"
+    },
+    {
+      "file": "assets/ui/fuel-system-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/fuel-system-badge.png",
+      "sha256": "f9ad154352169444dd929943f31c4b3f74a33e9074819a2e9a2a1069f9533cb2"
+    },
+    {
+      "file": "assets/ui/ignition-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/ignition-badge.png",
+      "sha256": "13eb81f55acc0e0c02d106bfcf03f39c4eaac71630aaa6d04047a50375204300"
+    },
+    {
+      "file": "assets/ui/powertrain-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/powertrain-badge.png",
+      "sha256": "6da4658a8f2b195cd18fe26f20d2167a5e83dcd72255d5fde1b408408fc904be"
+    },
+    {
+      "file": "assets/ui/tyre-wheel.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/tyre-wheel.png",
+      "sha256": "7a2ea8347691c26334522fd628a9cf268ffceff43031aaef7b307f3032b39894"
+    },
+    {
+      "file": "assets/ui/tyres-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/tyres-badge.png",
+      "sha256": "476bfe50e32c94f8caea5be4f1a056c7d31ecdde68c3448a326ad7f653192cc7"
+    },
+    {
+      "file": "designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_BLACK_REAR.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_BLACK_REAR.png",
+      "sha256": "1296a8ff137f509f6a665ecec4f80c4731d47832035c0510552d437de9f29e76"
+    },
+    {
+      "file": "designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_BLACK_SIDEVIEW.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_BLACK_SIDEVIEW.png",
+      "sha256": "7d7f1cab3db6553c2cf89684c5845edc961b5c33d26a305ae4dc9283afa12c13"
+    },
+    {
+      "file": "designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_BLUE_REAR.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_BLUE_REAR.png",
+      "sha256": "2ccb2baca49b7cc94d228c9c9fb386908aa859163cb2fab6343a25348a743ecb"
+    },
+    {
+      "file": "designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_BLUE_SIDEVIEW.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_BLUE_SIDEVIEW.png",
+      "sha256": "d118bac811ce0c392a382ddfcf73854124601f28546e6a954413f312306ac7b3"
+    },
+    {
+      "file": "designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_RED_REAR.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_RED_REAR.png",
+      "sha256": "0a4ac5b863e22eaec999b476de2d0206e7cfdc30677df2267ea2ed8941cc61b3"
+    },
+    {
+      "file": "designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_RED_SIDEVIEW.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G11-12/BMW_M760Li_G11_G12_FACELIFT_RED_SIDEVIEW.png",
+      "sha256": "56504232da55643960d0a16f626177340b12593122bd34414537d234a4b6edf8"
+    },
+    {
+      "file": "designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_BLACK_REAR.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_BLACK_REAR.png",
+      "sha256": "ceeae836c3ad40a5527aafd7ac3f3cdaa44fd0bef37a387f1f5fba78bbf71ee4"
+    },
+    {
+      "file": "designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_BLACK_SIDEVIEW.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_BLACK_SIDEVIEW.png",
+      "sha256": "908173fd93968d329150090d75a94b9a3d9fbfaf85233d3348b466e7cb5889a9"
+    },
+    {
+      "file": "designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_BLUE_REAR.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_BLUE_REAR.png",
+      "sha256": "000c8bdfb9495c31271c696f561e25c92dada2c622f359ebaf2455fa5d4aebbe"
+    },
+    {
+      "file": "designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_BLUE_SIDEVIEW.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_BLUE_SIDEVIEW.png",
+      "sha256": "c8129bf4969e458ff4b15992c6ebb3ecb53f318cc962a85ad05aa0a05eff3805"
+    },
+    {
+      "file": "designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_RED_REAR.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_RED_REAR.png",
+      "sha256": "acb501d73973b94103ba4df394fd3518b1e25de77f5656e57e83414937166388"
+    },
+    {
+      "file": "designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_RED_SIDEVIEW.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/CARS/G30/BMW_M550i_G30_PREFACELIFT_RED_SIDEVIEW.png",
+      "sha256": "3dd91cf6f4894d21b6b75645bc6344ed74e4778ae04ddb58502e5d6833f08a31"
+    },
+    {
+      "file": "designs/TYRESINFO-WHEEL.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/TYRESINFO-WHEEL.png",
+      "sha256": "f7590aa2e3cc03883c3d6ae93e4a6af30a505eaef9ae4366bc12ca760e24672e"
+    }
+  ],
   "maxDiskUsage": 33554432,
   "loggingId": "OAA6",
   "iconGlyph": "dyno",
