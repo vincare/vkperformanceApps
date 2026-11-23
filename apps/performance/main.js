@@ -32,7 +32,10 @@ const path = require('path');
 const W = 1600, H = 520;
 const FRESH_MS = 4500;
 const DYNO_FRESH_MS = 500;
-const RENDER_MS = 16;
+// The renderer can request frames at 60 Hz even though vehicle data changes
+// far more slowly. Keep live pages near 11 Hz and let static pages sleep.
+const RENDER_MS = 90;
+const STATIC_HEARTBEAT_MS = 1000;
 const DME_POLL_MS = 1200;
 const PEAK_HOLD_MS = 15000;
 const RPM_MAX = 8000;
@@ -138,7 +141,9 @@ mgu.run({
         const peaks = { live: Object.create(null), demo: Object.create(null) };
         const subscriptions = [];
         const diagnosticDedup = Object.create(null);
-        let renderTimer = null, renderQueued = false, freshnessTimer = null, dmeTimer = null, demoTimer = null;
+        let renderTimer = null, renderQueued = false, renderInFlight = null;
+        let renderDirty = true, lastRenderAt = 0;
+        let freshnessTimer = null, dmeTimer = null, demoTimer = null;
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
         let vehicleGear = null, vehicleGearAt = 0;
@@ -701,10 +706,9 @@ mgu.run({
             };
             record(name, raw, finite(value) ? value : null, unit, source, state[name].status);
             feedWarmup();
-            // Engine Config shows valve state and a timed smoke animation, not
-            // engine telemetry. Avoid rebuilding and sending the full screen
-            // for every fast vehicle signal while that page is open.
-            if (page !== 1) queueRender();
+            // Rebuild only pages that display or consume telemetry; static
+            // configuration and mode pages update from their own actions.
+            if (page === 0 || page === 3 || page === 4 || page === 5 || page === 6) queueRender();
         }
 
         function onProvider(iface, available) {
@@ -2053,7 +2057,7 @@ mgu.run({
             drawMSoundButton(cv, t, mSoundReady, mSoundActive(), toggleMSoundMode);
         }
 
-        async function render() {
+        async function drawFrame() {
             if (state.stopped) return;
             const demo = settings.get('demo') === 'on';
             const s = current(demo);
@@ -2183,8 +2187,37 @@ mgu.run({
             return ui.image('MAIN_GFX', cv);
         }
 
+        async function render() {
+            if (state.stopped) return;
+            if (renderInFlight) return renderInFlight;
+
+            const livePage = page === 0 || page === 3 || page === 4 || page === 6;
+            const interval = livePage ? RENDER_MS : STATIC_HEARTBEAT_MS;
+            const now = Date.now();
+            if (!renderDirty && now - lastRenderAt < interval) return;
+            // Keep a pending live update until the frame budget allows it. A
+            // later renderer tick will draw the newest state, coalescing bursts.
+            if (livePage && now - lastRenderAt < RENDER_MS) return;
+
+            renderDirty = false;
+            const finishRender = () => {
+                renderInFlight = null;
+                lastRenderAt = Date.now();
+                if (renderDirty && !state.stopped) queueRender();
+            };
+            renderInFlight = Promise.resolve().then(drawFrame).then(() => {
+                finishRender();
+            }, (e) => {
+                log.warn('render: ' + shortError(e));
+                finishRender();
+            });
+            return renderInFlight;
+        }
+
         function queueRender() {
             if (state.stopped) return;
+            renderDirty = true;
+            if (renderInFlight) return;
             if (mainLoop) { mainLoop.kick(); return; }
             if (renderQueued) return;
             renderQueued = true;
@@ -2401,7 +2434,8 @@ mgu.run({
         diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', engineMonitorReadOnly: true,
             exhaustControlDisarmed: !valveController.armedSetting,
             rawDiagnostics: diagnostics(), dmeCandidates: settings.get('readDmeCandidates') === true });
-        // Every screen refresh (60 fps) with the GPU renderer; 10 fps in software (PNG frames)
+        // The renderer may tick at 60 Hz; render() limits actual drawing to the
+        // vehicle-data rate and sends a 1 Hz keepalive on static pages.
         if (ctx.loop) mainLoop = ctx.loop('MAIN', 10, render);
         render().catch((e) => log.warn('first render: ' + shortError(e)));
     },
