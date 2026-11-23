@@ -189,6 +189,7 @@ def fetch_assets(adir, assets):
     """Large files an app needs but git doesn't keep (app.json "assets"): downloaded once, checked by SHA-256."""
     import hashlib, io, urllib.request, zipfile
     sha = lambda b: hashlib.sha256(b).hexdigest()
+    downloaded = []
     for a in assets:
         dst = os.path.join(adir, a['file'])
         if os.path.exists(dst) and sha(open(dst, 'rb').read()) == a['sha256']:
@@ -203,6 +204,8 @@ def fetch_assets(adir, assets):
             sys.exit('%s: file does not match its SHA-256' % a['file'])
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         open(dst, 'wb').write(data)
+        downloaded.append(dst)
+    return downloaded
 
 
 def build_ui(spec, language='en', hmi='ID7'):
@@ -645,7 +648,7 @@ def build(app_id, language='en', preview_only=False, store_package=False):
     json.dump({'rhmiLoadingEnabled': True, 'entryPointLoadingEnabled': True, 'settings': {app_id: spec.get('config', {})}},
               open(os.path.join(src, 'config', 'base.json'), 'w', encoding='utf-8', newline='\n'), indent=2)
     # app code
-    fetch_assets(adir, spec.get('assets', []))
+    fetched_assets = fetch_assets(adir, spec.get('assets', []))
     for f in os.listdir(adir):
         if f.endswith('.js'):
             shutil.copy(os.path.join(adir, f), os.path.join(src, 'javascript', 'app.js' if f == 'main.js' else f))
@@ -661,6 +664,19 @@ def build(app_id, language='en', preview_only=False, store_package=False):
             # a committed pack (e.g. dtc_scanner/dtc_db.pack); a local folder of the same name replaces it
             shutil.copy(os.path.join(adir, f), os.path.join(src, 'javascript', f))
             print('  %s (committed)' % f)
+    if store_package and fetched_assets:
+        # All folders have been embedded in source/*.pack. MGU Store builds
+        # run in a throwaway checkout, so drop only files fetched by this build
+        # to keep the extracted art and finished .tgz from occupying space twice.
+        for path in fetched_assets:
+            os.remove(path)
+        for folder in sorted({os.path.dirname(p) for p in fetched_assets}, key=len, reverse=True):
+            while folder != adir and folder.startswith(adir + os.sep):
+                try:
+                    os.rmdir(folder)
+                except OSError:
+                    break
+                folder = os.path.dirname(folder)
     # kit runtime
     if app_id == 'dtc_scanner' and language in ('zh-CN', 'ru'):
         module = 'build_diagnostic_zh' if language == 'zh-CN' else 'build_diagnostic_ru'
