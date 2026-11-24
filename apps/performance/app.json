@@ -3,7 +3,7 @@
   "title": "PERFORMANCE",
   "backBtnX": 21,
   "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
-  "version": "0.6.56",
+  "version": "0.6.57",
   "assets": [
     {
       "file": "assets/car-models/M340i_Black.png",
@@ -1416,17 +1416,6 @@
           "min": -40,
           "max": 160,
           "note": "ZF 8HP EGS temperature, deg C + 40"
-        },
-        {
-          "ecu": 24,
-          "did": "DA12",
-          "bytes": 1,
-          "at": 0,
-          "factor": 1,
-          "offset": -48,
-          "min": -40,
-          "max": 160,
-          "note": "EGS transmission oil temperature, deg C + 48"
         }
       ],
       "misfire": {

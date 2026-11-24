@@ -204,19 +204,23 @@ function drawSheet(cv, G, t, s, car, actions) {
 
     // 5. Five live values along the diagonal: accent tick, label, big value, bar segs
     const rows = s.rows || [];
-    for (let i = 0; i < 5; i++) {
+    const tyreMore = s.view === 'tyres' && s.tyrePage === 'more';
+    const rowCount = tyreMore ? 6 : 5;
+    for (let i = 0; i < rowCount; i++) {
         const row = rows[i] || { label: '—', value: null };
         const text = row.value === null || row.value === undefined ? '—' : String(row.value);
         const live = text !== '—' && text !== '';
-        const ry = y0 + 34 + i * 84;
+        const ry = y0 + (tyreMore ? 18 + i * 68 : 34 + i * 84);
+        const labelSize = tyreMore ? 12 : 13;
+        const valueSize = tyreMore ? 20 : 25;
         const rx = xAt(ribX + 26, ry);
-        cv.fillRect(rx + 12, ry - 2, 4, 66, G.withAlpha('#c8ced8', live ? 0.9 : 0.35));
-        cv.fillRect(rx + 12, ry + 56, 4, 8, live ? '#f32635' : G.withAlpha('#c8ced8', 0.3));
-        cv.text(row.label, rx + 44, ry + 21, 13, G.withAlpha('#e8c8ce', 0.55),
+        cv.fillRect(rx + 12, ry - 2, 4, tyreMore ? 50 : 66, G.withAlpha('#c8ced8', live ? 0.9 : 0.35));
+        cv.fillRect(rx + 12, ry + (tyreMore ? 42 : 56), 4, tyreMore ? 7 : 8, live ? '#f32635' : G.withAlpha('#c8ced8', 0.3));
+        cv.text(row.label, rx + 44, ry + (tyreMore ? 15 : 21), labelSize, G.withAlpha('#e8c8ce', 0.55),
             { font: 'bold', spacing: 1.0, literal: true });
-        cv.text(text, rx + 44, ry + 50, 25, live ? RED : G.withAlpha('#8c94a0', 0.5),
+        cv.text(text, rx + 44, ry + (tyreMore ? 39 : 50), valueSize, live ? RED : G.withAlpha('#8c94a0', 0.5),
             { font: 'num', spacing: 0.5, literal: true });
-        Sheet.drawBarSegs(cv, G, rx + 44, ry + 72, live);
+        Sheet.drawBarSegs(cv, G, rx + 44, ry + (tyreMore ? 54 : 72), live);
     }
 }
 

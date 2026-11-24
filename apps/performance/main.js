@@ -42,7 +42,7 @@ const ENGINE_DATA_RENDER_MS = 1000 / ENGINE_DATA_FPS;
 const DME_POLL_MS = 1200;
 const PEAK_HOLD_MS = 15000;
 const CD_STALE = 120000;
-const GEARBOX_STALE_MS = 30000;
+const GEARBOX_STALE_MS = 45000;
 const RPM_MAX = 8000;
 const BOOST_MAX_BAR = 2.5;
 const PRESSURE_UNITS = { 1: 'BAR', 2: 'KPA', 3: 'PSI', BAR: 'BAR', KPA: 'KPA', PSI: 'PSI' };
@@ -55,8 +55,9 @@ function json(value) {
     try { return JSON.stringify(value); } catch (e) { return '[unserializable]'; }
 }
 function pressureUnit(value) {
-    if (typeof value === 'string') return PRESSURE_UNITS[value.trim().toUpperCase()] || null;
-    return PRESSURE_UNITS[value] || null;
+    const raw = value && typeof value === 'object' ? (value.name || value.value) : value;
+    if (typeof raw === 'string') return PRESSURE_UNITS[raw.trim().toUpperCase()] || null;
+    return PRESSURE_UNITS[raw] || null;
 }
 function gearNumber(value) {
     if (typeof value === 'number') return value >= 3 && value <= 12 ? value - 2 : value === 1 ? -1 : value === 2 ? 0 : null;
@@ -107,6 +108,7 @@ mgu.run({
         } catch (e) { /* first start */ }
         let dragRuns = [], dragBest = Object.create(null), dragSelectedAt = null;
         let dragView = 'live', dragListOffset = 0, dragClearUntil = 0, dragPeakG = 0;
+        let dragLiveCleared = false;
         let rollingTimer = null, rollingResult = {}, demoRollingCleared = false;
         // Dragy-style road grade: accelerometer holds gravity, so slope% =
         // (a_measured - dv/dt) / g. At a standstill dv/dt is 0 and the raw
@@ -341,7 +343,7 @@ mgu.run({
             const unit = dragUnit(), distance = dragDistance(), rollout = settings.get('dragRollout') === true;
             dragTimer = new RunTimer(DragRun.allSplits(unit), {
                 rollout,
-                onLaunch: () => { dragPeakG = 0; dragWheelspin.launch(Date.now()); },
+                onLaunch: () => { dragLiveCleared = false; dragPeakG = 0; dragWheelspin.launch(Date.now()); },
                 onDone: (event) => {
                     const run = Object.assign({}, event, {
                         unit, distanceKey: distance.key, distanceLabel: distance.label,
@@ -359,6 +361,7 @@ mgu.run({
                         }
                     });
                     dragSelectedAt = run.at;
+                    dragLiveCleared = false;
                     dragView = 'live';
                     dragListOffset = 0;
                     dragClearUntil = 0;
@@ -377,6 +380,7 @@ mgu.run({
             const rollDone = rollingTimer ? rollingTimer.feed(at, speed) : {};
             const keys = Object.keys(rollDone);
             if (keys.length) {
+                dragLiveCleared = false;
                 const unit = dragUnit(), rollout = settings.get('dragRollout') === true;
                 const inRun = dragTimer.state === 'run';
                 keys.forEach((key) => {
@@ -481,16 +485,15 @@ mgu.run({
 
         function resetDragTimer() {
             if (!dragTimer) return null;
-            if (settings.get('demo') === 'on') {
-                demoRollingCleared = true;
-                rollingResult = {};
-                queueRender();
-                return render();
-            }
-            dragTimer.reset();
+            dragLiveCleared = true;
             rollingResult = {};
+            dragTimer.reset();
+            rollingTimer = new DragRun.RollingSplits(DragRun.allSplits(dragUnit()));
             dragPeakG = 0;
             dragWheelspin.resetRun();
+            if (settings.get('demo') === 'on') {
+                demoRollingCleared = true;
+            }
             queueRender();
             return render();
         }
@@ -927,14 +930,44 @@ mgu.run({
             if (finite(peak) && peak > 0) updateMetric('boostPeak', peakRaw, peak, 'bar', source, 'live');
         }
 
+        function tyrePressureBar(raw) {
+            if (!finite(raw) || raw >= 65532) return null;
+            const valueInUnit = raw * 0.1;
+            const factor = PRESS_TO_BAR[state.pressureUnit];
+            const value = factor ? valueInUnit * factor
+                : valueInUnit >= 0.5 && valueInUnit <= 6 ? valueInUnit
+                    : valueInUnit >= 7 && valueInUnit < 60 ? valueInUnit / 14.5038
+                        : valueInUnit >= 60 && valueInUnit <= 600 ? valueInUnit / 100 : valueInUnit;
+            return finite(value) && value > 0 && value < 7 ? value : null;
+        }
+        function tyreTemperatureC(raw) {
+            if (!finite(raw) || raw === 65535) return null;
+            let value = raw - 40;
+            if (state.tempUnit === 'F') value = (value - 32) * 5 / 9;
+            return finite(value) && value > -40 && value < 120 ? value : null;
+        }
+        function reconvertTyreMetrics(keys, decoder, unit, source) {
+            keys.forEach((key) => {
+                const previous = state[key];
+                if (!previous || previous.raw === undefined) return;
+                const value = decoder(previous.raw);
+                updateMetric(key, previous.raw, value, unit, source,
+                    finite(value) ? 'live' : 'invalid');
+            });
+        }
+        const tyrePressureKeys = ['tyrePFL', 'tyrePFR', 'tyrePRL', 'tyrePRR', 'tyrePtFL', 'tyrePtFR', 'tyrePtRL', 'tyrePtRR'];
+        const tyreTemperatureKeys = ['tyreTFL', 'tyreTFR', 'tyreTRL', 'tyreTRR'];
         function setPressureUnits(payload, source) {
             const raw = payload && payload.unitOfMeasurementAirPressure;
             const unit = pressureUnit(raw);
             state.pressureUnit = unit;
             const tempRaw = payload && payload.unitOfMeasurementTemperature;
-            state.tempUnit = ({ 1: 'C', 2: 'F', C: 'C', F: 'F' })[typeof tempRaw === 'string' ? tempRaw.trim().toUpperCase() : tempRaw] || state.tempUnit || null;
+            const tempValue = tempRaw && typeof tempRaw === 'object' ? (tempRaw.name || tempRaw.value) : tempRaw;
+            state.tempUnit = ({ 1: 'C', 2: 'F', C: 'C', F: 'F' })[typeof tempValue === 'string' ? tempValue.trim().toUpperCase() : tempValue] || state.tempUnit || null;
             diagLog('pressure_units', { source, raw, unit: unit || 'unknown' });
             if (state.boostFes.at) setFesBoost({ displayBoostPressure: state.boostFes.raw }, 'reconvert');
+            reconvertTyreMetrics(tyrePressureKeys, tyrePressureBar, 'bar', 'reconvert');
+            reconvertTyreMetrics(tyreTemperatureKeys, tyreTemperatureC, 'degC', 'reconvert');
             if (page !== 5 || carDataMetricVisible('boostFes')) queueRender();
         }
 
@@ -1042,12 +1075,8 @@ mgu.run({
             [['tyrePFL', 'actualValuePressureTyreFLH'], ['tyrePFR', 'actualValuePressureTyreFRH'],
              ['tyrePRL', 'actualValuePressureTyreRLH'], ['tyrePRR', 'actualValuePressureTyreRRH']].forEach(([key, field]) => {
                 const raw = payload[field];
-                let value = null;
-                if (finite(raw) && raw < 65532) {
-                    const v = raw * 0.1, k = PRESS_TO_BAR[state.pressureUnit];
-                    value = k ? v * k : v >= 0.5 && v <= 6 ? v : v >= 7 && v < 60 ? v / 14.5038 : v >= 60 && v <= 600 ? v / 100 : v;
-                }
-                updateMetric(key, raw, finite(value) && value > 0 && value < 7 ? value : null, 'bar', source, 'live');
+                const value = tyrePressureBar(raw);
+                updateMetric(key, raw, value, 'bar', source, finite(value) ? 'live' : 'invalid');
             });
         }
         function setTyreTarget(payload, source) {
@@ -1055,12 +1084,8 @@ mgu.run({
             [['tyrePtFL', 'targetPressureTyreFLH'], ['tyrePtFR', 'targetPressureTyreFRH'],
              ['tyrePtRL', 'targetPressureTyreRLH'], ['tyrePtRR', 'targetPressureTyreRRH']].forEach(([key, field]) => {
                 const raw = payload[field];
-                let value = null;
-                if (finite(raw) && raw < 65532) {
-                    const v = raw * 0.1, k = PRESS_TO_BAR[state.pressureUnit];
-                    value = k ? v * k : v >= 0.5 && v <= 6 ? v : v >= 7 && v < 60 ? v / 14.5038 : v >= 60 && v <= 600 ? v / 100 : v;
-                }
-                updateMetric(key, raw, finite(value) && value > 0 && value < 7 ? value : null, 'bar', source, 'live');
+                const value = tyrePressureBar(raw);
+                updateMetric(key, raw, value, 'bar', source, finite(value) ? 'live' : 'invalid');
             });
         }
         function setTyreTemp(payload, source) {
@@ -1068,9 +1093,8 @@ mgu.run({
             [['tyreTFL', 'actualValueTemperatureTyreFLH'], ['tyreTFR', 'actualValueTemperatureTyreFRH'],
              ['tyreTRL', 'actualValueTemperatureTyreRLH'], ['tyreTRR', 'actualValueTemperatureTyreRRH']].forEach(([key, field]) => {
                 const raw = payload[field];
-                let value = finite(raw) && raw !== 65535 ? raw - 40 : null;
-                if (finite(value) && state.tempUnit === 'F') value = (value - 32) * 5 / 9;
-                updateMetric(key, raw, finite(value) && value > -40 && value < 120 ? value : null, 'degC', source, 'live');
+                const value = tyreTemperatureC(raw);
+                updateMetric(key, raw, value, 'degC', source, finite(value) ? 'live' : 'invalid');
             });
         }
 
@@ -1097,59 +1121,67 @@ mgu.run({
             }
         };
 
-        // ---- DYNAMIC CONFIG: DSC mode requests through TPMS.chassisControl ----
-        // The same write channel the iDrive DSC button uses. Two-tap confirm on every
-        // mode; the live FES.statusDSCSwitchHMI read-back verifies what the car applied.
+        // ---- DYNAMIC CONFIG: DSC requests through TPMS.chassisControl ----
+        // Confirm the safety-reducing OFF command twice while parked; read back the
+        // actual mode from FES.statusDSCSwitchHMI instead of treating an accepted write as success.
         let tpmsProxy = null;
         const dscWrite = { busy: false, armed: null, armedUntil: 0, status: '', warn: false };
-        const DSC_ENUMS = {
-            on: ['DSC_EINSCHALTEN'],
-            off: ['DSC_AUSSCHALTEN'],
-            // The traction-mode request enum is not published; try the plausible names
-            // in order — a rejected set just moves to the next candidate.
-            mdm: ['TRAKTIONSMODUS_EINSCHALTEN', 'DTC_EINSCHALTEN', 'MDM_EINSCHALTEN', 'DSC_TRAKTIONSMODUS_EIN'],
-        };
+        // These two request enums are documented by the TPMS chassisControl reference.
+        // MDM's request enum is not verified; never send guessed values to the stability system.
+        const DSC_ENUMS = { on: 'DSC_EINSCHALTEN', off: 'DSC_AUSSCHALTEN' };
         const DSC_LABEL = { on: 'DSC ON', mdm: 'MDM', off: 'DSC OFF' };
         function dscStatus(text, warn) {
             dscWrite.status = text; dscWrite.warn = !!warn;
             queueRender();
         }
         function dscSend(mode) {
-            const candidates = DSC_ENUMS[mode];
-            let i = 0;
-            const attempt = () => {
-                if (i >= candidates.length) {
-                    dscWrite.busy = false;
-                    dscStatus(DSC_LABEL[mode] + ' · REFUSED BY CAR', true);
-                    return;
-                }
-                const value = candidates[i++];
-                let pending;
-                try { pending = ctx.signals.set(tpmsProxy, 'chassisControl', TyreData.dscStruct(value)); }
-                catch (e) { pending = Promise.reject(e); }
-                Promise.resolve(pending).then(
-                    () => {
-                        log.info('dsc ' + mode + ' sent via ' + value);
-                        dscStatus('SENT ' + DSC_LABEL[mode] + ' · VERIFYING');
-                        [1500, 4000].forEach((ms, j) => setTimeout(() => {
-                            const d = tyreExtra.dsc;
-                            const want = mode === 'mdm' ? 'traction' : mode;
-                            if (j === 1) {
-                                dscWrite.busy = false;
-                                dscStatus(d && d.state === want ? DSC_LABEL[mode] + ' ACTIVE'
-                                    : DSC_LABEL[mode] + ' SENT · CLUSTER SHOWS ' + (d ? d.state.toUpperCase() : 'UNKNOWN'),
-                                    !(d && d.state === want));
-                            } else queueRender();
-                        }, ms));
-                    },
-                    (e) => { log.warn('dsc ' + value + ': ' + shortError(e)); attempt(); });
-            };
-            attempt();
+            const value = DSC_ENUMS[mode];
+            if (!value) {
+                dscWrite.busy = false;
+                dscStatus('MDM NOT VERIFIED · USE CAR BUTTON', true);
+                return;
+            }
+            let pending;
+            try { pending = ctx.signals.set(tpmsProxy, 'chassisControl', TyreData.dscStruct(value)); }
+            catch (e) { pending = Promise.reject(e); }
+            Promise.resolve(pending).then(() => {
+                log.info('dsc ' + mode + ' request accepted via ' + value);
+                dscStatus('REQUEST SENT · CHECKING CLUSTER');
+                [1500, 4000].forEach((ms, j) => setTimeout(() => {
+                    const d = tyreExtra.dsc;
+                    if (j === 1) {
+                        dscWrite.busy = false;
+                        dscStatus(d && d.state === mode ? DSC_LABEL[mode] + ' ACTIVE'
+                            : 'NOT CONFIRMED · CLUSTER ' + (d ? d.state.toUpperCase() : 'UNKNOWN'),
+                            !(d && d.state === mode));
+                    } else queueRender();
+                }, ms));
+            }, (e) => {
+                dscWrite.busy = false;
+                log.warn('dsc ' + value + ': ' + shortError(e));
+                dscStatus(DSC_LABEL[mode] + ' · REFUSED BY CAR', true);
+            });
         }
         function dscRequest(mode) {
             if (settings.get('demo') === 'on') return dscStatus(DSC_LABEL[mode] + ' · DEMO MODE', false);
+            if (!DSC_ENUMS[mode]) return dscStatus('MDM NOT VERIFIED · USE CAR BUTTON', true);
             if (dscWrite.busy) { dscStatus('COMMAND IN PROGRESS', true); return null; }
+            if (mode === 'on') {
+                if (tyreExtra.dsc && tyreExtra.dsc.state === 'on') return dscStatus('DSC ON ALREADY ACTIVE', false);
+                dscWrite.armed = null;
+                if (!tpmsProxy) return dscStatus('TPMS LINK UNAVAILABLE', true);
+                dscWrite.busy = true;
+                dscStatus('SENDING DSC ON', false);
+                dscSend('on');
+                return null;
+            }
             const now = Date.now();
+            if (!fresh(state.speed, now)) return dscStatus('DSC OFF LOCKED · WAIT FOR SPEED', true);
+            if (state.speed.value >= 0.5) return dscStatus('DSC OFF LOCKED · STOP FIRST', true);
+            const currentDsc = tyreExtra.dsc && tyreExtra.dsc.state;
+            if (!currentDsc) return dscStatus('DSC OFF LOCKED · WAIT FOR STATUS', true);
+            if (currentDsc === 'off') return dscStatus('DSC OFF ALREADY ACTIVE', false);
+            if (currentDsc !== 'on') return dscStatus('DSC OFF LOCKED · ENABLE DSC FIRST', true);
             if (dscWrite.armed !== mode || now > dscWrite.armedUntil) {
                 dscWrite.armed = mode; dscWrite.armedUntil = now + 4000;
                 dscStatus('PRESS AGAIN TO SEND ' + DSC_LABEL[mode], mode === 'off');
@@ -1168,11 +1200,10 @@ mgu.run({
             dscOff() { return dscRequest('off'); },
         };
 
-        // ENGINE DATA chip: cycles ON -> MDM -> OFF -> ON from the *live* state, so
-        // modes set by the car's own DSC button are honoured. on/mdm send at once;
-        // off keeps the two-tap confirm (it's the safety-critical one).
+        // ENGINE DATA chip: cycles only between verified DSC ON/OFF requests.
         function dscGo(mode) {
             if (settings.get('demo') === 'on') return dscStatus(DSC_LABEL[mode] + ' · DEMO MODE', false);
+            if (!DSC_ENUMS[mode]) return dscStatus('MDM NOT VERIFIED · USE CAR BUTTON', true);
             if (mode === 'off') return dscRequest('off');
             if (dscWrite.busy) { dscStatus('COMMAND IN PROGRESS', true); return null; }
             if (!tpmsProxy) { dscStatus('TPMS LINK UNAVAILABLE', true); return null; }
@@ -1182,10 +1213,10 @@ mgu.run({
             return null;
         }
         function dscCycle() {
-            const order = ['on', 'traction', 'off'];
+            const order = ['on', 'off'];
             const cur = tyreExtra.dsc && tyreExtra.dsc.state;
             const nxt = order[(order.indexOf(cur) + 1) % order.length];
-            return dscGo(nxt === 'traction' ? 'mdm' : nxt);
+            return dscGo(nxt);
         }
 
         function currentValveView() {
@@ -1498,7 +1529,7 @@ mgu.run({
         startWatch(PEDAL, { AngleAcceleratorPedal: setPedal });
         // TPMS also needs a poll: BMW's own x_call only ever reads these, so a car may never notify them.
         startWatch(TPMS, { statusTyrePressure: setTyrePress, statusTyreTemperature: setTyreTemp,
-            statusTargetTyrePressure: setTyreTarget, statusTyreState: setTyreState }, { pollMs: 10000 });
+            statusTargetTyrePressure: setTyreTarget, statusTyreState: setTyreState }, { pollMs: 5000 });
         startWatch(TPMS_INTERNAL, { statusWheelTypeChange: setTyreDetection,
             tpmsCalibrationData: setTyreCalibration, statusFrontAxleTyre: setTyreFront,
             statusRearAxleTyre: setTyreRear, tpmsErfsActualTireData: setTyreSensor }, { pollMs: 15000 });
@@ -1761,7 +1792,7 @@ mgu.run({
             const gearbox = state.gearboxTemp;
             const gearboxSignalFresh = gearbox && gearbox.status === 'live' && finite(gearbox.value) &&
                 now - gearbox.at <= GEARBOX_STALE_MS;
-            const needsEgsTemp = (page === 0 || (page === 5 && carDataView === 'drivetrain')) &&
+            const needsEgsTemp = (page === 0 || page === 6 || (page === 5 && carDataView === 'drivetrain')) &&
                 (dme.egs || []).length > 0 && !gearboxSignalFresh &&
                 now - lastEgsTryAt >= 15000;
             const activeCarData = page === 5 && carDataView !== 'menu';
@@ -2076,11 +2107,12 @@ mgu.run({
                         { label: 'REAR RIGHT', value: '2.56 bar (28 °C)' },
                     ],
                     tyresMore: [
-                        { label: 'TARGET PRESSURE', value: '2.4 · 2.4 · 2.6 · 2.6 bar', detail: 'Partly loaded · summer · Automatic' },
-                        { label: 'FITTED TIRES', value: '245/40R18 / 275/35R19', detail: 'F 245/40R18 XL summer · R 275/35R19 XL summer | sensors say 245/40R18 (mounted)' },
-                        { label: 'TIRE DETECTION', value: 'Wheels found', detail: 'Every sensor is matched to a wheel.' },
-                        { label: 'TPMS RESET', value: 'Passed @ 47,812 km', detail: 'Reset from the iDrive menu' },
-                        { label: 'DSC', value: 'ON', detail: 'traction control · as the cluster shows it' },
+                        { label: 'FRONT LEFT / RIGHT · BAR / °C', value: '2.42 / 26 · 2.41 / 26' },
+                        { label: 'REAR LEFT / RIGHT · BAR / °C', value: '2.55 / 27 · 2.56 / 28' },
+                        { label: 'TARGET PRESSURE · FL / FR / RL / RR (bar)', value: '2.4 · 2.4 · 2.6 · 2.6' },
+                        { label: 'FITTED TIRES', value: '245/40R18 / 275/35R19' },
+                        { label: 'TIRE DETECTION / TPMS RESET', value: 'Wheels found · Passed' },
+                        { label: 'DSC · CLUSTER STATUS', value: 'ON' },
                     ],
                 };
                 return demoRow[view] || [];
@@ -2091,13 +2123,22 @@ mgu.run({
             const targetKpa = cdNum('boostTargetKpa');
             const tyreQuad = (names, digits) => {
                 const parts = names.map((name) => cdNum(name));
-                return parts.every(finite) ? parts.map((v) => formatNumber(v, digits)).join(' · ') : null;
+                return parts.some(finite) ? parts.map((v) => finite(v) ? formatNumber(v, digits) : '--').join(' · ') : null;
             };
             const tyreWheel = (pKey, tKey) => {
                 const p = cdNum(pKey), tt = cdNum(tKey);
                 if (!finite(p)) return null;
                 return finite(tt) ? formatNumber(p, 2) + ' bar (' + formatNumber(tt, 0) + ' °C)'
                     : formatNumber(p, 2) + ' bar';
+            };
+            const tyreWheelCompact = (pKey, tKey) => {
+                const p = cdNum(pKey), tt = cdNum(tKey);
+                if (!finite(p) && !finite(tt)) return '-- / --';
+                return (finite(p) ? formatNumber(p, 2) : '--') + ' / ' + (finite(tt) ? formatNumber(tt, 0) : '--');
+            };
+            const tyreAxleCompact = (p1, t1, p2, t2) => {
+                if (![p1, t1, p2, t2].some((key) => finite(cdNum(key)))) return 'WAITING FOR TPMS';
+                return tyreWheelCompact(p1, t1) + ' · ' + tyreWheelCompact(p2, t2);
             };
             const tyreTarget = tyreQuad(['tyrePtFL', 'tyrePtFR', 'tyrePtRL', 'tyrePtRR'], 1);
             const rows = {
@@ -2186,17 +2227,17 @@ mgu.run({
                     { label: 'REAR RIGHT', value: tyreWheel('tyrePRR', 'tyreTRR') },
                 ],
                 tyresMore: [
-                    { label: 'TARGET PRESSURE', value: tyreTarget ? tyreTarget + ' bar' : null,
-                        detail: (() => {
-                            const ts = tyreExtra.tyreState;
-                            if (!ts) return '';
-                            return [ts.loading, ts.season, ts.mode].filter(Boolean).join(' · ');
-                        })() },
+                    { label: 'FRONT LEFT / RIGHT · BAR / °C', value: tyreAxleCompact('tyrePFL', 'tyreTFL', 'tyrePFR', 'tyreTFR'),
+                        detail: [tyreWheel('tyrePFL', 'tyreTFL'), tyreWheel('tyrePFR', 'tyreTFR')].filter(Boolean).join(' · ') },
+                    { label: 'REAR LEFT / RIGHT · BAR / °C', value: tyreAxleCompact('tyrePRL', 'tyreTRL', 'tyrePRR', 'tyreTRR'),
+                        detail: [tyreWheel('tyrePRL', 'tyreTRL'), tyreWheel('tyrePRR', 'tyreTRR')].filter(Boolean).join(' · ') },
+                    { label: 'TARGET PRESSURE · FL / FR / RL / RR (bar)', value: tyreTarget || 'WAITING FOR TPMS',
+                        detail: (() => { const ts = tyreExtra.tyreState; return ts ? [ts.loading, ts.season, ts.mode].filter(Boolean).join(' · ') : ''; })() },
                     { label: 'FITTED TIRES', value: (() => {
                         const f = tyreExtra.frontTire, r = tyreExtra.rearTire;
-                        if (!f && !r) return null;
+                        if (!f && !r) return 'WAITING FOR TPMS';
                         if (f && r && f.size === r.size) return f.size;
-                        return (f ? f.size : '?') + ' / ' + (r ? r.size : '?');
+                        return (f ? f.size : '--') + ' / ' + (r ? r.size : '--');
                     })(), detail: (() => {
                         const f = tyreExtra.frontTire, r = tyreExtra.rearTire;
                         const parts = [];
@@ -2207,13 +2248,14 @@ mgu.run({
                         else if (st) parts.push('sensors: ' + st.state);
                         return parts.join(' | ');
                     })() },
-                    { label: 'TIRE DETECTION', value: tyreExtra.detection ? tyreExtra.detection.title : null,
-                        detail: tyreExtra.detection ? tyreExtra.detection.text : '' },
-                    { label: 'TPMS RESET', value: (() => {
+                    { label: 'TIRE DETECTION / TPMS RESET', value: (() => {
+                        const detection = tyreExtra.detection ? tyreExtra.detection.title : 'WAITING FOR TPMS';
+                        const calibration = tyreExtra.calibration ? tyreExtra.calibration.result : 'RESET UNKNOWN';
+                        return detection + ' · ' + calibration;
+                    })(), detail: (() => {
                         const c = tyreExtra.calibration;
-                        if (!c) return null;
-                        return c.result + (c.mileage ? ' @ ' + Math.round(c.mileage).toLocaleString('en-US') + ' km' : '');
-                    })(), detail: tyreExtra.calibration ? tyreExtra.calibration.type : '' },
+                        return c ? c.type + (c.mileage ? ' · ' + Math.round(c.mileage).toLocaleString('en-US') + ' km' : '') : '';
+                    })() },
                     { label: 'DSC', value: tyreExtra.dsc ? tyreExtra.dsc.state.toUpperCase() : null,
                         detail: 'traction control · as the cluster shows it' },
                 ],
@@ -2464,7 +2506,7 @@ mgu.run({
             const mSoundReady = valveCanActuate() && !valveController.state.busy && !mSoundBusy;
             drawModeButtons(cv, G, t, mSoundReady, mSoundActive(), toggleMSoundMode, () => {
                 queueRender();
-                return dscCycle();   // tap cycles DSC ON -> MDM -> OFF from the live state
+                return dscCycle();   // tap cycles DSC ON/OFF from the live state
             });
         }
 
@@ -2538,7 +2580,7 @@ mgu.run({
             } else if (page === 4) {
                 const now = Date.now(), demoMode = settings.get('demo') === 'on';
                 seedDemoDragRuns();
-                const selected = dragSelectedRun();
+                const selected = dragLiveCleared ? null : dragSelectedRun();
                 const isRunning = !!(dragTimer && dragTimer.state === 'run' && !demoMode);
                 const run = isRunning ? {
                     result: dragTimer.result, trap: dragTimer.trapSpeed, vmax: dragTimer.vmax,
@@ -2549,7 +2591,7 @@ mgu.run({
                 DragRunUi.draw(cv, G, t, {
                     view: dragView, runs: dragRuns, selectedAt: dragSelectedAt, selectedRun: selected,
                     section: dragSection, runsPage: dragRunsPage,
-                    currentRun: run, listOffset: dragListOffset, best: dragBest,
+                    currentRun: run, listOffset: dragListOffset, best: dragLiveCleared ? {} : dragBest,
                     splits: DragRun.splits(unit, distance.key), speedUnit: unit, distanceLabel: distance.label,
                     rolling: demoMode ? (demoRollingCleared ? {}
                         : { '100-200': 6.42, '200-300': 7.18 }) : rollingResult,

@@ -351,9 +351,8 @@ function drawSheet(cv, G, t, s, car, actions) {
             { font: 'bold', spacing: 0.4, literal: true });
     });
 
-    // 6. Status block — pulsing green READY TO LAUNCH when armed (like draggy),
-    // otherwise the red timing / standby state.
-    const setupY = y1 - 84, setupX = xAt(ribX + 12, setupY);
+    // 6. Only show the ready-to-launch cue. Timing/state copy is intentionally omitted.
+    const setupY = y1 - 84;
     const ready = s.timerState === 'ready';
     if (ready) {
         const btnY = setupY + 37, bx = xAt(ribX + 12, btnY);
@@ -373,21 +372,6 @@ function drawSheet(cv, G, t, s, car, actions) {
             Math.floor(Date.now() / 300) % 2 ? '#2ee06f' : G.withAlpha('#2ee06f', 0.3));
         cv.text('READY TO LAUNCH', bx + bw / 2 + 6, btnY + bh / 2 + 6, 16, '#2ee06f',
             { align: 'center', font: 'bold', spacing: 1.2, literal: true });
-    } else {
-        const stateLabel = isRun ? 'TIMING' : 'STANDBY';
-        cv.text('STATE · ' + stateLabel, setupX, setupY + 14, 20, '#ffffff',
-            { font: 'bold', spacing: 1.1, literal: true });
-        if (isRun) {
-            const tw = cv.textWidth('STATE · TIMING', 20, { font: 'bold', spacing: 1.1 });
-            cv.circle(setupX + tw + 18, setupY + 8, 5,
-                Math.floor(Date.now() / 300) % 2 ? '#ff243b' : G.withAlpha('#ff243b', 0.3));
-        }
-        const sub = isRun
-            ? (typeof s.elapsed === 'number' ? s.elapsed.toFixed(2) + ' S ELAPSED' : 'TIMING…')
-            : current ? runStamp(current.at) : 'STOP TO ARM · HOLD BRAKE';
-        cv.text(sub, setupX, setupY + 40, 13, '#ff8595', { font: 'bold', spacing: 0.8, literal: true });
-        cv.text(s.demo ? 'DEMO · TIMING PAUSED' : (s.rollout ? 'ROLLOUT 1 FT · ' : '') + 'FULL THROTTLE LAUNCH',
-            setupX, setupY + 64, 10.5, G.withAlpha('#e8c8ce', 0.5), { font: 'bold', spacing: 0.5, literal: true });
     }
 }
 

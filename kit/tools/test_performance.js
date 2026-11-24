@@ -28,7 +28,7 @@ const scaling = {
 };
 
 equal(app.id, 'performance', 'app id');
-equal(app.version, '0.6.51', 'app version');
+equal(app.version, '0.6.57', 'app version');
 equal(app.screens[0].title, '', 'screen title is hidden to avoid repeating Engine Data beside the section tabs');
 equal(app.settings.find((setting) => setting.key === 'drivetrainType').default, 'auto', 'drivetrain type defaults to automatic');
 const valveControl = app.settings.find((setting) => setting.key === 'valveControl');
@@ -53,12 +53,15 @@ app.settings.find((setting) => setting.key === 'torqueGaugeMax').steps.forEach((
 equal(app.signals['de.bmw.infotainment.vehicle.Vehicle2'].statusCarSpeed2, 'rs', 'DYNO speed signal declared');
 equal(app.signals['de.bmw.infotainment.vehicle.CDS2'].statusLongitudinalAccelerationMassCenter, 'rs', 'DYNO acceleration signal declared');
 equal(app.signals['de.bmw.infrastructure.analytics.BasicDataSet'].basicDataSet, 'rs', 'optional gearbox BasicDataSet declared for read and subscribe');
+equal(app.signals['de.bmw.infotainment.vehicle.TPMS'].statusTyrePressure, 'rs', 'live tire pressure signal declared');
+equal(app.signals['de.bmw.infotainment.vehicle.TPMS'].statusTyreTemperature, 'rs', 'live tire temperature signal declared');
+equal(app.signals['de.bmw.infotainment.vehicle.TPMS'].statusTargetTyrePressure, 'rs', 'target tire pressure signal declared');
+equal(app.signals['de.bmw.infotainment.vehicle.TPMS'].chassisControl, 'w', 'DSC request channel declared writable');
 const gearboxScale = app.config.scaling.gearboxTemp;
 equal(Calc.scale(96, gearboxScale), 48, 'cluster transmission oil temperature conversion');
 equal(Calc.scale(255, gearboxScale), null, 'invalid cluster transmission oil temperature');
-equal(app.config.dme.egs.map((candidate) => candidate.did).join(','), '6000,DA12', 'configured EGS temperature candidates');
+equal(app.config.dme.egs.map((candidate) => candidate.did).join(','), '6000', 'only the supported EGS temperature fallback remains configured');
 equal(Calc.scale(88, app.config.dme.egs[0]), 48, 'EGS 6000 temperature conversion');
-equal(Calc.scale(96, app.config.dme.egs[1]), 48, 'EGS DA12 temperature conversion');
 equal(app.config.dme.boost.map((candidate) => candidate.did || 'OBD ' + candidate.obd).join(','),
     'F470,F487,F40B,OBD 0B', 'M Vitals boost candidate order');
 equal(app.config.dme.baro.map((candidate) => candidate.did || 'OBD ' + candidate.obd).join(','),

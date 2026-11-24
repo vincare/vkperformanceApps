@@ -608,8 +608,8 @@ function drawExhaustSheet(cv, G, t, valve, car, actions, now) {
 
 // DYNAMIC CONFIG — same sheet language as EXHAUST SYSTEM: hex backdrop, slanted
 // car slab on the left, diagonal ribbon on the right. The only section for now is
-// DSC MODE: three tappable stability-control states written through the TPMS
-// chassisControl channel (the HMI's own DSC request line).
+// DSC MODE: verified DSC ON/OFF requests use TPMS chassisControl. MDM taps
+// show an explanation until BMW's request enum is confirmed for this HMI.
 const DSC_ROW_COLORS = { on: '#9ca4b0', mdm: '#55a9ff', off: '#ff243b' };
 function drawDynamic(cv, G, t, v, car, actions, now) {
     const y0 = (G.TOP || 44) + 8, y1 = H - 8, h = y1 - y0;
