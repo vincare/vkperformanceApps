@@ -11,6 +11,7 @@ const path = require('path');
 
 const W = 1600, H = 520;
 const LIGHT = 'de.bmw.infotainment.misc.ComfortFunctionIuK';
+const FES = 'de.bmw.infotainment.drivingexcitement.FES';
 const BDC = 0x40;
 const BUSES = [
     { read: [0xda, 0x5f], write: [0xda, 0x5e] },
@@ -32,13 +33,22 @@ const OEM_COLORS = [
     ['SKY BLUE', '#4DB8FF'], ['BMW BLUE', '#1582FF'], ['ELECTRIC BLUE', '#005CFF'], ['DEEP BLUE', '#1533B8'], ['NAVY BLUE', '#14204F'], ['INDIGO', '#3F32B8'],
     ['VIOLET', '#6F37D5'], ['PURPLE', '#9A35D5'], ['MAGENTA', '#E100B5'], ['HOT PINK', '#FF3C9D'], ['PINK', '#FF75B5'], ['ROSE', '#FF557A'],
     ['LAVENDER', '#BCA7FF'], ['LILAC', '#D4A7FF'], ['WARM WHITE', '#FFD9A8'], ['SOFT WHITE', '#FFEED5'], ['COOL WHITE', '#E9F5FF'], ['ICE WHITE', '#F7FCFF'],
-].map(([name, color]) => ({ name, color, rgb: [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) * 254 / 255) }));
+].map(([name, color]) => ({ name, color, rgb: [1, 3, 5].map((i) => Math.min(254, parseInt(color.slice(i, i + 2), 16))) }));
 const UPPER_LOC = new Set([0x05, 0x06, 0x09, 0x0a, 0x0c, 0x0d, 0x10, 0x11, 0x13, 0x14, 0x15, 0x16,
     0x17, 0x18, 0x19, 0x1a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x35, 0x36, 0x37,
     0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46,
     0x47, 0x48, 0x49, 0x4a, 0x62, 0x63, 0x64, 0x65]);
 const LOWER_LOC = new Set([0x01, 0x02, 0x03, 0x04, 0x07, 0x08, 0x0b, 0x0e, 0x0f, 0x12, 0x1b, 0x1c,
     0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x33, 0x34, 0x4b, 0x4c]);
+// BMW BDC LIN location IDs from the vehicle's own ambient-light map.
+const DOOR_LOC = new Set([0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
+    0x21, 0x22, 0x3f, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x62, 0x63, 0x64, 0x65]);
+const FOOTWELL_LOC = new Set([0x01, 0x02, 0x03, 0x04]);
+const M_COLOR = {
+    dashboard: '#2A64AD', door: '#163A74', footwell: '#D13B2A',
+    dashboardRgb: [42, 100, 173], doorRgb: [22, 58, 116], footwellRgb: [209, 59, 42],
+};
+const MODE_RGB = { comfort: [0, 0, 255], sport: [255, 0, 0], eco: [0, 255, 0] };
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const isFiniteNumber = (n) => typeof n === 'number' && isFinite(n);
 
@@ -128,14 +138,36 @@ const COMBOS = [
     ['Jade Coast', '#65D88F', '#22C9AF'], ['Emerald Gold', '#19A85D', '#FFD054'],
 ].map(([name, c1, c2]) => ({ name, c1, c2 }));
 
-function hexToRgbScaled(h) {
-    return [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) * 254 / 255);
+function hexToRgbBdc(h) {
+    // 0xFF is reserved by the BDC protocol as "leave this channel unchanged".
+    // Keep every other RGB value exact; pure white is represented by 0xFE.
+    return [1, 3, 5].map((i) => Math.min(254, parseInt(h.slice(i, i + 2), 16)));
+}
+function driveModeOf(raw) {
+    if (raw === undefined || raw === null || raw === '') return null;
+    const names = {
+        SPORT_DYNAMIC: 'sport', SPORT_EXPERT: 'sport', SPORT_INDIVIDUAL: 'sport', BOOST: 'sport',
+        PHEV_SPORT_STANDARD: 'sport', PHEV_SPORT_INDIVIDUAL: 'sport', PHEV_SPORT_PLUS: 'sport',
+        COMFORT: 'comfort', COMFORT_PLUS: 'comfort', COMFORT_INDIVIDUAL: 'comfort', PHEV_HYBRID_COMFORT: 'comfort',
+        ECO_PRO_EFFICIENT: 'eco', ECO_PRO_PLUS: 'eco', ECO_PRO_INDIVIDUAL: 'eco', PHEV_HYBRID_ECO: 'eco',
+    };
+    const numeric = typeof raw === 'number' || /^\d+$/.test(String(raw)) ? Number(raw) : null;
+    if (numeric !== null) {
+        if ([1, 2, 3, 15, 16, 23, 28].indexOf(numeric) >= 0) return 'sport';
+        if ([4, 5, 6, 19].indexOf(numeric) >= 0) return 'comfort';
+        if ([7, 8, 9, 18].indexOf(numeric) >= 0) return 'eco';
+        return null;
+    }
+    const name = String(raw).toUpperCase();
+    if (names[name]) return names[name];
+    return /SPORT|BOOST/.test(name) ? 'sport' : /COMFORT/.test(name) ? 'comfort' : /ECO/.test(name) ? 'eco' : null;
 }
 
-/** The Zones page: pick which zone the colour controls target. */
+/** The Zones page: pick which zone the next colour command targets. */
 const ZONE_ROWS = [
-    { name: 'All zones', zone: 'all' }, { name: 'Dashboard (upper)', zone: 'upper' },
-    { name: 'Footwells (lower)', zone: 'lower' },
+    { name: 'DASHBOARD', zone: 'dashboard' },
+    { name: 'DOORS', zone: 'doors' },
+    { name: 'FOOTWELL', zone: 'footwell' },
 ];
 
 mgu.run({
@@ -155,9 +187,14 @@ mgu.run({
             oemScroll: 0, oemScrollMax: 0,
             detail: null, detailScroll: 0, detailScrollMax: 0, selColour: -1, selCombo: -1, previewChoice: null,
             detailFocus: -1, look: null, pendingLook: false, oemLockBusy: false,
+            zoneColors: { upper: null, lower: null, dashboard: null, doors: null, footwell: null },
+            zoneLightingEnabled: false, zoneColorReturn: null,
             favorites: [], favorite: 0, upperRead: null, lowerRead: null, customUpper: null, customLower: null, customOther: null,
+            features: { mColor: false, comfort: false, sport: false, eco: false },
+            driveMode: null, activeFeatureLighting: null, modeSyncPending: false, modeSyncBusy: false,
+            customByLocation: Object.create(null),
         };
-        let stopped = false, renderTimer = null, autoScanTimer = null, renderQueued = false;
+        let stopped = false, renderTimer = null, autoScanTimer = null, renderQueued = false, loopOwnsRenders = false;
         let lastAction = Object.create(null), hitboxes = [], wheelGeom = null;
         let lastHudGeom = null, lastDetGeom = null, lastFocusKey = null, focusPoll = null;
         let ambientTouchDown = null;
@@ -172,6 +209,92 @@ mgu.run({
         const previewRgb = () => hsvToRgb(hueValue(), saturationValue() / 100, brightnessValue() / 100);
         const dimmedRgb = (colour) => colour.rgb.map((n) => Math.round(n * colour.brightness / 100));
         const zoneName = () => state.zone === 'all' ? 'ALL LIGHTS' : state.zone === 'upper' ? 'UPPER / TRIM' : 'LOWER / FOOTWELLS';
+        const zoneTargets = () => state.zone === 'all' ? ['upper', 'lower', 'other'] : [state.zone];
+        const validHex = (value) => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+        const anyAutoFeature = () => !!(state.features.mColor || state.features.comfort || state.features.sport || state.features.eco);
+        function desiredFeatureLighting() {
+            if (!state.oemEnabled) return null;
+            if (state.features.mColor) return { key: 'mColor', dashboard: M_COLOR.dashboard, door: M_COLOR.door, footwell: M_COLOR.footwell };
+            if (state.driveMode && state.features[state.driveMode] && MODE_RGB[state.driveMode]) {
+                const c = hex(MODE_RGB[state.driveMode]);
+                return { key: state.driveMode, dashboard: c, door: c, footwell: c };
+            }
+            return null;
+        }
+        function zonePreviewColors() {
+            let dashboard, doors, footwell;
+            const feature = desiredFeatureLighting();
+            if (feature) {
+                dashboard = feature.dashboard; doors = feature.door; footwell = feature.footwell;
+                return { upper: dashboard, door: doors, lower: footwell, dashboard, doors, footwell };
+            }
+            if (state.previewChoice === 'combo' && COMBOS[state.selCombo]) {
+                dashboard = doors = COMBOS[state.selCombo].c1; footwell = COMBOS[state.selCombo].c2;
+            } else if (state.previewChoice === 'colour' && PALETTE[state.selColour]) {
+                dashboard = doors = footwell = PALETTE[state.selColour].c1;
+            } else if (state.oemSelected) {
+                dashboard = doors = footwell = state.oemSelected.color;
+            } else {
+                dashboard = doors = footwell = hex(previewRgb());
+            }
+            if (state.customUpper && state.customUpper.rgb) dashboard = doors = hex(dimmedRgb(state.customUpper));
+            if (state.customLower && state.customLower.rgb) footwell = hex(dimmedRgb(state.customLower));
+            if (validHex(state.zoneColors.upper)) dashboard = doors = state.zoneColors.upper;
+            if (validHex(state.zoneColors.lower)) footwell = state.zoneColors.lower;
+            if (validHex(state.zoneColors.dashboard)) dashboard = state.zoneColors.dashboard;
+            if (validHex(state.zoneColors.doors)) doors = state.zoneColors.doors;
+            if (validHex(state.zoneColors.footwell)) footwell = state.zoneColors.footwell;
+            return { upper: dashboard, door: doors, lower: footwell, dashboard, doors, footwell };
+        }
+        function zoneDetailRows() {
+            const colours = zonePreviewColors();
+            return [{ name: 'AMBIENT ZONES LIGHTING', desc: state.zoneLightingEnabled ? 'ON · TAP A COLOUR TO EDIT' : 'OFF · TURN ON TO EDIT COLOURS',
+                zone: 'toggle', toggle: true, enabled: state.zoneLightingEnabled }].concat(ZONE_ROWS.map((row) => Object.assign({}, row, {
+                desc: state.zoneLightingEnabled ? 'Tap the colour to change it' : 'Turn on zone lighting to edit',
+                c1: colours[row.zone], disabled: !state.zoneLightingEnabled,
+            })));
+        }
+        function syncZoneColorsForTargets(upper, lower) {
+            const targets = zoneTargets();
+            if (targets.indexOf('upper') >= 0 && validHex(upper)) {
+                state.zoneColors.upper = state.zoneColors.dashboard = state.zoneColors.doors = upper;
+            }
+            if (targets.indexOf('lower') >= 0 && validHex(lower)) state.zoneColors.lower = state.zoneColors.footwell = lower;
+        }
+        function setDetailFocus(row) {
+            state.detailFocus = row;
+            if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + row; lastFocusKey = ctx.display.focusKey; }
+        }
+        function openZoneColorPicker(zone, row) {
+            if (state.detail !== 'zones' || !state.zoneLightingEnabled
+                || ['dashboard', 'doors', 'footwell'].indexOf(zone) < 0) return;
+            const colors = zonePreviewColors();
+            if (!validHex(state.zoneColors.dashboard)) state.zoneColors.dashboard = colors.dashboard;
+            if (!validHex(state.zoneColors.doors)) state.zoneColors.doors = colors.doors;
+            if (!validHex(state.zoneColors.footwell)) state.zoneColors.footwell = colors.footwell;
+            state.zoneColorReturn = { target: zone, row, scroll: state.detailScroll };
+            state.detail = 'colours'; state.detailScroll = 0;
+            setDetailFocus(1);
+            saveLook(); queueRender();
+        }
+        async function chooseZoneColor(zone, color) {
+            if (!state.zoneLightingEnabled || ['dashboard', 'doors', 'footwell'].indexOf(zone) < 0 || !validHex(color)) return;
+            const row = ZONE_ROWS.findIndex((r) => r.zone === zone) + 1;
+            const origin = state.zoneColorReturn || { target: zone, row, scroll: 0 };
+            if (zone === 'dashboard') state.zoneColors.dashboard = state.zoneColors.upper = color;
+            else if (zone === 'doors') state.zoneColors.doors = color;
+            else state.zoneColors.footwell = state.zoneColors.lower = color;
+            disableAutomaticModesForManual(['upper', 'lower', 'other']);
+            state.look = { type: 'zone-colours', dashboard: state.zoneColors.dashboard, doors: state.zoneColors.doors,
+                footwell: state.zoneColors.footwell, upper: state.zoneColors.dashboard, lower: state.zoneColors.footwell };
+            state.pendingLook = false;
+            state.detail = 'zones'; state.detailScroll = origin.scroll || 0;
+            state.zoneColorReturn = null;
+            setDetailFocus(origin.row >= 0 ? origin.row : row);
+            saveLook(); queueRender();
+            if (!state.oemEnabled && !await setOemLightingEnabled(true)) return;
+            await applyZoneLighting(false, 'ZONE COLOUR');
+        }
         const acceptedText = (u) => u && u[0] === 0x6e ? 'accepted' : u && u[0] === 0x7f ? 'rejected NRC ' + (u[2] == null ? '--' : u[2].toString(16).toUpperCase().padStart(2, '0')) : 'no reply';
 
         try {
@@ -185,13 +308,32 @@ mgu.run({
             const saved = JSON.parse(fs.readFileSync(lookFile, 'utf8'));
             if (saved && typeof saved === 'object') {
                 state.look = saved.look && typeof saved.look === 'object' ? saved.look : null;
-                if (saved.oemSelected && saved.oemSelected.rgb) {
+                if (saved.oemSelected && saved.oemSelected.name) {
+                    // saveLook intentionally stores the palette key, not a duplicate of its RGB data.
+                    // Resolve that key against the canonical palette when the app starts again.
                     const match = OEM_COLORS.find((c) => c.name === saved.oemSelected.name);
-                    state.oemSelected = match || saved.oemSelected;
+                    state.oemSelected = match || null;
                 }
                 state.selColour = isFiniteNumber(saved.selColour) ? saved.selColour : -1;
                 state.selCombo = isFiniteNumber(saved.selCombo) ? saved.selCombo : -1;
                 state.previewChoice = saved.previewChoice || null;
+                if (saved.features && typeof saved.features === 'object') {
+                    state.features.mColor = !!saved.features.mColor;
+                    state.features.comfort = !!saved.features.comfort;
+                    state.features.sport = !!saved.features.sport;
+                    state.features.eco = !!saved.features.eco;
+                } else if (['mColor', 'comfort', 'sport', 'eco'].indexOf(saved.featureMode) >= 0) {
+                    state.features[saved.featureMode] = true;
+                }
+                if (saved.zoneColors && typeof saved.zoneColors === 'object') {
+                    state.zoneColors.upper = validHex(saved.zoneColors.upper) ? saved.zoneColors.upper : null;
+                    state.zoneColors.lower = validHex(saved.zoneColors.lower) ? saved.zoneColors.lower : null;
+                    state.zoneColors.dashboard = validHex(saved.zoneColors.dashboard) ? saved.zoneColors.dashboard : state.zoneColors.upper;
+                    state.zoneColors.doors = validHex(saved.zoneColors.doors) ? saved.zoneColors.doors : state.zoneColors.upper;
+                    state.zoneColors.footwell = validHex(saved.zoneColors.footwell) ? saved.zoneColors.footwell : state.zoneColors.lower;
+                }
+                state.zoneLightingEnabled = typeof saved.zoneLightingEnabled === 'boolean'
+                    ? saved.zoneLightingEnabled : !!(state.look && state.look.type === 'zone-colours');
                 if (saved.zone === 'all' || saved.zone === 'upper' || saved.zone === 'lower') state.zone = saved.zone;
                 if (saved.oemEnabled === false) state.oemEnabled = false;
                 if (isFiniteNumber(saved.oemBackground)) state.oemBackground = clamp(saved.oemBackground, 10, 100);
@@ -206,6 +348,9 @@ mgu.run({
                     look: state.look, selColour: state.selColour, selCombo: state.selCombo,
                     oemSelected: state.oemSelected && state.oemSelected.name ? { name: state.oemSelected.name } : null,
                     previewChoice: state.previewChoice, zone: state.zone, oemEnabled: state.oemEnabled,
+                    features: state.features,
+                    zoneColors: state.zoneColors,
+                    zoneLightingEnabled: state.zoneLightingEnabled,
                     oemBackground: state.oemBackground, oemAccent: state.oemAccent,
                     oemNight: state.oemNight, oemDynamic: state.oemDynamic,
                 }));
@@ -214,7 +359,9 @@ mgu.run({
 
         function setNotice(text, color) { state.notice = text; state.noticeColor = color || C.muted; queueRender(); }
         function queueRender() {
-            if (stopped || renderQueued) return;
+            // The visible-screen loop already paints the latest state at its 20 FPS cadence.
+            // Avoid queuing a second, out-of-band draw for every signal/input update.
+            if (stopped || loopOwnsRenders || renderQueued) return;
             renderQueued = true;
             renderTimer = setTimeout(() => {
                 renderTimer = null; renderQueued = false;
@@ -235,6 +382,7 @@ mgu.run({
             try {
                 const watch = await ctx.signals.watch(LIGHT, '1', {
                     statusAmbientLightInteriorColour: (v) => {
+                        const wasEnabled = state.oemEnabled;
                         const slot = readSlot(v);
                         const slotChanged = slot !== null && slot !== state.liveSlot;
                         state.liveSlot = slot;
@@ -254,9 +402,16 @@ mgu.run({
                                 state.oemEnabled = reportedOn;
                             }
                         }
+                        if (!wasEnabled && state.oemEnabled && anyAutoFeature()) {
+                            setTimeout(() => syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e))), 0);
+                        }
                         // OEM menu colour pick (slot changed) while our LIN look is applied
                         // + Ambient lighting ON → overwrite it back. OFF toggle lets OEM through.
-                        if (slotChanged && state.oemEnabled && state.look && state.activeCustom && !state.oemLockBusy
+                        if (slotChanged && state.oemEnabled && state.activeFeatureLighting && anyAutoFeature() && !state.oemLockBusy
+                            && Date.now() - lastOemLockAt > 4000) {
+                            lastOemLockAt = Date.now();
+                            syncModeLighting(true).catch((e) => log.warn('drive-mode ambience lock: ' + shortError(e)));
+                        } else if (slotChanged && state.oemEnabled && state.look && state.activeCustom && !state.activeFeatureLighting && !state.oemLockBusy
                             && Date.now() - lastOemLockAt > 4000) {
                             lastOemLockAt = Date.now(); state.oemLockBusy = true;
                             reapplyLook('OEM MENU CHANGE OVERRIDDEN · APP COLOUR KEPT').finally(() => { state.oemLockBusy = false; });
@@ -274,9 +429,9 @@ mgu.run({
                         const speed = isFiniteNumber(raw) && raw !== 65535 ? raw * 0.015625 : null;
                         if (speed !== null && speed >= 0 && speed <= 400) { state.speed = speed; state.speedAt = Date.now(); }
                         else { state.speed = null; state.speedAt = 0; }
-                        if (state.pendingLook && state.oemEnabled && freshSpeed() && state.modules.length) {
+                        if (state.pendingLook && (state.oemEnabled || state.zoneLightingEnabled) && freshSpeed() && state.modules.length) {
                             state.pendingLook = false;
-                            reapplyLook('LAST AMBIENT LOOK RESTORED');
+                            reapplyLook('LAST AMBIENT LOOK RESTORED', !!state.zoneLightingEnabled);
                         }
                         if (!state.oemEnabled && state.modules.length && !state.blackoutOverride && !state.blackoutApplying
                             && Date.now() - state.blackoutLastAttemptAt > 10000 && freshSpeed()) {
@@ -288,6 +443,22 @@ mgu.run({
                 if (watch && watch.shutdown) ctx._moreAmbientWatches.push(watch);
                 if (watch && watch.error) log.warn('Vehicle speed: ' + watch.error);
             } catch (e) { log.warn('Vehicle speed signal: ' + shortError(e)); }
+            try {
+                const watch = await ctx.signals.watch(FES, '1', {
+                    statusFESVehicleDynamicSwitchHMI: (v) => {
+                        const raw = v && v.actualValueModeDrivingExperience;
+                        if (raw === undefined || raw === null || raw === '') return;
+                        const nextMode = driveModeOf(raw);
+                        if (nextMode === state.driveMode) return;
+                        state.driveMode = nextMode;
+                        state.modeSyncPending = true;
+                        queueRender();
+                        syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e)));
+                    },
+                }, log, { pollMs: 2000 });
+                if (watch && watch.shutdown) ctx._moreAmbientWatches.push(watch);
+                if (watch && watch.error) log.warn('Driving mode signal: ' + watch.error);
+            } catch (e) { log.warn('Driving mode signal: ' + shortError(e)); }
         }
         ctx._moreAmbientWatches = [];
 
@@ -325,7 +496,11 @@ mgu.run({
                 else if (!state.oemEnabled && state.modules.length && !state.blackoutOverride) {
                     setTimeout(() => applyBlackoutOverride(), 0);
                 }
-                if (state.oemEnabled && state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
+                if (state.zoneLightingEnabled && state.modules.length) {
+                    setTimeout(() => applyZoneLighting(true, 'ZONE LIGHTING RESTORED'), 0);
+                } else if (state.oemEnabled && anyAutoFeature() && state.modules.length) {
+                    setTimeout(() => syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e))), 0);
+                } else if (state.oemEnabled && state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
             }
         }
         function average(list) {
@@ -347,47 +522,66 @@ mgu.run({
             return !!(reply && reply[0] === 0x6e && reply[1] === did[0] && reply[2] === did[1]);
         }
         function activeZoneLooks() {
-            const looks = [];
-            if (state.customUpper) looks.push({ zone: 'upper', colour: state.customUpper,
-                modules: state.modules.filter((m) => !m.fault && m.part === 'upper') });
-            if (state.customLower) looks.push({ zone: 'lower', colour: state.customLower,
-                modules: state.modules.filter((m) => !m.fault && m.part === 'lower') });
-            if (state.customOther) looks.push({ zone: 'other', colour: state.customOther,
-                modules: state.modules.filter((m) => !m.fault && m.part === 'unknown') });
-            return looks.filter((look) => look.modules.length);
+            const grouped = Object.create(null);
+            for (const module of state.modules) {
+                if (module.fault) continue;
+                const byLocation = state.customByLocation[String(module.location)];
+                const colour = byLocation || (module.part === 'upper' ? state.customUpper
+                    : module.part === 'lower' ? state.customLower : state.customOther);
+                if (!colour) continue;
+                const key = colour.rgb.join(',') + ':' + colour.brightness;
+                if (!grouped[key]) grouped[key] = { zone: 'custom', colour, modules: [] };
+                grouped[key].modules.push(module);
+            }
+            return Object.keys(grouped).map((key) => grouped[key]);
         }
-        async function applyCustom(isRenewal, requestedColour, requestedZones, allowWhileMoving) {
-            if (stopped || state.applyBusy || state.scanBusy || state.busy) return;
+        async function applyCustom(isRenewal, requestedColour, requestedZones, allowWhileMoving, requestedLabel) {
+            if (stopped || state.applyBusy || state.scanBusy || state.busy) return false;
             const renewingBlackout = isRenewal && state.blackoutOverride;
             if (!renewingBlackout && !allowWhileMoving && !canChangeColor()) {
                 if (isRenewal) {
                     state.activeCustom = false; state.customUpper = null; state.customLower = null; state.customOther = null; state.renewTimer = null;
+                    state.customByLocation = Object.create(null); state.activeFeatureLighting = null;
                     setNotice('CUSTOM COLOUR WILL RETURN TO BMW WHEN ITS SHORT HOLD EXPIRES', C.amber);
                 }
-                return;
+                return false;
             }
             if (!state.modules.length) {
                 if (!isRenewal) setNotice('NO DISCOVERED RGB MODULES · BMW FACTORY LIGHTING IS UNCHANGED', C.amber);
-                return;
+                return false;
             }
             const chosen = isRenewal ? [] : (requestedZones || (state.zone === 'all' ? ['upper', 'lower', 'other'] : [state.zone]));
             const healthy = state.modules.filter((m) => !m.fault);
             const applicable = isRenewal ? [] : chosen.filter((zone) => healthy.some((m) => zone === 'other' ? m.part === 'unknown' : m.part === zone));
-            if (!isRenewal && !applicable.length) { setNotice('NO HEALTHY LIGHT MODULES FOUND IN THIS ZONE', C.amber); return; }
+            if (!isRenewal && !applicable.length) { setNotice('NO HEALTHY LIGHT MODULES FOUND IN THIS ZONE', C.amber); return false; }
             const fallback = requestedColour && requestedColour.rgb ? requestedColour : { rgb: rgb(), brightness: brightnessValue() };
             const colorFor = (zone) => {
                 const map = requestedColour && requestedColour.byZone;
                 const value = map && (map[zone] || map.lower || map.upper);
                 return value && value.rgb ? value : fallback;
             };
+            if (!isRenewal) {
+                if (requestedColour && requestedColour.byLocation) {
+                    state.customByLocation = Object.create(null);
+                    Object.keys(requestedColour.byLocation).forEach((location) => {
+                        const c = requestedColour.byLocation[location];
+                        if (c && Array.isArray(c.rgb) && c.rgb.length === 3) {
+                            state.customByLocation[String(Number(location))] = { rgb: c.rgb.slice(0, 3), brightness: clamp(Number(c.brightness) || 0, 0, 100) };
+                        }
+                    });
+                } else {
+                    healthy.filter((m) => applicable.indexOf(m.part === 'unknown' ? 'other' : m.part) >= 0)
+                        .forEach((m) => { delete state.customByLocation[String(m.location)]; });
+                }
+            }
             if (applicable.indexOf('upper') >= 0) state.customUpper = Object.assign({}, colorFor('upper'));
             if (applicable.indexOf('lower') >= 0) state.customLower = Object.assign({}, colorFor('lower'));
             if (applicable.indexOf('other') >= 0) state.customOther = Object.assign({}, colorFor('other'));
             const looks = activeZoneLooks();
-            if (!looks.length) { setNotice('NO HEALTHY MODULES FOUND IN THIS ZONE', C.amber); return; }
+            if (!looks.length) { setNotice('NO HEALTHY MODULES FOUND IN THIS ZONE', C.amber); return false; }
             clearTimeout(state.renewTimer); state.renewTimer = null;
             state.applyBusy = true;
-            if (!isRenewal) setNotice('APPLYING ' + (state.oemSelected ? state.oemSelected.name : 'COLOUR') + ' TO ' + looks.map((x) => x.modules.length).reduce((a, b) => a + b, 0) + ' MODULES…', C.cyan);
+            if (!isRenewal) setNotice('APPLYING ' + (requestedLabel || (state.oemSelected ? state.oemSelected.name : 'COLOUR')) + ' TO ' + looks.map((x) => x.modules.length).reduce((a, b) => a + b, 0) + ' MODULES…', C.cyan);
             let ok = 0, failed = 0;
             try {
                 // Renew both selected zones when needed; only use module addresses returned by the live BDC scan.
@@ -398,29 +592,180 @@ mgu.run({
                 if (ok) {
                     if (!isRenewal) setNotice('COMMAND ACKNOWLEDGED BY ' + ok + ' MODULES' + (failed ? ' · ' + failed + ' NO ACK' : '') + ' · CHECK THE LIGHTS', failed ? C.amber : C.green);
                     clearTimeout(state.renewTimer);
-                    state.renewTimer = setTimeout(() => applyCustom(true), RENEW_MS);
+                    state.renewTimer = setTimeout(() => applyCustom(true, null, null, !!state.activeFeatureLighting), RENEW_MS);
+                    return true;
                 } else {
-                    state.customUpper = null; state.customLower = null; state.customOther = null; state.activeCustom = false;
+                    state.customUpper = null; state.customLower = null; state.customOther = null; state.customByLocation = Object.create(null); state.activeCustom = false;
+                    state.activeFeatureLighting = null;
                     if (state.blackoutOverride) state.blackoutOverride = false;
                     if (!isRenewal) setNotice('BDC DID NOT ACCEPT THE COLOUR · BMW LIGHTING IS UNCHANGED', C.red);
+                    return false;
                 }
             } catch (e) {
                 state.activeCustom = false; state.customUpper = null; state.customLower = null; state.customOther = null;
+                state.customByLocation = Object.create(null); state.activeFeatureLighting = null;
                 if (state.blackoutOverride) state.blackoutOverride = false;
                 if (!isRenewal) setNotice('COLOUR COMMAND FAILED · ' + shortError(e).slice(0, 70), C.red);
                 log.warn('ambient write: ' + shortError(e));
+                return false;
             } finally {
                 state.applyBusy = false; queueRender();
                 retryOemToggleWhenIdle();
+                if (state.modeSyncPending && !stopped) setTimeout(() => syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e))), 0);
                 if (!state.oemEnabled && state.modules.length && !state.blackoutOverride && !state.blackoutApplying) {
                     setTimeout(() => applyBlackoutOverride(), 0);
                 }
             }
         }
+        async function applyZoneLighting(allowWhileMoving, requestedLabel) {
+            if (!state.zoneLightingEnabled) return false;
+            if (state.scanBusy || state.scan === 'not scanned') {
+                state.pendingLook = true;
+                setNotice('ZONE LIGHTING READY · WAITING FOR LIGHT MODULE SCAN', C.cyan);
+                return false;
+            }
+            const preview = zonePreviewColors();
+            if (!validHex(state.zoneColors.dashboard)) state.zoneColors.dashboard = preview.dashboard;
+            if (!validHex(state.zoneColors.doors)) state.zoneColors.doors = preview.doors;
+            if (!validHex(state.zoneColors.footwell)) state.zoneColors.footwell = preview.footwell;
+            if (!state.oemEnabled && !await setOemLightingEnabled(true)) return false;
+
+            const brightnessFor = (zone) => effectiveOemBrightness(zone === 'footwell' ? state.oemBackground : state.oemAccent);
+            const colourFor = (zone) => ({
+                rgb: hexToRgbBdc(state.zoneColors[zone]), brightness: brightnessFor(zone),
+            });
+            const byZone = { upper: colourFor('dashboard'), lower: colourFor('footwell'), other: colourFor('dashboard') };
+            const byLocation = Object.create(null);
+            state.modules.filter((m) => !m.fault).forEach((m) => {
+                const zone = DOOR_LOC.has(m.location) ? 'doors' : FOOTWELL_LOC.has(m.location) ? 'footwell' : 'dashboard';
+                byLocation[String(m.location)] = colourFor(zone);
+            });
+            const applied = await applyCustom(false, { byZone, byLocation }, ['upper', 'lower', 'other'], !!allowWhileMoving,
+                requestedLabel || 'AMBIENT ZONES');
+            if (applied) state.pendingLook = false;
+            return applied;
+        }
+        async function toggleZoneLighting() {
+            const enabled = !state.zoneLightingEnabled;
+            if (enabled) {
+                const preview = zonePreviewColors();
+                if (!validHex(state.zoneColors.dashboard)) state.zoneColors.dashboard = preview.dashboard;
+                if (!validHex(state.zoneColors.doors)) state.zoneColors.doors = preview.doors;
+                if (!validHex(state.zoneColors.footwell)) state.zoneColors.footwell = preview.footwell;
+                state.zoneLightingEnabled = true;
+                disableAutomaticModesForManual(['upper', 'lower', 'other']);
+                state.look = { type: 'zone-colours', dashboard: state.zoneColors.dashboard, doors: state.zoneColors.doors,
+                    footwell: state.zoneColors.footwell, upper: state.zoneColors.dashboard, lower: state.zoneColors.footwell };
+                saveLook(); queueRender();
+                return applyZoneLighting(true, 'AMBIENT ZONES ON');
+            }
+            state.zoneLightingEnabled = false;
+            disableAutomaticModesForManual(['upper', 'lower', 'other']);
+            saveLook(); queueRender();
+            setNotice('AMBIENT ZONES OFF · SWITCHING LIGHTS OFF', C.cyan);
+            return setOemLightingEnabled(false);
+        }
+        function makeFeaturePayload(feature) {
+            const brightness = effectiveOemBrightness(100);
+            if (feature.key !== 'mColor') {
+                const c = MODE_RGB[feature.key].slice();
+                const same = { rgb: c, brightness };
+                return { byZone: { upper: same, lower: same, other: same } };
+            }
+            const dashboard = { rgb: M_COLOR.dashboardRgb.slice(), brightness };
+            const door = { rgb: M_COLOR.doorRgb.slice(), brightness };
+            const footwell = { rgb: M_COLOR.footwellRgb.slice(), brightness };
+            const byLocation = Object.create(null);
+            state.modules.filter((m) => !m.fault).forEach((m) => {
+                byLocation[String(m.location)] = DOOR_LOC.has(m.location) ? door : m.location >= 0x01 && m.location <= 0x04 ? footwell : dashboard;
+            });
+            return {
+                byZone: { upper: dashboard, lower: footwell, other: dashboard },
+                byLocation,
+            };
+        }
+        async function syncModeLighting(force) {
+            if (stopped) return false;
+            if (state.modeSyncBusy) { state.modeSyncPending = true; return false; }
+            state.modeSyncBusy = true;
+            let result = false;
+            try {
+                do {
+                    state.modeSyncPending = false;
+                    if (stopped || !state.oemEnabled) break;
+                    if (state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying) {
+                        state.modeSyncPending = true;
+                        break;
+                    }
+                    const feature = desiredFeatureLighting();
+                    if (feature) {
+                        state.oemWantApply = false;
+                        if (!force && state.activeFeatureLighting && state.activeFeatureLighting.key === feature.key && state.activeCustom && !state.blackoutOverride) {
+                            result = true;
+                            continue;
+                        }
+                        if (!state.modules.length) {
+                            state.modeSyncPending = state.scan === 'not scanned' || state.scan === 'scanning';
+                            setNotice(state.modeSyncPending ? 'AMBIENT MODE READY · WAITING FOR LIGHT MODULE SCAN' : 'NO RGB MODULES FOUND · MODE COLOUR WAS NOT APPLIED', C.amber);
+                            break;
+                        }
+                        const payload = makeFeaturePayload(feature);
+                        result = await applyCustom(false, payload, ['upper', 'lower', 'other'], true,
+                            feature.key === 'mColor' ? 'M COLOR · 3 ZONES' : feature.key.toUpperCase() + ' MODE');
+                        if (result) {
+                            state.activeFeatureLighting = feature;
+                            setNotice(feature.key === 'mColor' ? 'M COLOR APPLIED · DASH / DOORS / FOOTWELLS' : feature.key.toUpperCase() + ' MODE COLOUR APPLIED', C.green);
+                            queueRender();
+                        }
+                    } else if (state.activeFeatureLighting) {
+                        state.activeFeatureLighting = null;
+                        await restoreBmw();
+                        result = true;
+                    } else if (state.features.comfort || state.features.sport || state.features.eco) {
+                        const waitingFor = ['comfort', 'sport', 'eco'].find((mode) => state.features[mode]);
+                        if (waitingFor) setNotice(waitingFor.toUpperCase() + ' MODE COLOUR ARMED · WAITING FOR ' + waitingFor.toUpperCase(), C.cyan);
+                    }
+                } while (state.modeSyncPending && !stopped && state.oemEnabled);
+            } finally {
+                state.modeSyncBusy = false;
+                queueRender();
+            }
+            return result;
+        }
+        function disableAutomaticModesForManual(zones) {
+            if (!anyAutoFeature() && !state.activeFeatureLighting) return;
+            const selected = zones || ['upper', 'lower', 'other'];
+            const hasZone = (m) => selected.indexOf(m.part === 'unknown' ? 'other' : m.part) >= 0;
+            state.modules.filter(hasZone).forEach((m) => { delete state.customByLocation[String(m.location)]; });
+            state.features = { mColor: false, comfort: false, sport: false, eco: false };
+            state.activeFeatureLighting = null;
+            state.modeSyncPending = false;
+            saveLook(); queueRender();
+        }
+        async function toggleFeatureMode(featureKey) {
+            if (['mColor', 'comfort', 'sport', 'eco'].indexOf(featureKey) < 0) return;
+            const turningOn = !state.features[featureKey];
+            if (featureKey === 'mColor') {
+                state.features = { mColor: turningOn, comfort: false, sport: false, eco: false };
+            } else {
+                state.features.mColor = false;
+                state.features[featureKey] = turningOn;
+            }
+            if (turningOn) state.oemWantApply = false;
+            state.modeSyncPending = true;
+            saveLook(); queueRender();
+            if (state.features.mColor) setNotice('M COLOR SELECTED · APPLYING THE 3-ZONE PALETTE', C.cyan);
+            else if (turningOn && state.driveMode !== featureKey) {
+                setNotice(featureKey.toUpperCase() + ' MODE COLOUR ARMED · WAITING FOR ' + featureKey.toUpperCase(), C.cyan);
+            }
+            await syncModeLighting();
+        }
         async function applyBlackoutOverride() {
             if (state.blackoutApplying || stopped || state.oemEnabled || state.blackoutOverride) return false;
             state.blackoutApplying = true;
             state.blackoutLastAttemptAt = Date.now();
+            state.activeFeatureLighting = null;
+            state.customByLocation = Object.create(null);
             const black = { byZone: {
                 upper: { rgb: [0, 0, 0], brightness: 0 },
                 lower: { rgb: [0, 0, 0], brightness: 0 },
@@ -438,6 +783,7 @@ mgu.run({
         async function restoreBmw() {
             if (state.applyBusy || state.scanBusy || state.busy) return false;
             clearTimeout(state.renewTimer); state.renewTimer = null; state.activeCustom = false; state.blackoutOverride = false;
+            state.activeFeatureLighting = null; state.customByLocation = Object.create(null);
             if (!state.modules.length || !state.diag || !state.diag.available) {
                 state.upperRead = null; state.lowerRead = null; state.customUpper = null; state.customLower = null; state.customOther = null;
                 setNotice('RESTORE LINK UNAVAILABLE · THE SHORT BMW OVERRIDE WILL EXPIRE BY ITSELF', C.amber);
@@ -452,9 +798,13 @@ mgu.run({
                 setNotice('BMW LIGHTING RESTORED · ' + ok + ' MODULES' + (failed ? ' · ' + failed + ' DID NOT ACK' : ''), failed ? C.amber : C.green);
                 return ok > 0 && failed === 0;
             } catch (e) { setNotice('RESTORE FAILED · ' + shortError(e).slice(0, 72), C.red); log.warn('ambient restore: ' + shortError(e)); }
-            finally { state.busy = false; queueRender(); retryOemToggleWhenIdle(); }
+            finally {
+                state.busy = false; queueRender(); retryOemToggleWhenIdle();
+                if (state.modeSyncPending && !stopped) setTimeout(() => syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e))), 0);
+            }
         }
         async function setFactorySlot(n) {
+            disableAutomaticModesForManual(zoneTargets());
             if (state.activeCustom) await restoreBmw();
             if (!canChangeColor()) return;
             if (!state.proxy) { setNotice('BMW FACTORY COLOUR CONTROL IS NOT AVAILABLE', C.amber); return; }
@@ -486,6 +836,7 @@ mgu.run({
                     clearTimeout(state.renewTimer); state.renewTimer = null;
                     state.activeCustom = false; state.blackoutOverride = false;
                     state.customUpper = null; state.customLower = null; state.customOther = null;
+                    state.customByLocation = Object.create(null); state.activeFeatureLighting = null;
                 }
 
                 let bmwAccepted = false;
@@ -571,7 +922,7 @@ mgu.run({
         function effectiveOemBrightness(value) {
             return clamp(Math.round(value * (state.oemNight ? 0.45 : 1)), 10, 100);
         }
-        async function applyOemSelection() {
+        async function applyOemSelection(allowWhileMoving) {
             if (!state.oemSelected || stopped) return;
             if (state.scanBusy) { state.oemWantApply = true; setNotice('COLOUR READY · APPLYING WHEN MODULE SCAN FINISHES', C.cyan); return; }
             if (!state.modules.length) {
@@ -592,51 +943,99 @@ mgu.run({
                     other: { rgb: state.oemSelected.rgb, brightness: effectiveOemBrightness(Math.round((state.oemAccent + state.oemBackground) / 2)) },
                 },
             };
-            await applyCustom(false, color, ['upper', 'lower', 'other']);
+            await applyCustom(false, color, zoneTargets(), !!allowWhileMoving);
         }
         /** Shared apply payloads so a pick, a persisted restore and the OEM lock all write the same look. */
         const comboPayload = (c) => ({ byZone: {
-            upper: { rgb: hexToRgbScaled(c.c1), brightness: effectiveOemBrightness(state.oemAccent) },
-            lower: { rgb: hexToRgbScaled(c.c2), brightness: effectiveOemBrightness(state.oemBackground) },
-            other: { rgb: hexToRgbScaled(c.c2), brightness: effectiveOemBrightness(Math.round((state.oemAccent + state.oemBackground) / 2)) },
+            upper: { rgb: hexToRgbBdc(c.c1), brightness: effectiveOemBrightness(state.oemAccent) },
+            lower: { rgb: hexToRgbBdc(c.c2), brightness: effectiveOemBrightness(state.oemBackground) },
+            other: { rgb: hexToRgbBdc(c.c2), brightness: effectiveOemBrightness(Math.round((state.oemAccent + state.oemBackground) / 2)) },
         } });
-        const colourPayload = (c) => { const rgb = hexToRgbScaled(c.c1); return { byZone: {
+        const colourPayload = (c) => { const rgb = hexToRgbBdc(c.c1); return { byZone: {
             upper: { rgb, brightness: effectiveOemBrightness(state.oemAccent) },
             lower: { rgb, brightness: effectiveOemBrightness(state.oemBackground) },
             other: { rgb, brightness: effectiveOemBrightness(Math.round((state.oemAccent + state.oemBackground) / 2)) },
         } }; };
-        async function applyComboLook(c, note) {
+        async function applyComboLook(c, note, allowWhileMoving) {
             if (!state.oemEnabled) { const on = await setOemLightingEnabled(true); if (!on) return; }
             if (note) setNotice(note, C.cyan);
-            await applyCustom(false, comboPayload(c), ['upper', 'lower', 'other']);
+            // A combo is a paired dashboard/footwell look; a previously selected single zone
+            // in Zones must not silently restrict it to just one half of the cabin.
+            await applyCustom(false, comboPayload(c), ['upper', 'lower', 'other'], !!allowWhileMoving);
         }
-        async function applyColourLook(c, note) {
+        async function applyColourLook(c, note, allowWhileMoving) {
             if (!state.oemEnabled) { const on = await setOemLightingEnabled(true); if (!on) return; }
             if (note) setNotice(note, C.cyan);
-            await applyCustom(false, colourPayload(c), ['upper', 'lower', 'other']);
+            await applyCustom(false, colourPayload(c), zoneTargets(), !!allowWhileMoving);
+        }
+        async function applyStudioLook(note, allowWhileMoving) {
+            const targets = zoneTargets();
+            const colour = { rgb: rgb(), brightness: brightnessValue() };
+            const colourHex = hex(colour.rgb);
+            disableAutomaticModesForManual(targets);
+            state.oemSelected = null;
+            state.previewChoice = null;
+            state.look = {
+                type: 'studio', hue: hueValue(), saturation: saturationValue(), brightness: brightnessValue(),
+                targets: targets.slice(),
+            };
+            state.pendingLook = false;
+            syncZoneColorsForTargets(colourHex, colourHex);
+            saveLook(); queueRender();
+            if (!state.oemEnabled && !await setOemLightingEnabled(true)) return false;
+            if (note) setNotice(note, C.cyan);
+            return applyCustom(false, colour, targets, !!allowWhileMoving, 'CUSTOM COLOUR');
         }
         /** Re-writes the last picked look — used for start-up restore and the OEM-menu override lock. */
-        async function reapplyLook(note) {
+        async function reapplyLook(note, allowWhileMoving) {
             const lk = state.look;
             if (!lk) return;
-            if (lk.type === 'combo' && COMBOS[lk.index]) return applyComboLook(COMBOS[lk.index], note || ('COMBO ' + COMBOS[lk.index].name.toUpperCase() + ' · REAPPLYING…'));
-            if (lk.type === 'colour' && PALETTE[lk.index]) return applyColourLook(PALETTE[lk.index], note || (PALETTE[lk.index].name.toUpperCase() + ' · REAPPLYING…'));
+            if (lk.type === 'combo' && COMBOS[lk.index]) return applyComboLook(COMBOS[lk.index], note || ('COMBO ' + COMBOS[lk.index].name.toUpperCase() + ' · REAPPLYING…'), allowWhileMoving);
+            if (lk.type === 'colour' && PALETTE[lk.index]) return applyColourLook(PALETTE[lk.index], note || (PALETTE[lk.index].name.toUpperCase() + ' · REAPPLYING…'), allowWhileMoving);
+            if (lk.type === 'zone-colours' && state.zoneLightingEnabled) {
+                if (!validHex(state.zoneColors.dashboard)) state.zoneColors.dashboard = validHex(lk.dashboard) ? lk.dashboard : lk.upper;
+                if (!validHex(state.zoneColors.doors)) state.zoneColors.doors = validHex(lk.doors) ? lk.doors : lk.upper;
+                if (!validHex(state.zoneColors.footwell)) state.zoneColors.footwell = validHex(lk.footwell) ? lk.footwell : lk.lower;
+                if (!validHex(state.zoneColors.dashboard) || !validHex(state.zoneColors.doors) || !validHex(state.zoneColors.footwell)) return;
+                return applyZoneLighting(!!allowWhileMoving, note ? 'ZONE LIGHTING RESTORED' : 'ZONE LIGHTING');
+            }
+            if (lk.type === 'studio') {
+                settings.set('hue', clamp(Number(lk.hue) || 0, 0, 345));
+                settings.set('saturation', clamp(Number(lk.saturation) || 0, 0, 100));
+                settings.set('brightness', clamp(Number(lk.brightness) || 76, 10, 100));
+                const targets = Array.isArray(lk.targets)
+                    ? lk.targets.filter((zone) => ['upper', 'lower', 'other'].indexOf(zone) >= 0)
+                    : zoneTargets();
+                if (!targets.length) return;
+                return applyCustom(false, { rgb: rgb(), brightness: brightnessValue() }, targets,
+                    !!allowWhileMoving, note ? 'CUSTOM COLOUR RESTORED' : 'CUSTOM COLOUR');
+            }
             if (lk.type === 'oem' && state.oemSelected) {
                 if (note) setNotice(note, C.cyan);
-                return applyOemSelection();
+                return applyOemSelection(allowWhileMoving);
             }
         }
         /** A tap on the open right panel: a combo applies both zones, a colour applies it to all zones. */
         async function pickDetailItem(i) {
             if (state.detail === 'zones') {
-                const z = ZONE_ROWS[i]; if (!z) return;
-                state.zone = z.zone; saveLook(); queueRender(); return;
+                if (i === 0) return toggleZoneLighting();
+                const z = ZONE_ROWS[i - 1]; if (!z) return;
+                if (!state.zoneLightingEnabled) { setNotice('TURN ON AMBIENT ZONES LIGHTING TO EDIT COLOURS', C.amber); return; }
+                state.zone = z.zone === 'footwell' ? 'lower' : 'upper';
+                saveLook(); setNotice('SELECTED ZONE · ' + z.name, C.cyan); return;
             }
             if (state.detail === 'combos') {
                 const c = COMBOS[i]; if (!c) return;
+                if (state.zoneColorReturn) {
+                    const target = state.zoneColorReturn.target;
+                    return chooseZoneColor(target, target === 'footwell' ? c.c2 : c.c1);
+                }
+                state.zone = 'all';
+                disableAutomaticModesForManual(['upper', 'lower', 'other']);
                 state.selCombo = i; state.previewChoice = 'combo'; state.look = { type: 'combo', index: i }; state.pendingLook = false;
+                syncZoneColorsForTargets(c.c1, c.c2);
                 saveLook(); queueRender();
-                await applyComboLook(c, 'COMBO ' + c.name.toUpperCase() + ' · APPLYING BOTH ZONES…');
+                await applyComboLook(c, 'COMBO ' + c.name.toUpperCase() + ' · APPLYING TO ' + zoneName() + '…');
                 return;
             }
             if (state.detail === 'colours' && i === 0) {
@@ -647,9 +1046,14 @@ mgu.run({
                 queueRender(); return;
             }
             const c = PALETTE[i - 1]; if (!c) return;
+            if (state.zoneColorReturn) {
+                return chooseZoneColor(state.zoneColorReturn.target, c.c1);
+            }
+            disableAutomaticModesForManual(zoneTargets());
             state.selColour = i - 1; state.previewChoice = 'colour'; state.look = { type: 'colour', index: i - 1 }; state.pendingLook = false;
+            syncZoneColorsForTargets(c.c1, c.c1);
             saveLook(); queueRender();
-            await applyColourLook(c, 'COLOUR ' + c.name.toUpperCase() + ' · APPLYING TO ALL ZONES…');
+            await applyColourLook(c, 'COLOUR ' + c.name.toUpperCase() + ' · APPLYING TO ' + zoneName() + '…');
         }
         async function applyOemBrightness() {
             if (state.oemSelected) return applyOemSelection();
@@ -665,7 +1069,7 @@ mgu.run({
                         Math.round((state.oemAccent + state.oemBackground) / 2);
                     byZone[zone] = { rgb: color, brightness: effectiveOemBrightness(base) };
                 });
-                return applyCustom(false, { byZone }, ['upper', 'lower', 'other']);
+                return applyCustom(false, { byZone }, zoneTargets());
             }
             const averageBrightness = effectiveOemBrightness(Math.round((state.oemBackground + state.oemAccent) / 2));
             if (!canChangeColor()) return;
@@ -682,9 +1086,11 @@ mgu.run({
             return applyOemBrightness();
         }
         async function selectOemColor(color) {
+            disableAutomaticModesForManual(zoneTargets());
             state.oemSelected = color;
             state.oemPaletteOpen = true;
             state.look = { type: 'oem', name: color.name }; state.pendingLook = false;
+            syncZoneColorsForTargets(color.color, color.color);
             saveLook(); queueRender();
             if (!state.oemEnabled && !await setOemLightingEnabled(true)) return;
             if (state.scanBusy) { state.oemWantApply = true; setNotice('COLOUR READY · APPLYING WHEN MODULE SCAN FINISHES', C.cyan); return; }
@@ -716,9 +1122,9 @@ mgu.run({
             view: toggleView, zone: changeZone,
             studioPage: () => setPage('studio'), bmwPage: () => setPage('bmw'), oemPage: () => setPage('oem'),
             oemColorPanel: () => { state.oemPaletteOpen = !state.oemPaletteOpen; queueRender(); },
-            panelColour: () => { state.detail = 'colours'; state.detailScroll = 0; state.detailFocus = state.selColour >= 0 ? state.selColour + 1 : 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; } queueRender(); },
-            panelCombos: () => { state.detail = 'combos'; state.detailScroll = 0; state.detailFocus = state.selCombo >= 0 ? state.selCombo : 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; } queueRender(); },
-            panelZones: () => { state.detail = 'zones'; state.detailScroll = 0; state.detailFocus = Math.max(0, ZONE_ROWS.findIndex((z) => z.zone === state.zone)); if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; } queueRender(); },
+            panelColour: () => { state.zoneColorReturn = null; state.detail = 'colours'; state.detailScroll = 0; state.detailFocus = state.selColour >= 0 ? state.selColour + 1 : 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; } queueRender(); },
+            panelCombos: () => { state.zoneColorReturn = null; state.detail = 'combos'; state.detailScroll = 0; state.detailFocus = state.selCombo >= 0 ? state.selCombo : 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; } queueRender(); },
+            panelZones: () => { state.zoneColorReturn = null; state.detail = 'zones'; state.detailScroll = 0; state.detailFocus = 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow0'; lastFocusKey = ctx.display.focusKey; } queueRender(); },
             detailBack: () => {
                 const prev = state.detail;
                 // Combos lives inside the Color page: back returns to Color, then to the main list
@@ -727,6 +1133,13 @@ mgu.run({
                     state.detailFocus = state.selColour >= 0 ? state.selColour + 1 : 0;
                     if (ctx.display) { ctx.display.focusKey = 'tgt:drow' + state.detailFocus; lastFocusKey = ctx.display.focusKey; }
                     queueRender(); return;
+                }
+                if (prev === 'colours' && state.zoneColorReturn) {
+                    const origin = state.zoneColorReturn;
+                    state.zone = origin.target; state.detail = 'zones'; state.detailScroll = origin.scroll || 0;
+                    state.zoneColorReturn = null;
+                    setDetailFocus(origin.row);
+                    saveLook(); queueRender(); return;
                 }
                 state.detail = null; state.detailScroll = 0; state.detailFocus = -1;
                 const returnRow = prev === 'colours' ? 1 : prev === 'zones' ? 2 : 0;
@@ -738,10 +1151,17 @@ mgu.run({
                 const target = !state.oemEnabled;
                 const ok = await setOemLightingEnabled(target);
                 // turning the ambient back on restores OUR look, not the OEM colour
-                if (ok && target) { if (state.look) await reapplyLook(); else if (state.oemSelected) await applyOemSelection(); }
+                if (ok && target) {
+                    if (anyAutoFeature()) await syncModeLighting();
+                    else if (state.look) await reapplyLook(); else if (state.oemSelected) await applyOemSelection();
+                }
             },
             oemNight: async () => { state.oemNight = !state.oemNight; saveLook(); queueRender(); await applyOemBrightness(); },
             oemDynamic: () => { state.oemDynamic = !state.oemDynamic; saveLook(); queueRender(); },
+            mColorMode: () => toggleFeatureMode('mColor'),
+            comfortMode: () => toggleFeatureMode('comfort'),
+            sportMode: () => toggleFeatureMode('sport'),
+            ecoMode: () => toggleFeatureMode('eco'),
             backgroundDown: () => adjustOemBrightness('background', state.oemBackground - 10),
             backgroundUp: () => adjustOemBrightness('background', state.oemBackground + 10),
             accentDown: () => adjustOemBrightness('accent', state.oemAccent - 10),
@@ -749,7 +1169,9 @@ mgu.run({
             hueMinus: () => changeSetting('hue', -15, 0, 345), huePlus: () => changeSetting('hue', 15, 0, 345),
             satMinus: () => changeSetting('saturation', -10, 0, 100), satPlus: () => changeSetting('saturation', 10, 0, 100),
             brightnessMinus: () => changeSetting('brightness', -10, 10, 100), brightnessPlus: () => changeSetting('brightness', 10, 10, 100),
-            scan: scanModules, apply: () => applyCustom(false), restore: restoreBmw,
+            scan: scanModules,
+            apply: () => applyStudioLook('CUSTOM COLOUR · APPLYING TO ' + zoneName() + '…'),
+            restore: () => { disableAutomaticModesForManual(); return restoreBmw(); },
             factoryPrev: () => { state.slot = state.liveSlot || state.slot; return setFactorySlot(state.slot <= 1 ? 12 : state.slot - 1); },
             factoryNext: () => { state.slot = state.liveSlot || state.slot; return setFactorySlot(state.slot >= 12 ? 1 : state.slot + 1); },
             factoryApply: () => setFactorySlot(state.slot), favPrev: () => chooseFavorite(-1), favNext: () => chooseFavorite(1),
@@ -995,28 +1417,54 @@ mgu.run({
             ribbonStatus(cv, rib, y0, y1);
         }
         async function render() {
-            // Black screen with the blurred G20 ghost behind it; pages stay in the code, undrawn.
+            // G20 cabin preview behind the controls; auxiliary pages stay in the code, undrawn.
             if (stopped || (!ui.isVisible('MAIN') && !ctx.preview)) return;
             hitboxes = [];
             const cv = ctx.canvas(W, H).clear('#000000');
+            let featurePreview = null;
             try {
                 BgArt.load();
                 const colour = state.oemEnabled && state.previewChoice === 'colour' && state.selColour >= 0 ? PALETTE[state.selColour] : null;
                 const combo = state.oemEnabled && state.previewChoice === 'combo' && state.selCombo >= 0 ? COMBOS[state.selCombo] : null;
-                BgArt.setColors(combo ? combo.c1 : colour && colour.c1, combo ? combo.c2 : colour && colour.c1, state.oemEnabled);
+                const pendingUpper = combo ? combo.c1 : colour ? colour.c1 : state.oemSelected ? state.oemSelected.color : hex(previewRgb());
+                const pendingLower = combo ? combo.c2 : colour ? colour.c1 : state.oemSelected ? state.oemSelected.color : hex(previewRgb());
+                const targets = zoneTargets();
+                const upperPreview = targets.indexOf('upper') >= 0 ? pendingUpper
+                    : state.customUpper ? hex(dimmedRgb(state.customUpper)) : null;
+                const lowerPreview = targets.indexOf('lower') >= 0 ? pendingLower
+                    : state.customLower ? hex(dimmedRgb(state.customLower)) : null;
+                featurePreview = desiredFeatureLighting();
+                if (featurePreview) {
+                    BgArt.setColors(featurePreview.dashboard, featurePreview.footwell, state.oemEnabled, featurePreview.door);
+                } else if (state.detail === 'zones' || state.zoneColorReturn || (state.look && state.look.type === 'zone-colours')) {
+                    const zoneColors = zonePreviewColors();
+                    BgArt.setColors(zoneColors.upper, zoneColors.lower, state.oemEnabled, zoneColors.door);
+                } else {
+                    BgArt.setColors(upperPreview, lowerPreview, state.oemEnabled);
+                }
                 BgArt.draw(cv, W, H);
             } catch (e) { log.warn('background art: ' + shortError(e)); }
             let scr = null;
             if (state.detail) {
                 // Full page replaces the panel: back arrow returns to INTERIOR LIGHTING
+                const detailItems = state.detail === 'combos' ? COMBOS : state.detail === 'zones' ? zoneDetailRows()
+                    : [{ name: 'Combos', nav: true }].concat(PALETTE);
+                const zoneHeaderColors = state.detail === 'zones' ? zonePreviewColors() : null;
+                let detailSel = state.detail === 'combos' ? state.selCombo : state.detail === 'zones' ? (state.zoneLightingEnabled ? 0 : -1)
+                    : (state.selColour >= 0 ? state.selColour + 1 : -1);
+                if (state.detail === 'colours' && state.zoneColorReturn) {
+                    const selectedColor = zonePreviewColors()[state.zoneColorReturn.target];
+                    const selectedPalette = PALETTE.findIndex((color) => color.c1.toLowerCase() === selectedColor.toLowerCase());
+                    detailSel = selectedPalette >= 0 ? selectedPalette + 1 : -1;
+                }
                 const det = Sheet.drawDetailPanel(cv, G, {
                     title: 'INTERIOR LIGHTING',
-                    items: state.detail === 'combos' ? COMBOS : state.detail === 'zones' ? ZONE_ROWS
-                        : [{ name: 'Combos', nav: true }].concat(PALETTE),
-                    sel: state.detail === 'combos' ? state.selCombo : state.detail === 'zones' ? ZONE_ROWS.findIndex((z) => z.zone === state.zone)
-                        : (state.selColour >= 0 ? state.selColour + 1 : -1),
+                    items: detailItems,
+                    sel: detailSel,
                     focus: state.detailFocus,
-                    image: state.detail === 'zones' ? BgArt.zones() : null,
+                    imageInfo: state.detail === 'zones' ? { name: zoneName() } : null,
+                    imageSwatches: zoneHeaderColors ? [zoneHeaderColors.dashboard, zoneHeaderColors.doors, zoneHeaderColors.footwell] : null,
+                    rowH: state.detail === 'zones' ? 72 : undefined,
                     scroll: state.detailScroll, extra: cv.extra || 0,
                 });
                 state.detailScrollMax = det.scroll.max;
@@ -1025,14 +1473,25 @@ mgu.run({
                 lastDetGeom = { offsets: det.offsets, rowHs: det.rowHs, avail: det.avail };
                 if (det.back) hitboxes.push({ x: det.back.x, y: det.back.y, w: det.back.w, h: det.back.h, key: 'detailBack' });
                 det.rows.forEach((r) => hitboxes.push({ x: r.x, y: r.y, w: r.w, h: r.h, key: 'detailItem', i: r.i }));
+                (det.swatches || []).forEach((s) => hitboxes.push({ x: s.x, y: s.y, w: s.w, h: s.h, key: 'zoneColor', zone: s.zone, row: s.row }));
                 if (cv.own) {
                     if (det.back) cv.target(det.back.x, det.back.y, det.back.w, det.back.h, actions.detailBack, 'back', 0);
+                    // Touch routing uses the first matching page target. Zone swatches sit inside
+                    // their row's full-width target, so register the swatches first or the row
+                    // action consumes the tap before openZoneColorPicker() can run.
+                    (det.swatches || []).forEach((s) => cv.target(s.x, s.y, s.w, s.h,
+                        () => openZoneColorPicker(s.zone, s.row), 'zonecolor_' + s.zone + '_' + s.row, 10));
                     (det.targets || det.rows).forEach((r) => cv.target(r.x, r.y, r.w, r.h, () => pickDetailItem(r.i), 'drow' + r.i, 0));
                 }
             } else {
+                const zoneLook = state.look && state.look.type === 'zone-colours' ? zonePreviewColors() : null;
                 const hud = Sheet.drawInteriorLighting(cv, G, {
-                    enabled: state.oemEnabled, color: state.selColour >= 0 ? PALETTE[state.selColour].c1 : (state.oemSelected ? state.oemSelected.color : '#18d8ff'),
-                    combo: state.previewChoice === 'combo' && state.selCombo >= 0 ? COMBOS[state.selCombo] : null,
+                    enabled: state.oemEnabled, color: zoneLook ? (state.zone === 'lower' ? zoneLook.lower : zoneLook.upper)
+                        : state.selColour >= 0 ? PALETTE[state.selColour].c1 : (state.oemSelected ? state.oemSelected.color : '#18d8ff'),
+                    featureLighting: featurePreview,
+                    features: state.features,
+                    combo: zoneLook ? { c1: zoneLook.upper, c2: zoneLook.lower }
+                        : state.previewChoice === 'combo' && state.selCombo >= 0 ? COMBOS[state.selCombo] : null,
                     brightness: state.oemAccent, bgBrightness: state.oemBackground, night: state.oemNight, dynamic: state.oemDynamic, focus: state.oemFocus,
                     zone: state.zone, zoneColor: state.oemSelected ? state.oemSelected.color : '#18d8ff',
                     zonesImg: BgArt.zones(), scroll: state.oemScroll, extra: cv.extra || 0,
@@ -1050,7 +1509,7 @@ mgu.run({
                 hitboxes.push({ x: hud.plus.x, y: hud.plus.y, w: hud.plus.w, h: hud.plus.h, key: 'accentUp' });
                 hitboxes.push({ x: hud.bar.x, y: hud.bar.y, w: hud.bar.w, h: hud.bar.h, key: 'oemBrightness', zone: 'accent' });
             }
-            if (scr && scr.max > 0) cv.scroll = { y: scr.y, bar: scr.bar };
+            if (scr && scr.max > 0) cv.scroll = { y: scr.y };
             return ui.image('MAIN_GFX', cv);
         }
         function hitTest(x, y) {
@@ -1060,6 +1519,7 @@ mgu.run({
                 if (b.key === 'slot') { state.slot = b.slot; return setFactorySlot(b.slot); }
                 if (b.key === 'oemColor') return selectOemColor(b.color);
                 if (b.key === 'hudRow') { if (b.act && actions[b.act]) return actions[b.act](); return; }
+                if (b.key === 'zoneColor') return openZoneColorPicker(b.zone, b.row);
                 if (b.key === 'detailItem') return pickDetailItem(b.i);
                 if (b.key && actions[b.key]) return actions[b.key]();
             }
@@ -1121,7 +1581,12 @@ mgu.run({
                 render().catch((e) => log.warn('render: ' + shortError(e)));
             }
         });
-        if (ctx.loop) ctx.loop('MAIN', 6, render);
+        if (ctx.loop) {
+            loopOwnsRenders = true;
+            if (renderTimer !== null) { clearTimeout(renderTimer); renderTimer = null; renderQueued = false; }
+            // 20 FPS on the software path and an explicit 20 FPS cap on the GPU renderer.
+            ctx.loop('MAIN', 20, render, { gpuFps: 20 });
+        }
 
         await watchSignals();
         try { state.diag = await new Diag(ctx.signals, log).init(); state.diag.quiet = true; state.diag.busyLog = false; }
@@ -1132,8 +1597,8 @@ mgu.run({
             if (stopped) return;
             scanModules().then(() => {
                 // The car remembers the last app look: re-apply it once modules are known.
-                if (stopped || !state.look || !state.oemEnabled) return;
-                if (state.modules.length && freshSpeed()) reapplyLook('LAST AMBIENT LOOK RESTORED');
+                if (stopped || !state.look || state.zoneLightingEnabled || (!state.oemEnabled && !state.zoneLightingEnabled) || anyAutoFeature()) return;
+                if (state.modules.length && freshSpeed()) reapplyLook('LAST AMBIENT LOOK RESTORED', !!state.zoneLightingEnabled);
                 else if (state.modules.length) state.pendingLook = true;   // retry when a fresh speed arrives
             }).catch((e) => log.warn('automatic ambient scan: ' + shortError(e)));
         }, 250);
@@ -1154,6 +1619,7 @@ mgu.run({
             lastFocusKey = k;
             const rm = /^tgt:row(\d+)$/.exec(k || '');
             const dm = /^tgt:drow(\d+)$/.exec(k || '');
+            const zm = /^tgt:zonecolor_(dashboard|doors|footwell)_(\d+)$/.exec(k || '');
             const intoView = (g, i, cur) => {
                 const lo = Math.max(0, g.offsets[i] + g.rowHs[i] - g.avail), hi = g.offsets[i];
                 return Math.max(lo, Math.min(hi, cur));
@@ -1162,6 +1628,8 @@ mgu.run({
                 state.oemFocus = +rm[1]; state.oemScroll = intoView(lastHudGeom, +rm[1], state.oemScroll); queueRender();
             } else if (dm && lastDetGeom && lastDetGeom.offsets[dm[1]] !== undefined) {
                 state.detailFocus = +dm[1]; state.detailScroll = intoView(lastDetGeom, +dm[1], state.detailScroll); queueRender();
+            } else if (zm && lastDetGeom && lastDetGeom.offsets[zm[2]] !== undefined) {
+                state.detailFocus = +zm[2]; state.detailScroll = intoView(lastDetGeom, +zm[2], state.detailScroll); queueRender();
             } else if (k) {
                 if (state.oemFocus !== -1 || state.detailFocus !== -1) { state.oemFocus = -1; state.detailFocus = -1; queueRender(); }
             }

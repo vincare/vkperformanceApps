@@ -1,7 +1,7 @@
 'use strict';
 /**
- * bg_art.js - designs/G20.png as the screen background: decoded once, slightly
- * blurred and dimmed so it sits as a faint ghost image behind the black screen.
+ * bg_art.js - designs/G20.png as the screen background: decoded once, carefully
+ * downsampled, and dimmed so the photo keeps its natural texture on the display.
  * VISIBLE is how much of the photo shows through (0.05 = 5%).
  */
 
@@ -16,12 +16,12 @@ const IMAGE_ID = 0x4d41;
 const ZONES_ID = 0x4d43;
 const FILE = 'G20.png';
 const ZONES_FILE = 'Zones.png';
-const MAX_SIDE = 1023;          // renderer's image limit
+const MAX_SIDE = 2048;          // Store renderer's native pixmap limit (upstream supports 4096)
 const VISIBLE = 0.98;           // image visibility (black veil sits at 0.02 over it)
-const BLUR_R = 1;               // box-blur radius on the downscaled pixels (almost none)
 const packIndexes = Object.create(null);
 let loaded = false, geom = null, zonesGeom = null;
-let baseImage = null, offImage = null, activeColorKey = '';
+let baseImage = null, offImage = null, upperLightMask = null;
+let footwellSpillMask = null, activeColorKey = '';
 
 function readExact(fd, size, position) {
     const out = Buffer.alloc(size);
@@ -120,54 +120,46 @@ function downscale(source) {
     const height = Math.max(1, Math.floor(source.height * scale));
     if (width === source.width && height === source.height) return source;
     const target = new Uint8Array(width * height * 4), src = source.rgba;
-    for (let y = 0; y < height; y++) {
-        const fy = (y + 0.5) * source.height / height - 0.5;
-        const y0 = Math.max(0, Math.floor(fy)), y1 = Math.min(source.height - 1, y0 + 1), wy = Math.max(0, fy - y0);
-        for (let x = 0; x < width; x++) {
-            const fx = (x + 0.5) * source.width / width - 0.5;
-            const x0 = Math.max(0, Math.floor(fx)), x1 = Math.min(source.width - 1, x0 + 1), wx = Math.max(0, fx - x0);
-            const a = (y0 * source.width + x0) * 4, b = (y0 * source.width + x1) * 4;
-            const c = (y1 * source.width + x0) * 4, d = (y1 * source.width + x1) * 4;
-            const to = (y * width + x) * 4;
-            for (let k = 0; k < 3; k++) {
-                const top = src[a + k] + (src[b + k] - src[a + k]) * wx;
-                const bottom = src[c + k] + (src[d + k] - src[c + k]) * wx;
-                target[to + k] = Math.round(top + (bottom - top) * wy);
+    // Area averaging applies a proper low-pass filter when reducing the 3072 px
+    // design photo to the renderer's 2048 px texture limit. Center-sampled
+    // bilinear interpolation skipped most source pixels and made cabin textures look
+    // crunchy/over-sharp after scaling back up on the head unit.
+    const weightsForAxis = (sourceSize, targetSize) => {
+        const ratio = sourceSize / targetSize, weights = new Array(targetSize);
+        for (let out = 0; out < targetSize; out++) {
+            const start = out * ratio, end = (out + 1) * ratio, invSpan = 1 / (end - start);
+            const taps = [];
+            for (let input = Math.floor(start); input < Math.ceil(end); input++) {
+                const overlap = Math.min(end, input + 1) - Math.max(start, input);
+                if (overlap > 0) taps.push([input, overlap * invSpan]);
             }
+            weights[out] = taps;
+        }
+        return weights;
+    };
+    const xWeights = weightsForAxis(source.width, width), yWeights = weightsForAxis(source.height, height);
+    for (let y = 0; y < height; y++) {
+        const yt = yWeights[y];
+        for (let x = 0; x < width; x++) {
+            const to = (y * width + x) * 4;
+            let r = 0, g = 0, b = 0;
+            const xt = xWeights[x];
+            for (let yi = 0; yi < yt.length; yi++) {
+                const sy = yt[yi][0], wy = yt[yi][1], row = sy * source.width * 4;
+                for (let xi = 0; xi < xt.length; xi++) {
+                    const sx = xt[xi][0], weight = xt[xi][1] * wy, from = row + sx * 4;
+                    r += src[from] * weight;
+                    g += src[from + 1] * weight;
+                    b += src[from + 2] * weight;
+                }
+            }
+            target[to] = Math.round(r);
+            target[to + 1] = Math.round(g);
+            target[to + 2] = Math.round(b);
             target[to + 3] = 255;
         }
     }
     return { width, height, rgba: target };
-}
-
-/** One separable box-blur pass (horizontal + vertical) at radius r. */
-function boxBlur(source, r) {
-    const { width, height, rgba } = source;
-    const tmp = new Uint8Array(width * height * 4), out = new Uint8Array(width * height * 4);
-    const n = r * 2 + 1;
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            let sr = 0, sg = 0, sb = 0;
-            for (let k = -r; k <= r; k++) {
-                const xx = Math.min(width - 1, Math.max(0, x + k)), i = (y * width + xx) * 4;
-                sr += rgba[i]; sg += rgba[i + 1]; sb += rgba[i + 2];
-            }
-            const o = (y * width + x) * 4;
-            tmp[o] = sr / n; tmp[o + 1] = sg / n; tmp[o + 2] = sb / n; tmp[o + 3] = 255;
-        }
-    }
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            let sr = 0, sg = 0, sb = 0;
-            for (let k = -r; k <= r; k++) {
-                const yy = Math.min(height - 1, Math.max(0, y + k)), i = (yy * width + x) * 4;
-                sr += tmp[i]; sg += tmp[i + 1]; sb += tmp[i + 2];
-            }
-            const o = (y * width + x) * 4;
-            out[o] = sr / n; out[o + 1] = sg / n; out[o + 2] = sb / n; out[o + 3] = 255;
-        }
-    }
-    return { width, height, rgba: out };
 }
 
 function rgbToHsv(r, g, b) {
@@ -205,6 +197,82 @@ function smoothstep(a, b, value) {
     return t * t * (3 - 2 * t);
 }
 
+// Boundary between the upper trim and footwell glow in the cabin photo.
+// The glovebox underside rises toward the passenger door, then follows its
+// lower edge. A straight horizontal split cuts across that shape and leaves
+// fragments of the upper colour in the footwell.
+const LOWER_ZONE_EDGE = [
+    [0.00, 0.94], [0.16, 0.88], [0.28, 0.76], [0.40, 0.62],
+    [0.52, 0.55], [0.64, 0.53], [0.74, 0.56], [0.84, 0.62],
+    [0.94, 0.70], [1.00, 0.75],
+];
+function lowerZoneBoundary(x) {
+    for (let i = 1; i < LOWER_ZONE_EDGE.length; i++) {
+        const right = LOWER_ZONE_EDGE[i];
+        if (x > right[0]) continue;
+        const left = LOWER_ZONE_EDGE[i - 1];
+        const t = (x - left[0]) / (right[0] - left[0]);
+        return left[1] + (right[1] - left[1]) * t;
+    }
+    return LOWER_ZONE_EDGE[LOWER_ZONE_EDGE.length - 1][1];
+}
+
+function buildFootwellSpillMask(width, height) {
+    const mask = new Float32Array(width * height), leftByX = new Float32Array(width), edgeByX = new Float32Array(width);
+    for (let x = 0; x < width; x++) {
+        const xNorm = x / Math.max(1, width - 1);
+        leftByX[x] = smoothstep(0.25, 0.38, xNorm) * (1 - smoothstep(0.48, 0.58, xNorm));
+        edgeByX[x] = lowerZoneBoundary(xNorm);
+    }
+    for (let y = 0; y < height; y++) {
+        const yNorm = y / Math.max(1, height - 1), row = y * width;
+        for (let x = 0; x < width; x++) {
+            const yFalloff = smoothstep(edgeByX[x] + 0.015, edgeByX[x] + 0.13, yNorm)
+                * (1 - smoothstep(0.84, 0.95, yNorm));
+            mask[row + x] = leftByX[x] * yFalloff;
+        }
+    }
+    return mask;
+}
+
+// Only the two actual upper ambient strips should take the selected upper hue.
+// Keeping the rest of the dashboard out of this mask prevents blue reflections
+// on the dash surface from being recoloured as if they were light strips.
+const UPPER_LIGHT_PATHS = [
+    // Follow the real dashboard LED edge through its original pointed end.
+    // The tight mask keeps the photo's natural tapered cap intact.
+    { radius: 12, points: [[0.428, 0.505], [0.449, 0.489], [0.475, 0.470], [0.501, 0.452], [0.527, 0.435], [0.553, 0.417],
+        [0.579, 0.400], [0.605, 0.383], [0.632, 0.372], [0.658, 0.363], [0.684, 0.355], [0.695, 0.350], [0.696, 0.349]] },
+    // Door strip under the handle. Follow its downward bend precisely; the old
+    // coarse curve stayed too high and caused the last section to be extinguished.
+    { radius: 24, points: [[0.704, 0.451], [0.729, 0.462], [0.753, 0.484], [0.777, 0.517], [0.801, 0.551], [0.824, 0.580]] },
+];
+const FOOTWELL_SPILL_MAX = 0.24;
+
+function buildUpperLightMask(width, height, light, maskBit, mask) {
+    mask = mask || new Uint8Array(width * height);
+    maskBit = maskBit || 1;
+    const lights = light ? [light] : UPPER_LIGHT_PATHS;
+    for (const item of lights) {
+        const path = item.points, radius = item.radius;
+        for (let j = 1; j < path.length; j++) {
+            const ax = path[j - 1][0] * width, ay = path[j - 1][1] * height;
+            const bx = path[j][0] * width, by = path[j][1] * height;
+            const dx = bx - ax, dy = by - ay, lenSq = dx * dx + dy * dy;
+            const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - radius));
+            const x1 = Math.min(width - 1, Math.ceil(Math.max(ax, bx) + radius));
+            const y0 = Math.max(0, Math.floor(Math.min(ay, by) - radius));
+            const y1 = Math.min(height - 1, Math.ceil(Math.max(ay, by) + radius));
+            for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+                const t = lenSq ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / lenSq)) : 0;
+                const px = ax + t * dx, py = ay + t * dy;
+                if ((x - px) * (x - px) + (y - py) * (y - py) <= radius * radius) mask[y * width + x] |= maskBit;
+            }
+        }
+    }
+    return mask;
+}
+
 /** Prepare the same interior photo with blue light strips extinguished. */
 function makeOffImage() {
     if (offImage || !baseImage) return offImage;
@@ -231,9 +299,9 @@ function makeOffImage() {
 }
 
 /** Recolour the photo when enabled, or show the same cabin with ambient lights off. */
-function setColors(upperHex, lowerHex, enabled) {
+function setColors(upperHex, lowerHex, enabled, doorHex) {
     if (!loaded || !baseImage) return;
-    const key = enabled === false ? 'OFF' : (upperHex || '') + '|' + (lowerHex || '');
+    const key = enabled === false ? 'OFF' : (upperHex || '') + '|' + (doorHex || upperHex || '') + '|' + (lowerHex || '');
     if (key === activeColorKey) return;
     activeColorKey = key;
     if (enabled === false) {
@@ -242,6 +310,7 @@ function setColors(upperHex, lowerHex, enabled) {
         return;
     }
     const upper = parseHexColor(upperHex), lower = parseHexColor(lowerHex);
+    const door = parseHexColor(doorHex || upperHex);
     if (!upper && !lower) {
         setImage(IMAGE_ID, baseImage.width, baseImage.height, baseImage.rgba);
         return;
@@ -250,41 +319,83 @@ function setColors(upperHex, lowerHex, enabled) {
     const { width, height, rgba } = baseImage;
     const tinted = new Uint8Array(rgba);
     const upperHsv = upper && rgbToHsv(upper[0], upper[1], upper[2]);
+    const doorHsv = door && rgbToHsv(door[0], door[1], door[2]);
     const lowerHsv = lower && rgbToHsv(lower[0], lower[1], lower[2]);
-    const splitY = Math.round(height * 0.62); // dash and door strip above; footwell glow below
+    if ((upperHsv || doorHsv) && !upperLightMask) {
+        upperLightMask = new Uint8Array(width * height);
+        buildUpperLightMask(width, height, UPPER_LIGHT_PATHS[0], 1, upperLightMask);
+        buildUpperLightMask(width, height, UPPER_LIGHT_PATHS[1], 2, upperLightMask);
+    }
+    const off = upperHsv || doorHsv ? makeOffImage().rgba : null;
+    const edgeByX = new Float32Array(width);
+    for (let x = 0; x < width; x++) edgeByX[x] = lowerZoneBoundary(x / Math.max(1, width - 1));
     for (let y = 0; y < height; y++) {
-        const target = y < splitY ? upperHsv : lowerHsv;
-        if (!target) continue;
+        const normalizedY = y / Math.max(1, height - 1);
         const row = y * width * 4;
         for (let x = 0; x < width; x++) {
+            // Put the full boundary strip on the footwell side. Anti-aliased
+            // colour blending here left a visible trace of the upper combo hue.
+            const lowerWeight = normalizedY >= edgeByX[x] ? 1 : 0;
+            const upperWeight = 1 - lowerWeight;
+            const upperAmount = upperHsv ? upperWeight : 0;
+            const lowerAmount = lowerHsv ? lowerWeight : 0;
+            if (upperAmount < 0.01 && lowerAmount < 0.01) continue;
             const i = row + x * 4;
             const [h, s, v] = rgbToHsv(rgba[i], rgba[i + 1], rgba[i + 2]);
-            if (v < 0.035 || h < 185 || h > 270 || s < 0.13) continue;
-            const hueMask = smoothstep(185, 205, h) * (1 - smoothstep(255, 270, h));
-            const amount = hueMask * smoothstep(0.13, 0.48, s) * smoothstep(0.035, 0.16, v);
-            if (amount < 0.01) continue;
-            const [r, g, b] = hsvToRgb(target[0], target[1], v);
-            tinted[i] = Math.round(rgba[i] + (r - rgba[i]) * amount);
-            tinted[i + 1] = Math.round(rgba[i + 1] + (g - rgba[i + 1]) * amount);
-            tinted[i + 2] = Math.round(rgba[i + 2] + (b - rgba[i + 2]) * amount);
+            let amount = 0;
+            if (v >= 0.035 && h >= 185 && h <= 270 && s >= 0.13) {
+                const hueMask = smoothstep(185, 205, h) * (1 - smoothstep(255, 270, h));
+                amount = hueMask * smoothstep(0.13, 0.48, s) * smoothstep(0.035, 0.16, v);
+            }
+            if (amount >= 0.01) {
+                const pixel = y * width + x;
+                const lightMask = upperLightMask ? upperLightMask[pixel] : 0;
+                const onDashboardStrip = !!(lightMask & 1);
+                const onDoorStrip = !!(lightMask & 2);
+                const upperStrip = onDashboardStrip || onDoorStrip;
+                if ((upperHsv || doorHsv) && upperWeight && !upperStrip) {
+                    // Remove source-blue reflections from the dashboard surface;
+                    // the selected hue is reserved for the light strips themselves.
+                    tinted[i] = off[i]; tinted[i + 1] = off[i + 1]; tinted[i + 2] = off[i + 2];
+                } else {
+                    const targetHsv = upperWeight ? (onDoorStrip ? doorHsv : upperHsv) : lowerHsv;
+                    const target = targetHsv ? hsvToRgb(targetHsv[0], targetHsv[1], v) : null;
+                    if (!target) continue;
+                    const r = target[0], g = target[1], b = target[2];
+                    tinted[i] = Math.round(rgba[i] + (r - rgba[i]) * amount);
+                    tinted[i + 1] = Math.round(rgba[i + 1] + (g - rgba[i + 1]) * amount);
+                    tinted[i + 2] = Math.round(rgba[i + 2] + (b - rgba[i + 2]) * amount);
+                }
+            }
+
+            if (lowerHsv && lowerWeight && footwellSpillMask) {
+                // Add a soft footwell-only light spill toward the darker left
+                // side, keeping texture while avoiding a black patch in the preview.
+                const spill = FOOTWELL_SPILL_MAX * footwellSpillMask[y * width + x] * (1 - v * 0.35);
+                if (spill > 0.005) {
+                    tinted[i] = Math.min(255, Math.round(tinted[i] + lower[0] * spill));
+                    tinted[i + 1] = Math.min(255, Math.round(tinted[i + 1] + lower[1] * spill));
+                    tinted[i + 2] = Math.min(255, Math.round(tinted[i + 2] + lower[2] * spill));
+                }
+            }
         }
     }
     setImage(IMAGE_ID, width, height, tinted);
 }
 
-/** Decode + soften + dim once, then hand the pixels to the renderer. */
+/** Decode, area-downsample, and dim once, then hand the pixels to the renderer. */
 function load() {
     if (loaded) return;
     loaded = true;
     let img = decodePng(readPackedFile('designs', FILE));
     img = downscale(img);
-    img = boxBlur(img, BLUR_R);
     for (let i = 0; i < img.rgba.length; i += 4) {
         img.rgba[i] = Math.round(img.rgba[i] * VISIBLE);
         img.rgba[i + 1] = Math.round(img.rgba[i + 1] * VISIBLE);
         img.rgba[i + 2] = Math.round(img.rgba[i + 2] * VISIBLE);
     }
     baseImage = img;
+    footwellSpillMask = buildFootwellSpillMask(img.width, img.height);
     activeColorKey = '';
     setImage(IMAGE_ID, img.width, img.height, img.rgba);
     geom = { w: img.width, h: img.height };
