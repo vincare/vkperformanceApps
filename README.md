@@ -6,6 +6,7 @@ This branch contains the Vincare applications published through the MGU Store so
 - **Climate Control** — a climate status display for BMW HU_MGU / iDrive 7.
 - **NaviSport** — a CarPlay map preview with BMW performance telemetry and guarded M SOUND MODE control.
 - **MoreAmbients** — a custom ambient-colour studio, upper/lower zone control, BMW colour slots, and saved looks.
+- **VKP DEV-SCAN** — a read-only iDrive 7 interface catalog browser with searchable vehicle-feature topics, full member details, and a saved report.
 
 The source also keeps the shared runtime, build tools, and renderer/controller components these apps require. The separate upstream app packages are not part of this branch's MGU Store catalogue.
 

@@ -1,0 +1,73 @@
+{
+  "id": "vkpdevscan",
+  "title": "VKP DEV-SCAN",
+  "backBtnX": 21,
+  "description": "Searches the iDrive 7 interface catalog by vehicle feature and shows matching services, fields, methods, broadcasts and definitions. Includes paging, detailed member views and a saved report. Reads local platform files only; it sends no commands to the vehicle.",
+  "version": "0.2.0",
+  "loggingId": "OAA8",
+  "iconGlyph": "wrench",
+  "vendor": "VKPERFORMANCE",
+  "mguHmi": [
+    "ID7"
+  ],
+  "requires": {
+    "idrive7-renderd": "2.1.18",
+    "mgu-inputgate": "1.1.0"
+  },
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "VKP DEV-SCAN",
+      "buttons": [
+        [
+          "BTN_TOPIC",
+          "Next topic"
+        ],
+        [
+          "BTN_DETAIL",
+          "Details"
+        ],
+        [
+          "BTN_MORE",
+          "More"
+        ],
+        [
+          "BTN_SAVE",
+          "Save report"
+        ],
+        [
+          "BTN_SETTINGS",
+          "Settings"
+        ]
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "key": "theme",
+      "label": "Colour theme",
+      "desc": "Choose the colour scheme used by the scanner.",
+      "type": "choice",
+      "default": "m_red",
+      "options": [
+        [
+          "m_red",
+          "VKP Red"
+        ],
+        [
+          "m_tricolour",
+          "M Tricolour"
+        ],
+        [
+          "ice",
+          "Ice White"
+        ],
+        [
+          "amber",
+          "Night Amber"
+        ]
+      ]
+    }
+  ]
+}
