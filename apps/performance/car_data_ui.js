@@ -25,6 +25,30 @@ const SECTIONS = [
 
 function sectionOf(key) { return SECTIONS.find((s) => s.key === key) || SECTIONS[0]; }
 
+/** Small slanted nav chip under a sheet's title tag; fwd=true draws a '>' chevron, false a '<'. */
+function navChip(cv, G, x, y, label, fwd, run, key) {
+    const w = Math.max(150, Math.ceil(cv.textWidth(label, 15, { font: 'bold', spacing: 1.4, literal: true }) + 58));
+    Sheet.para(cv, x, y, w, y + 42, 12, G.withAlpha('#ffffff', 0.08));
+    const cy = y + 21;
+    if (fwd) {
+        cv.line(x + w - 24, cy - 10, x + w - 16, cy, 2.4, '#ffffff');
+        cv.line(x + w - 16, cy, x + w - 24, cy + 10, 2.4, '#ffffff');
+    } else {
+        cv.line(x + 24, cy - 10, x + 16, cy, 2.4, '#ffffff');
+        cv.line(x + 16, cy, x + 24, cy + 10, 2.4, '#ffffff');
+    }
+    cv.text(label, x + w / 2 + (fwd ? -8 : 8), y + 28, 15, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.4, literal: true });
+    if (cv.own && run) cv.target(x - 6, y - 4, w + 12, 50, run, key, 10);
+}
+
+function fitText(cv, s, size, w) {
+    s = String(s || '');
+    if (cv.textWidth(s, size, { literal: true }) <= w) return s;
+    while (s.length > 1 && cv.textWidth(s + '...', size, { literal: true }) > w) s = s.slice(0, -1);
+    return s + '...';
+}
+
 function menuCard(cv, G, t, x, y, w, h, def, action, artReady) {
     // Keep the menu visually consistent while the badges are being prepared:
     // display either all eight images or the full set of vector fallbacks.
@@ -63,6 +87,7 @@ function drawMenu(cv, G, t, actions) {
 
 function drawSheet(cv, G, t, s, car, actions) {
     const def = sectionOf(s.view);
+    const more = s.view === 'tyres' && s.tyrePage === 'more';
     const y0 = (G.TOP || 44) + 8, y1 = H - 8, h = y1 - y0;
     const xAt = (xTop, y) => xTop - (y - y0) / h * SLANT;
 
@@ -77,7 +102,7 @@ function drawSheet(cv, G, t, s, car, actions) {
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
 
-    const wheel = def.key === 'tyres' ? Sheet.sectionArt('tyreWheel', '#000000') : null;
+    const wheel = def.key === 'tyres' && !more ? Sheet.sectionArt('tyreWheel', '#000000') : null;
     if (wheel) {
         // The car large in the slab's upper part; a row of four wheels along its bottom,
         // each with the corner code and live pressure above it.
@@ -114,20 +139,61 @@ function drawSheet(cv, G, t, s, car, actions) {
         });
     } else {
         // Every section sheet: the car side view fills the slab — nothing below it.
+        // MORE TYRES INFO instead shows the car smaller, with the extra values' detail texts
+        // listed under it.
+        const maxW = Math.min(slabW - 160, 640), maxH = more ? 200 : y1 - y0 - 90;
         if (s.side) {
-            const maxW = Math.min(slabW - 160, 640), maxH = y1 - y0 - 90;
             const scale = Math.min(maxW / s.side.width, maxH / s.side.height);
             const cw = s.side.width * scale, ch = s.side.height * scale;
-            cv.image(s.side.id, slabX + (slabW - cw) / 2 - slabS / 2, y0 + (y1 - y0 - ch) / 2 + 12, cw, ch);
+            cv.image(s.side.id, slabX + (slabW - cw) / 2 - slabS / 2, y0 + (more ? 40 : (y1 - y0 - ch) / 2 + 12), cw, ch);
+        }
+        if (more) {
+            // The useful extras, spaced out: red tick, small dim label, white value that may wrap
+            // to a second line, hairlines between. The DSC row's detail is a static description —
+            // it stays in the ribbon and is skipped here.
+            const lines = (s.rows || []).filter((row) => row && row.detail && row.label !== 'DSC');
+            const textX = slabX + 52 - slabS / 2, textW = slabW - 120;
+            const wrap = (str) => {
+                const words = String(str).split(' '), out = [''];
+                words.forEach((word) => {
+                    const cand = out[out.length - 1] ? out[out.length - 1] + ' ' + word : word;
+                    if (cv.textWidth(cand, 16, { literal: true }) <= textW - 40) out[out.length - 1] = cand;
+                    else out.push(word);
+                });
+                return out.slice(0, 2);
+            };
+            let dy = y0 + 246;
+            if (lines.length) {
+                cv.text('DETAILS', textX + 16, dy, 13, G.withAlpha('#e8c8ce', 0.5),
+                    { font: 'bold', spacing: 1.8, literal: true });
+                dy += 20;
+            }
+            lines.forEach((line, i) => {
+                if (i) cv.fillRect(textX + 16, dy - 6, textW - 36, 1, G.withAlpha('#ffffff', 0.07));
+                const valueLines = wrap(line.text);
+                cv.fillRect(textX, dy + 4, 3, 28 + (valueLines.length - 1) * 21, G.withAlpha('#f32635', 0.8));
+                cv.text(fitText(cv, line.label, 13, textW - 40), textX + 16, dy + 14, 13, t.dim,
+                    { font: 'bold', spacing: 1.2, literal: true });
+                valueLines.forEach((v, j) => {
+                    cv.text(fitText(cv, v, 16, textW - 40), textX + 16, dy + 36 + j * 21, 16, '#ffffff', { literal: true });
+                });
+                dy += 48 + (valueLines.length - 1) * 21;
+            });
         }
     }
 
 
     // 3. Enlarged section title tag
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, def.title, 23, 196, 1.4), tagH = 46, tagSlant = 15;
+    const title = more ? 'MORE TYRES INFO' : def.title;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, title, 30, 196, 1.6), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text(def.title, tagX + (tagW - tagSlant) / 2, tagY + 34, 23, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.4, literal: true });
+    cv.text(title, tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
+    // TYRES INFO gets a second page: the chip under its title steps between them.
+    if (def.key === 'tyres') {
+        if (more) navChip(cv, G, tagX, tagY + tagH + 16, 'TYRES INFO', false, actions && actions.tyresMain, 'performance_tyres_main');
+        else navChip(cv, G, tagX, tagY + tagH + 16, 'MORE TYRES INFO', true, actions && actions.tyresMore, 'performance_tyres_more');
+    }
 
     // 4. Smooth diagonal panel on the right (same ribbon as DYNO RUN)
     const ribX = 1128;

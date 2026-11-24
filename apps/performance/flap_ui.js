@@ -107,14 +107,23 @@ const SECTION_ART = {
     exhaust: 'ui/exhaust-system-badge.png', burbles: 'ui/exhaust-burbles-badge.png',
     dyno: 'ui/dyno-run-badge.png', drag: 'ui/drag-run-badge.png',
     valid: 'ui/drag-valid-stamp.png', invalid: 'ui/drag-invalid-stamp.png',
+    dynamic: 'ui/dynamic-config-badge.png',
     engineInfo: 'ui/engine-info-badge.png', powertrain: 'ui/powertrain-badge.png',
     boost: 'ui/boost-badge.png', fuel: 'ui/fuel-system-badge.png',
     ignition: 'ui/ignition-badge.png', drivetrain: 'ui/drivetrain-badge.png',
     electrical: 'ui/electrical-badge.png', tyres: 'ui/tyres-badge.png',
     tyreWheel: 'ui/tyre-wheel.png',
+    dscOn: 'ui/dsc-on.png', dscMdm: 'ui/dsc-mdm.png', dscOff: 'ui/dsc-off.png',
+    dscOnDim: 'ui/dsc-on-dim.png', dscMdmDim: 'ui/dsc-mdm-dim.png', dscOffDim: 'ui/dsc-off-dim.png',
+    dscOnW: 'ui/dsc-on-w.png', dscMdmW: 'ui/dsc-mdm-w.png', dscOffW: 'ui/dsc-off-w.png',
 };
 let sectionArtSetImage;
 const sectionArtCache = {};
+// Each (kind, bg) bake gets its own image id in a range clear of the other apps'
+// ids (drag stamps use 0x5660-0x5665, car art 0x564b-c): a shared id would mean the
+// renderer keeps whichever pixels went up first - or drops the op on a ver mismatch.
+const sectionArtIds = {};
+let sectionArtSeq = 0;
 function sectionArt(kind, bg) {
     const file = SECTION_ART[kind];
     if (!file) return null;
@@ -145,7 +154,7 @@ function sectionArt(kind, bg) {
         const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
         const cropped = new Uint8Array(cw * ch * 4);
         for (let y = 0; y < ch; y++) cropped.set(d.rgba.subarray(((y0 + y) * w + x0) * 4, ((y0 + y) * w + x0 + cw) * 4), y * cw * 4);
-        const id = 0x5650 + Object.keys(SECTION_ART).indexOf(kind);
+        const id = sectionArtIds[key] || (sectionArtIds[key] = 0x5700 + (sectionArtSeq++));
         sectionArtSetImage(id, cw, ch, cropped);
         art = { id, w: cw, h: ch };
     } catch (e) { art = null; }
@@ -211,9 +220,10 @@ function drawConfigCard(cv, G, t, x, y, w, h, title, subtitle, kind, action) {
 }
 
 function drawSectionMenu(cv, G, t, car, actions) {
-    const y = (G.TOP || 44) + 30, h = 414, w = 760, gap = 32;
+    const y = (G.TOP || 44) + 30, h = 414, w = 500, gap = 26;
     drawConfigCard(cv, G, t, 24, y, w, h, 'EXHAUST SYSTEM', 'VALVE CONTROL · DRIVE MODES', 'exhaust', actions && actions.exhaust);
     drawConfigCard(cv, G, t, 24 + w + gap, y, w, h, 'EXHAUST BURBLES', 'BM3 BURBLE ADJUSTMENT', 'burbles', actions && actions.burbles);
+    drawConfigCard(cv, G, t, 24 + (w + gap) * 2, y, w, h, 'DYNAMIC CONFIG', 'STABILITY CONTROL MODES', 'dynamic', actions && actions.dynamic);
 }
 
 function drawChip(cv, G, x, y, w, label, opts) {
@@ -256,7 +266,7 @@ function drawChip(cv, G, x, y, w, label, opts) {
 
 function titleTagWidth(cv, label, size, minWidth, spacing, font) {
     const width = cv.textWidth(label, size, {
-        font: font || 'num', spacing: spacing === undefined ? 1.6 : spacing, literal: true,
+        font: font || 'bold', spacing: spacing === undefined ? 1.6 : spacing, literal: true,
     });
     return Math.max(minWidth || 0, Math.ceil(width + 42));
 }
@@ -284,10 +294,10 @@ function drawBurbles(cv, G, t, valve, car, actions, now) {
     drawCar(cv, G, t, valve, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, 'flames');
 
     // 3. Title tag
-    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST BURBLES', 27, 300), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST BURBLES', 30, 300), tagH = 46, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('EXHAUST BURBLES', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('EXHAUST BURBLES', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
 
     // 4. Smooth diagonal panel on the right (same ribbon as EXHAUST SYSTEM)
     const ribX = 1128;
@@ -400,7 +410,7 @@ function exhaustBell(cv, cx, cy, c) {
     cv.fillRect(cx - 2, cy - 7.5, 2.2, 15, c);
 }
 
-function modeIcon(cv, G, t, kind, cx, cy, s, c) {
+function modeIcon(cv, G, t, kind, cx, cy, s, c, lit) {
     if (kind === 'OPEN') {
         exhaustBell(cv, cx, cy, c);
         cv.arc(cx - 2, cy, 5.5, 7.6, 52, 128, c, { round: true });
@@ -444,6 +454,35 @@ function modeIcon(cv, G, t, kind, cx, cy, s, c) {
         cv.line(cx + 6, cy, cx - 2, cy + 8, 3.2, c);
         cv.line(cx + 10, cy - 4, cx + 14, cy, 2.2, c);
         cv.line(cx + 14, cy, cx + 10, cy + 4, 2.2, c);
+    } else if (kind === 'DSC_ON' || kind === 'MDM' || kind === 'DSC_OFF') {
+        // Supplied DSC pictogram (car + skid marks), recoloured to the row scheme.
+        // cv.image is opaque, so the art is composited over the ribbon band it sits
+        // on: plain band for inactive rows, band + the active row's white@12% wash.
+        const artKey = (kind === 'MDM' ? 'dscMdm' : kind === 'DSC_OFF' ? 'dscOff' : 'dscOn') + (lit ? '' : 'Dim');
+        const art = sectionArt(artKey, lit ? '#44282e' : '#2a0b12');
+        if (art) {
+            const iw = s + 12, ih = Math.round(iw * art.h / art.w);
+            cv.image(art.id, Math.round(cx - iw / 2), Math.round(cy - ih / 2) + 1, iw, ih);
+            return;
+        }
+        // Vector fallback if the PNG assets are missing
+        const mark = '#101216';
+        cv.polyline([[cx - 7.5, cy + 4], [cx - 4.8, cy + 7.5], [cx - 8, cy + 11], [cx - 4.5, cy + 14]], 2, c);
+        cv.polyline([[cx + 7.5, cy + 4], [cx + 4.8, cy + 7.5], [cx + 8, cy + 11], [cx + 4.5, cy + 14]],
+            2, kind === 'MDM' ? G.withAlpha(c, 0.35) : c);
+        cv.quad([[cx - 4.5, cy - 12.5], [cx + 4.5, cy - 12.5], [cx + 6.5, cy - 7], [cx - 6.5, cy - 7]], c);
+        cv.quad([[cx - 8.5, cy - 5.8], [cx + 8.5, cy - 5.8], [cx + 10, cy + 0.5], [cx - 10, cy + 0.5]], c);
+        cv.line(cx - 7, cy - 6.4, cx + 7, cy - 6.4, 1.5, mark);
+        cv.fillRect(cx - 9.6, cy + 1.4, 2.6, 3.2, c);
+        cv.fillRect(cx + 7, cy + 1.4, 2.6, 3.2, c);
+        if (kind === 'DSC_ON') {
+            cv.line(cx - 4, cy - 7, cx - 1.4, cy - 4.2, 1.9, mark);
+            cv.line(cx - 1.4, cy - 4.2, cx + 4.4, cy - 10.8, 1.9, mark);
+        } else if (kind === 'MDM') {
+            cv.text('M', cx, cy - 3.4, 12, mark, { align: 'center', font: 'bold' });
+        } else {
+            cv.line(cx - 11.5, cy - 13, cx + 11.5, cy + 13, 3, c);
+        }
     } else if (kind === 'GFORCE') {
         cv.arc(cx, cy, 9.6, 12.6, 0, 360, c);
         cv.text('G', cx, cy + 7, 17, c, { align: 'center', font: 'bold' });
@@ -480,10 +519,10 @@ function modeIcon(cv, G, t, kind, cx, cy, s, c) {
     }
 }
 
-function drawBarSegs(cv, G, x, y, selected) {
+function drawBarSegs(cv, G, x, y, selected, selColor) {
     const sw = 68, sh = 4.5, gap = 7, sl = 4;
     const c0 = selected ? '#9ca4b0' : G.withAlpha('#8c94a0', 0.55);
-    const c1 = selected ? '#ff243b' : G.withAlpha('#8c94a0', 0.42);
+    const c1 = selected ? (selColor || '#ff243b') : G.withAlpha('#8c94a0', 0.42);
     cv.quad([[x + sl, y], [x + sl + sw, y], [x + sw, y + sh], [x, y + sh]], c0);
     const x2 = x + sw + gap;
     cv.quad([[x2 + sl, y], [x2 + sl + sw, y], [x2 + sw, y + sh], [x2, y + sh]], c1);
@@ -507,10 +546,10 @@ function drawExhaustSheet(cv, G, t, valve, car, actions, now) {
     // 3. Car centered on the slab
     drawCar(cv, G, t, valve, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, true);
 
-    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST SYSTEM', 27, 264), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST SYSTEM', 30, 264), tagH = 46, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('EXHAUST SYSTEM', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('EXHAUST SYSTEM', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
 
     // 3. Smooth diagonal panel on the right (no banding segments or decorative outlines)
     const ribX = 1128;
@@ -567,6 +606,79 @@ function drawExhaustSheet(cv, G, t, valve, car, actions, now) {
         { font: 'bold', spacing: 0.6, literal: true });
 }
 
+// DYNAMIC CONFIG — same sheet language as EXHAUST SYSTEM: hex backdrop, slanted
+// car slab on the left, diagonal ribbon on the right. The only section for now is
+// DSC MODE: three tappable stability-control states written through the TPMS
+// chassisControl channel (the HMI's own DSC request line).
+const DSC_ROW_COLORS = { on: '#9ca4b0', mdm: '#55a9ff', off: '#ff243b' };
+function drawDynamic(cv, G, t, v, car, actions, now) {
+    const y0 = (G.TOP || 44) + 8, y1 = H - 8, h = y1 - y0;
+    const xAt = (xTop, y) => xTop - (y - y0) / h * SLANT;
+
+    cv.fillRect(0, y0, W, h, t.bg);
+    drawHexMesh(cv, G, y0, y1, false);
+
+    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
+    cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
+    cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
+    cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
+    drawCar(cv, G, t, null, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, false);
+
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'DYNAMIC CONFIG', 30, 300), tagH = 46, tagSlant = 15;
+    para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
+    cv.text('DYNAMIC CONFIG', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
+
+    const ribX = 1128;
+    para(cv, ribX,       y0, 210, y1, SLANT, '#2a0b12');
+    para(cv, ribX + 210, y0, 112, y1, SLANT, '#1b070c');
+    para(cv, ribX + 322, y0, 62,  y1, SLANT, '#8c1122');
+    para(cv, ribX + 384, y0, 56,  y1, SLANT, '#d91c33');
+
+    // DSC MODE section header
+    const headX = xAt(ribX + 26, y0 + 34);
+    cv.text('DSC MODE', headX + 12, y0 + 42, 13, G.withAlpha('#e8c8ce', 0.6),
+        { font: 'bold', spacing: 2.2, literal: true });
+    cv.line(headX + 12, y0 + 52, headX + 12 + 130, y0 + 52, 1, G.withAlpha('#e8c8ce', 0.22));
+
+    const dsc = (v && v.dsc) || {};
+    const state = dsc.state;                    // 'on' | 'traction' | 'off' | null
+    const busy = !!dsc.busy;
+    const rows = [
+        ['DSC_ON',  'DSC ON',  'on',       DSC_ROW_COLORS.on,  actions && actions.dscOn,  'performance_dsc_on'],
+        ['MDM',     'MDM',     'traction', DSC_ROW_COLORS.mdm, actions && actions.dscMdm, 'performance_dsc_mdm'],
+        ['DSC_OFF', 'DSC OFF', 'off',      DSC_ROW_COLORS.off, actions && actions.dscOff, 'performance_dsc_off'],
+    ];
+    rows.forEach(([iconKey, label, match, color, run, targetKey], i) => {
+        const ry = y0 + 96 + i * 86;
+        const rx = xAt(ribX + 26, ry);
+        const rowActive = state === match;
+        if (rowActive) {
+            para(cv, rx - 18, ry - 22, 348, ry + 42, 22, G.withAlpha('#ffffff', 0.12));
+            para(cv, rx - 18, ry - 22, 6,   ry + 42, 22, color);
+        }
+        const ic = busy ? t.dim : rowActive ? '#ffffff' : G.withAlpha('#c8ced8', 0.78);
+        modeIcon(cv, G, t, iconKey, rx + 12, ry + 6, 34, rowActive ? color : ic, rowActive);
+        cv.text(label, rx + 44, ry + 8, 21, ic, { font: 'bold', spacing: 1.2, literal: true });
+        drawBarSegs(cv, G, rx + 44, ry + 18, rowActive, color);
+        if (cv.own && run && !busy) cv.target(rx - 18, ry - 22, 348, 64, run, targetKey, 10);
+    });
+
+    // Lower status block: live DSC state (cluster signal) + last write result
+    const setupY = y1 - 108, setupX = xAt(ribX + 12, setupY);
+    const stateLabel = state === 'traction' ? 'MDM' : state ? 'DSC ' + state.toUpperCase() : 'UNKNOWN';
+    cv.text('DSC · ' + stateLabel, setupX, setupY + 14, 20, '#ffffff',
+        { font: 'bold', spacing: 1.1, literal: true });
+    const status = dsc.status || 'READY FOR COMMAND';
+    cv.text(status, setupX, setupY + 42, 13,
+        dsc.warn ? '#ff5c70' : '#ff8595', { font: 'bold', spacing: 0.8, literal: true });
+    cv.text(state === 'off' ? 'STABILITY CONTROL FULLY OFF'
+        : state === 'traction' ? 'REDUCED INTERVENTION'
+        : state === 'on' ? 'FULL STABILITY CONTROL' : 'WAITING FOR DSC SIGNAL',
+        setupX, setupY + 66, 10, G.withAlpha('#e8c8ce', 0.55), { font: 'bold', spacing: 0.6, literal: true });
+}
+
 function drawValveFlaps(cv, G, t, car, imageRect, valveMode, now) {
     if (!car || !car.exhaustTips || car.exhaustTips.length < 2) return;
     const target = valveMode === 'OPEN' ? 1 : valveMode === 'CLOSED' ? 0 : 0.5;
@@ -621,8 +733,9 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || RED);
     if (view === 'sections') drawSectionMenu(cv, G, t, car, sectionActions);
     else if (view === 'burbles') drawBurbles(cv, G, t, v, car, act, now);
+    else if (view === 'dynamic') drawDynamic(cv, G, t, v, car, act, now);
     else drawExhaustSheet(cv, G, t, v, car, act, now);
     return cv;
 }
 
-module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, titleTagWidth };
+module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawDynamic, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, titleTagWidth };

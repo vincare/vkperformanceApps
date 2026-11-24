@@ -201,10 +201,10 @@ function drawSheet(cv, G, t, s, car, current, actions) {
     drawCar(cv, G, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
 
     // 3. Title tag and saved-runs action
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DYNO RUN', 27, 196), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DYNO RUN', 30, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DYNO RUN', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('DYNO RUN', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'ALL DYNO RUNS',
         { icon: 'fwd', run: actions && actions.toggleView, key: 'performance_dyno_runs' });
 
@@ -253,22 +253,6 @@ function drawSheet(cv, G, t, s, car, current, actions) {
         Sheet.drawBarSegs(cv, G, rx + 44, ry + 62, hasData);
     });
 
-    // 6. Lower status block: pull state, last run stamp and gate hint
-    const setupY = y1 - 84, setupX = xAt(ribX + 12, setupY);
-    const stateLabel = isPull ? 'LIVE' : current ? 'LAST RUN' : 'STANDBY';
-    cv.text('STATE · ' + stateLabel, setupX, setupY + 14, 20, '#ffffff',
-        { font: 'bold', spacing: 1.1, literal: true });
-    if (isPull) {
-        const tw = cv.textWidth('STATE · LIVE', 20, { font: 'bold', spacing: 1.1 });
-        cv.circle(setupX + tw + 18, setupY + 8, 5,
-            Math.floor(Date.now() / 300) % 2 ? '#ff243b' : G.withAlpha('#ff243b', 0.3));
-    }
-    const sub = isPull ? 'RECORDING ROAD PULL'
-        : current ? runStamp(current.at)
-        : 'HOLD ONE GEAR · FLAT ROAD';
-    cv.text(sub, setupX, setupY + 40, 13, '#ff8595', { font: 'bold', spacing: 0.8, literal: true });
-    cv.text(s.gateText || (isPull ? 'KEEP ONE GEAR STEADY' : 'FULL THROTTLE · 1,500 RPM SWEEP'),
-        setupX, setupY + 64, 10.5, G.withAlpha('#e8c8ce', 0.5), { font: 'bold', spacing: 0.5, literal: true });
 }
 
 // Saved-runs list: same shell as the dyno sheet (hex mesh, slanted slab, red tag,
@@ -318,10 +302,10 @@ function drawRuns(cv, G, t, s, actions) {
     });
 
     // Title tag
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'SAVED RUNS', 27, 216), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'SAVED RUNS', 30, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('SAVED RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('SAVED RUNS', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
 
     // Right ribbon — control rows, same style as the mode rows
     const ribX = 1128;

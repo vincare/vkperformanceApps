@@ -566,7 +566,9 @@ class Display {
         if (this.own()) {
             // header (tabs), page and the slim bar: the back column and the status corner stay the HMI's (unless customBackBtn claims the back area below the home cell)
             const rects = [{ x: hx, y: 0, w: he - hx, h: this.headH() }, { x: hx, y: this.headH(), w: W - hx, h: pl.h - this.headH() }];
-            if (this.customBackBtn && hx > 0) rects.push({ x: 0, y: this.headH(), w: hx, h: HMI.colEnd - pl.y - this.headH() });
+            // the back column (the claim must cover _touch's whole backBtn hit area, sx<140, not just the HMI's column —
+            // a tap on the unclaimed strip hides the app (CLOSED) instead of stepping back)
+            if (this.customBackBtn && hx > 0) rects.push({ x: 0, y: this.headH(), w: Math.max(hx, Math.min(140, W)), h: HMI.colEnd - pl.y - this.headH() });
             this.gpu.claim(rects.map(logical));
             return;
         }
@@ -909,7 +911,7 @@ class Display {
         if (sb === true) c.strokeRoundRect(hx + 6, FULL.headH + 6, W - hx - 12, H - this.barH() - FULL.headH - 12, 14, 3, G.withAlpha(t.sel || t.accent, 0.8));
         else if (sb && sb.bar) c.roundRect((sb.bar.x - 2) * k + pl.ox, sb.bar.y * k + pl.oy, (sb.bar.w + 4) * k, sb.bar.h * k, (sb.bar.w / 2 + 2) * k, t.sel || t.accent);
         // the controller's place is marked by an underline under the target, not a frame round it
-        if (pt) {
+        if (pt && !this.hideTargetMark) {
             const uw = Math.min(pt.w * k, 96), ux = pt.x * k + pl.ox + (pt.w * k - uw) / 2;
             const uy = pt.y * k + pl.oy + pt.h * k + 7;
             c.fillRect(ux, uy, uw, 4, t.sel || t.accent);

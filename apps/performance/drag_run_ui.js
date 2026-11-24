@@ -214,6 +214,61 @@ function traceChart(cv, G, t, s, trace, rect, marks) {
     }
 }
 
+// Dragy-style round speedo for the live sheet: dark dial face, thick red 270°
+// ring with a glow, inside ticks + numbers, tapered needle, speed + RESET below.
+const GAUGE_MARKS = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330];
+function dragyGauge(cv, G, t, s, gx, gy, R, actions) {
+    const A0 = 225, SPAN = 270, VMAX = 330, THK = 26;
+    const r0 = R - THK / 2, r1 = R + THK / 2, F = r1 + 12, S = F + 3;
+    const mph = s.speedUnit === 'mph';
+    const raw = Number.isFinite(s.speed) ? s.speed : 0;
+    const v = Math.max(0, Math.min(VMAX, raw * (mph ? 0.621371 : 1)));
+    const pt = (a, r, ox, oy) => [ox + Math.sin(a * Math.PI / 180) * r, oy - Math.cos(a * Math.PI / 180) * r];
+    const aOf = (val) => A0 + val / VMAX * SPAN;
+
+    // The dial face, rim, grey track and numbers are static — bake them into a
+    // layer once instead of scanning ~100k pixels for them every frame (the
+    // head unit killed/restarted the app on the unbaked version).
+    const L = G.layer(['dragy', R, VMAX, t.name].join('|'), 2 * S, 2 * S, (c) => {
+        c.circle(S, S, F, '#0c0f15');
+        c.arc(S, S, F - 4, F - 1, A0, A0 + SPAN, G.withAlpha('#ffffff', 0.10));
+        c.circle(S, S, 58, G.withAlpha('#ffffff', 0.025));
+        c.arc(S, S, r0, r1, A0, A0 + SPAN, G.withAlpha('#c7cbd1', 0.20), { round: true });
+        GAUGE_MARKS.forEach((m) => {
+            const [nx, ny] = pt(aOf(m), r0 - 24, S, S);
+            c.text(String(m), nx, ny + 5, m % 90 === 0 ? 15 : 13, '#7d8592',
+                { align: 'center', font: 'bold' });
+        });
+    }, cv.textScale);
+    cv.blit(L, gx - S, gy - S);
+
+    // dynamic: glowing red fill + numbers lighting up once passed
+    if (v > 0.5) {
+        cv.arc(gx, gy, r0 - 5, r1 + 5, A0, aOf(v), G.withAlpha(RED, 0.16), { round: true });
+        cv.arc(gx, gy, r0, r1, A0, aOf(v), RED, { round: true });
+        cv.arc(gx, gy, r1 - 9, r1, A0, aOf(v), G.withAlpha('#ff8b96', 0.35), { round: true });
+        GAUGE_MARKS.forEach((m) => {
+            if (m === 0 || !(v >= m - 0.5)) return;
+            const [nx, ny] = pt(aOf(m), r0 - 24, gx, gy);
+            cv.text(String(m), nx, ny + 5, m % 90 === 0 ? 15 : 13, RED,
+                { align: 'center', font: 'bold' });
+        });
+    }
+
+    // Dragy-style digital speed in the middle of the dial, unit right under it
+    cv.text(String(Math.round(v)), gx, gy + 13, 38, t.text, { align: 'center', font: 'bold' });
+    cv.text(mph ? 'MPH' : 'KM/H', gx, gy + 30, 11, G.withAlpha(t.dim, 0.7),
+        { align: 'center', font: 'bold', spacing: 1, literal: true });
+
+    // live run timer under the speed — what matters while the ring fills
+    if (s.timerState === 'run' && typeof s.elapsed === 'number')
+        cv.text(s.elapsed.toFixed(2) + ' S', gx, gy + 72, 16, G.withAlpha('#ff8595', 0.9),
+            { align: 'center', font: 'bold', spacing: 1, literal: true });
+
+    Sheet.drawChip(cv, G, gx - 59, gy + F + 16, 118, 'RESET',
+        { icon: 'reset', run: actions && actions.reset, key: 'performance_drag_gauge_reset' });
+}
+
 // Live sheet: same shell as DYNO RUN — tag, chips, slanted stage with the trace,
 // right ribbon with result rows and the status block.
 function drawSheet(cv, G, t, s, car, actions) {
@@ -238,17 +293,17 @@ function drawSheet(cv, G, t, s, car, actions) {
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
 
-    cv.text('ACCELERATION TRACE', 316, y0 + 36, 15, t.dim, { font: 'bold', spacing: 1.4, literal: true });
+    cv.text('SPEEDOMETER', 316, y0 + 36, 15, t.dim, { font: 'bold', spacing: 1.4, literal: true });
     cv.roundRect(316, y0 + 56, 18, 5, 2, RED);
-    cv.text('SPEED', 341, y0 + 63, 12, t.dim, { font: 'bold', spacing: 0.5, literal: true });
-    traceChart(cv, G, t, s, isRun ? s.trace : (current && current.trace), { x: 338, y: y0 + 106, w: 560, h: 270 });
+    cv.text(unitL, 341, y0 + 63, 12, t.dim, { font: 'bold', spacing: 0.5, literal: true });
+    dragyGauge(cv, G, t, s, 606, y0 + 230, 144, actions);
     drawCar(cv, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
 
     // 3. Title tag and actions
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUN', 27, 196), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUN', 30, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUN', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('DRAG RUN', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'DRAG HISTORY',
         { icon: 'fwd', run: actions && actions.toggleView, key: 'performance_drag_runs' });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 68, 118, 'RESET',
@@ -260,17 +315,6 @@ function drawSheet(cv, G, t, s, car, actions) {
     Sheet.para(cv, ribX + 210, y0, 112, y1, SLANT, '#1b070c');
     Sheet.para(cv, ribX + 322, y0, 62,  y1, SLANT, '#8c1122');
     Sheet.para(cv, ribX + 384, y0, 56,  y1, SLANT, '#d91c33');
-
-    // VALID/INVALID sticker at the right of the timing values: it sits inside the dark
-    // ribbon band (baked on that band's colour, 50% ink), beside the first rows.
-    const hasLiveTimes = hasTimedResults(current) || Object.keys(s.rolling || {}).some((key) =>
-        typeof s.rolling[key] === 'number' && isFinite(s.rolling[key]) && s.rolling[key] > 0);
-    const liveStamp = hasLiveTimes ? stampArt(s.slope == null || s.slope >= -1.0, '#1b070c') : null;
-    if (liveStamp) {
-        const ih = 120, iw = Math.round(ih * liveStamp.w / liveStamp.h);
-        const iy = y0 + 26;
-        cv.image(liveStamp.id, xAt(ribX + 266, iy + ih / 2) - iw / 2, iy, iw, ih);
-    }
 
     // 5. Result rows: the five timed splits — speed intervals then the two mile marks
     const res = (key) => {
@@ -312,14 +356,18 @@ function drawSheet(cv, G, t, s, car, actions) {
     const setupY = y1 - 84, setupX = xAt(ribX + 12, setupY);
     const ready = s.timerState === 'ready';
     if (ready) {
-        const btnY = setupY + 30, bx = xAt(ribX + 12, btnY);
+        const btnY = setupY + 37, bx = xAt(ribX + 12, btnY);
         const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 160);
         const bw = 198, bh = 34;
         Sheet.para(cv, bx, btnY, bw, btnY + bh, 10,
             G.withAlpha('#2ee06f', 0.10 + 0.12 * pulse));
-        cv.line(bx, btnY, bx + bw, btnY, 2,
+        cv.line(bx + 1, btnY, bx + bw - 1, btnY, 2,
             G.withAlpha('#2ee06f', 0.35 + 0.55 * pulse));
-        cv.line(bx + bw - 10, btnY + bh, bx - 10, btnY + bh, 2,
+        cv.line(bx + bw - 1, btnY + 1, bx + bw - 9, btnY + bh - 1, 2,
+            G.withAlpha('#2ee06f', 0.28 + 0.42 * pulse));
+        cv.line(bx - 9, btnY + bh - 1, bx - 1, btnY + 1, 2,
+            G.withAlpha('#2ee06f', 0.28 + 0.42 * pulse));
+        cv.line(bx + bw - 11, btnY + bh, bx - 9, btnY + bh, 2,
             G.withAlpha('#2ee06f', 0.2 + 0.3 * pulse));
         cv.circle(bx + 18, btnY + bh / 2, 3.6,
             Math.floor(Date.now() / 300) % 2 ? '#2ee06f' : G.withAlpha('#2ee06f', 0.3));
@@ -384,10 +432,10 @@ function drawSections(cv, G, t, s, actions) {
     });
 
     // Title tag and clear-history action
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 27, 216), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 30, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196,
         s.clearArmed ? 'CONFIRM CLEAR' : 'CLEAR HISTORY',
         { icon: 'reset', run: actions && actions.clear, key: 'performance_dragsecs_clear' });
@@ -521,10 +569,10 @@ function drawRuns(cv, G, t, s, actions) {
 
     // Title tag and clear-section action
     const shortName = sec.label.replace(/ KM\/H| MPH/g, '');
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 27, 216), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 30, 216), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     const clearLines = s.clearArmed ? ['CONFIRM CLEAR'] : ['CLEAR ' + shortName, 'HISTORY'];
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 242,
         clearLines.join(' '),
@@ -658,10 +706,10 @@ function drawReport(cv, G, t, s, actions) {
     });
 
     // Left title tag and next-run action
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'REPORT', 27, 196), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'REPORT', 30, 196), tagH = 46, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('REPORT', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('REPORT', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 156, 'NEXT RUN',
         { icon: 'fwd', run: actions && actions.nextRun, key: 'performance_dragreport_next' });
 

@@ -23,6 +23,8 @@ const DragRunUi = require('./drag_run_ui');
 const RaceModesUi = require('./race_modes_ui');
 const CarDataUi = require('./car_data_ui');
 const WarmupUi = require('./warmup_ui');
+const MisfireTrack = require('./misfire_track');
+const TyreData = require('./tyre_data');
 const { Warmup } = require('./warmup');
 const { Controller: FlapController } = require('./flap_controller');
 const { AutoFlap, flapFor, modeName } = require('./flap_auto');
@@ -153,7 +155,7 @@ mgu.run({
         let lastDynoGate = null;
         let vehicleGear = null, vehicleGearAt = 0;
         const cachedDriveMode = settings.get('lastDriveMode');
-        let page = 0, engineConfigView = 'sections', carDataView = 'menu', valveReady = false;
+        let page = 0, engineConfigView = 'sections', carDataView = 'menu', tyrePage = 'main', valveReady = false;
         let drivingMode = flapFor(cachedDriveMode) ? cachedDriveMode : null;
         let driveModeConfirmed = false;
         let burbleTarget = 1.5, burbleCommandActive = false;
@@ -773,6 +775,7 @@ mgu.run({
                     return null;
                 }
                 subscriptions.push(sub);
+                if (sub.proxy && iface === TPMS) tpmsProxy = sub.proxy;
                 diagLog('watch_completed', { interface: iface, error: sub.error || null, available: sub.available === true });
                 if (sub.error) {
                     log.warn('Performance signal ' + iface + ': ' + sub.error);
@@ -1071,6 +1074,120 @@ mgu.run({
             });
         }
 
+        // The car's richer tyre info (aref_tires decode): detection status, last reset, fitted
+        // sizes, what the sensors report, selection/loading state, and what DSC is doing.
+        // Each watched field is its own struct payload.
+        const tyreExtra = {};
+        const tyreStore = (key, fn) => (payload) => {
+            if (!payload) return;
+            const v = fn(payload);
+            if (v) { tyreExtra[key] = v; if (page === 5 && carDataView === 'tyres') queueRender(); }
+        };
+        const setTyreDetection = tyreStore('detection', TyreData.detection);
+        const setTyreCalibration = tyreStore('calibration', TyreData.calibration);
+        const setTyreFront = tyreStore('frontTire', TyreData.frontAxle);
+        const setTyreRear = tyreStore('rearTire', TyreData.rearAxle);
+        const setTyreSensor = tyreStore('sensorTire', TyreData.sensorTire);
+        const setTyreState = tyreStore('tyreState', TyreData.tyreState);
+        const setDsc = (payload) => {
+            const v = TyreData.dsc(payload);
+            if (v) {
+                tyreExtra.dsc = v;
+                if (page === 0 || (page === 5 && carDataView === 'tyres') || (page === 1 && engineConfigView === 'dynamic')) queueRender();
+            }
+        };
+
+        // ---- DYNAMIC CONFIG: DSC mode requests through TPMS.chassisControl ----
+        // The same write channel the iDrive DSC button uses. Two-tap confirm on every
+        // mode; the live FES.statusDSCSwitchHMI read-back verifies what the car applied.
+        let tpmsProxy = null;
+        const dscWrite = { busy: false, armed: null, armedUntil: 0, status: '', warn: false };
+        const DSC_ENUMS = {
+            on: ['DSC_EINSCHALTEN'],
+            off: ['DSC_AUSSCHALTEN'],
+            // The traction-mode request enum is not published; try the plausible names
+            // in order — a rejected set just moves to the next candidate.
+            mdm: ['TRAKTIONSMODUS_EINSCHALTEN', 'DTC_EINSCHALTEN', 'MDM_EINSCHALTEN', 'DSC_TRAKTIONSMODUS_EIN'],
+        };
+        const DSC_LABEL = { on: 'DSC ON', mdm: 'MDM', off: 'DSC OFF' };
+        function dscStatus(text, warn) {
+            dscWrite.status = text; dscWrite.warn = !!warn;
+            queueRender();
+        }
+        function dscSend(mode) {
+            const candidates = DSC_ENUMS[mode];
+            let i = 0;
+            const attempt = () => {
+                if (i >= candidates.length) {
+                    dscWrite.busy = false;
+                    dscStatus(DSC_LABEL[mode] + ' · REFUSED BY CAR', true);
+                    return;
+                }
+                const value = candidates[i++];
+                let pending;
+                try { pending = ctx.signals.set(tpmsProxy, 'chassisControl', TyreData.dscStruct(value)); }
+                catch (e) { pending = Promise.reject(e); }
+                Promise.resolve(pending).then(
+                    () => {
+                        log.info('dsc ' + mode + ' sent via ' + value);
+                        dscStatus('SENT ' + DSC_LABEL[mode] + ' · VERIFYING');
+                        [1500, 4000].forEach((ms, j) => setTimeout(() => {
+                            const d = tyreExtra.dsc;
+                            const want = mode === 'mdm' ? 'traction' : mode;
+                            if (j === 1) {
+                                dscWrite.busy = false;
+                                dscStatus(d && d.state === want ? DSC_LABEL[mode] + ' ACTIVE'
+                                    : DSC_LABEL[mode] + ' SENT · CLUSTER SHOWS ' + (d ? d.state.toUpperCase() : 'UNKNOWN'),
+                                    !(d && d.state === want));
+                            } else queueRender();
+                        }, ms));
+                    },
+                    (e) => { log.warn('dsc ' + value + ': ' + shortError(e)); attempt(); });
+            };
+            attempt();
+        }
+        function dscRequest(mode) {
+            if (settings.get('demo') === 'on') return dscStatus(DSC_LABEL[mode] + ' · DEMO MODE', false);
+            if (dscWrite.busy) { dscStatus('COMMAND IN PROGRESS', true); return null; }
+            const now = Date.now();
+            if (dscWrite.armed !== mode || now > dscWrite.armedUntil) {
+                dscWrite.armed = mode; dscWrite.armedUntil = now + 4000;
+                dscStatus('PRESS AGAIN TO SEND ' + DSC_LABEL[mode], mode === 'off');
+                return null;
+            }
+            dscWrite.armed = null;
+            if (!tpmsProxy) { dscStatus('TPMS LINK UNAVAILABLE', true); return null; }
+            dscWrite.busy = true;
+            dscStatus('SENDING ' + DSC_LABEL[mode], false);
+            dscSend(mode);
+            return null;
+        }
+        const dscActions = {
+            dscOn() { return dscRequest('on'); },
+            dscMdm() { return dscRequest('mdm'); },
+            dscOff() { return dscRequest('off'); },
+        };
+
+        // ENGINE DATA chip: cycles ON -> MDM -> OFF -> ON from the *live* state, so
+        // modes set by the car's own DSC button are honoured. on/mdm send at once;
+        // off keeps the two-tap confirm (it's the safety-critical one).
+        function dscGo(mode) {
+            if (settings.get('demo') === 'on') return dscStatus(DSC_LABEL[mode] + ' · DEMO MODE', false);
+            if (mode === 'off') return dscRequest('off');
+            if (dscWrite.busy) { dscStatus('COMMAND IN PROGRESS', true); return null; }
+            if (!tpmsProxy) { dscStatus('TPMS LINK UNAVAILABLE', true); return null; }
+            dscWrite.busy = true;
+            dscStatus('SENDING ' + DSC_LABEL[mode], false);
+            dscSend(mode);
+            return null;
+        }
+        function dscCycle() {
+            const order = ['on', 'traction', 'off'];
+            const cur = tyreExtra.dsc && tyreExtra.dsc.state;
+            const nxt = order[(order.indexOf(cur) + 1) % order.length];
+            return dscGo(nxt === 'traction' ? 'mdm' : nxt);
+        }
+
         function currentValveView() {
             const control = valveController.view();
             const matched = !!(valveController.ident && valveController.ident.elAgk &&
@@ -1341,6 +1458,11 @@ mgu.run({
                 engineConfigView = 'burbles';
                 queueRender();
             },
+            dynamic() {
+                dscWrite.armed = null;
+                engineConfigView = 'dynamic';
+                queueRender();
+            },
             sections() {
                 engineConfigView = 'sections';
                 queueRender();
@@ -1360,6 +1482,7 @@ mgu.run({
         const KOMBI = 'de.bmw.infotainment.KombiIF';
         const PEDAL = 'de.bmw.powertrain.AcceleratorPedal';
         const TPMS = 'de.bmw.infotainment.vehicle.TPMS';
+        const TPMS_INTERNAL = 'de.bmw.infotainment.vehicle.TPMSInternalData';
         startWatch(CDS, { statusEngineSpeed2: setRpm, statusEngineTemperature: setEngineTemps,
             statusEngineStatus: setEngineStatus, statusBattery2: setBattery, statusHandBrake: setHandBrake }, { pollMs: 10000 });
         startWatch(BASIC_DATA, { basicDataSet: setGearboxTemp }, { pollMs: 10000 });
@@ -1375,13 +1498,17 @@ mgu.run({
         startWatch(PEDAL, { AngleAcceleratorPedal: setPedal });
         // TPMS also needs a poll: BMW's own x_call only ever reads these, so a car may never notify them.
         startWatch(TPMS, { statusTyrePressure: setTyrePress, statusTyreTemperature: setTyreTemp,
-            statusTargetTyrePressure: setTyreTarget }, { pollMs: 10000 });
+            statusTargetTyrePressure: setTyreTarget, statusTyreState: setTyreState }, { pollMs: 10000 });
+        startWatch(TPMS_INTERNAL, { statusWheelTypeChange: setTyreDetection,
+            tpmsCalibrationData: setTyreCalibration, statusFrontAxleTyre: setTyreFront,
+            statusRearAxleTyre: setTyreRear, tpmsErfsActualTireData: setTyreSensor }, { pollMs: 15000 });
         startWatch(VEHICLE_INFO, { statusGearboxDrive: setGearboxStatus, DataPowerTrain2: setGearSelection });
         startWatch(FES, {
             statusActualValueTorque2: setFesTorque,
             statusVehicleDynamicEngine: setFesPercentages,
             statusSwitchDriveDynamicSport2: setFesBoost,
             statusFESVehicleDynamicSwitchHMI: applyDrivingMode,
+            statusDSCSwitchHMI: setDsc,
         });
         startDriveModePoll();
 
@@ -1435,6 +1562,25 @@ mgu.run({
         let misfireEcu = null, misfireMids = null, misfireCounts = [], misfireCursor = 0;
         let misfireRetryAt = 0, misfireNextAt = 0, misfireDid = false, misfireScanComplete = false, misfireProbeMid = 0xA3;
 
+        // aref_misfire's tracker: every count rise between readings is an event with the drive's
+        // conditions; counts restarting at 0 mark a new drive. Kept across drives on disk.
+        const misfireFile = path.join(ctx.dataDir, 'misfires.json');
+        const misfireCsv = path.join(ctx.dataDir, 'misfires.csv');
+        let misfireSaved = null;
+        try { misfireSaved = JSON.parse(fs.readFileSync(misfireFile, 'utf8')); } catch (e) { /* first run */ }
+        const misfireTracker = new MisfireTrack.Tracker(misfireSaved);
+        let misfireAvg = [], misfireDirty = false;
+        const misfireSave = () => {
+            if (!misfireDirty) return;
+            try {
+                fs.writeFileSync(misfireFile, JSON.stringify(misfireTracker.state));
+                fs.writeFileSync(misfireCsv, MisfireTrack.csv(misfireTracker.state.events));
+                misfireDirty = false;
+            } catch (e) { log.warn('misfire save: ' + shortError(e)); }
+        };
+        const misfireSaveTimer = setInterval(misfireSave, 60000);
+        let misfireAvgDirty = false;
+
         function warmCarDataArt() {
             if (state.stopped) {
                 carDataArtTimer = null;
@@ -1466,6 +1612,20 @@ mgu.run({
             carDataArtTimer = setTimeout(warmCarDataArt, 0);
         }
 
+        // Conditions snapshot for a misfire event (aref_misfire ctx): what the car was doing.
+        function misfireCtx() {
+            const n = Date.now();
+            return {
+                rpm: fresh(state.rpm, n) ? state.rpm.value : null,
+                speed: fresh(state.speed, n) ? state.speed.value : null,
+                coolant: cdNum('coolantTemp'),
+                oil: cdNum('oilTemp'),
+                gear: vehicleGear || null,
+                torque: state.torqueFes && finite(state.torqueFes.value) ? state.torqueFes.value : null,
+                mode: drivingMode,
+            };
+        }
+
         async function pollMisfire(now) {
             const cfg = dme.misfire || {};
             const set = (value, status) => {
@@ -1473,6 +1633,15 @@ mgu.run({
                 if (status === 'unavailable' && state.misfire && state.misfire.status === 'live' &&
                     Date.now() - state.misfire.at <= 120000) return;
                 state.misfire = { raw: value, value, unit: 'counts', source: 'DME / OBD service 06', at: Date.now(), status };
+                // Every rise is a logged event with the drive's conditions; a count back at 0 is a
+                // new drive. Only feed a complete set (every cylinder answered at least once).
+                if (status === 'live' && Array.isArray(value) && value.some((v) => v !== null)) {
+                    try {
+                        const ev = misfireTracker.feed(value, Date.now(), misfireCtx(), misfireAvg);
+                        if (ev.length || misfireAvgDirty) { misfireDirty = true; misfireAvgDirty = false; }
+                        if (ev.length) log.info('misfire: ' + ev.map((e) => 'cyl' + e.cyl + '+' + e.n).join(', '));
+                    } catch (e) { log.warn('misfire track: ' + shortError(e)); }
+                }
                 if (page === 5 && carDataView === 'engineInfo') queueRender();
             };
             if (!misfireMids || !misfireMids.length) {
@@ -1523,6 +1692,8 @@ mgu.run({
                 misfireCursor = 0;
                 const tid = parseInt(cfg.tid || '0C', 16);
                 const row = first.rows.find((item) => item.tid === tid) || first.rows[0];
+                const avgRow = first.rows.find((item) => item.tid === 0x0B);
+                if (avgRow && avgRow.value < 65535) { misfireAvg[misfireMids.indexOf(0xA2)] = avgRow.value; misfireAvgDirty = true; }
                 if (row && row.value < 65535) {
                     misfireCounts[misfireMids.indexOf(0xA2)] = row.value;
                     set(misfireCounts.slice(), 'live');
@@ -1553,12 +1724,14 @@ mgu.run({
             }
             const tid = parseInt(cfg.tid || '0C', 16);
             const row = rows.find((item) => item.tid === tid) || rows[0];
+            const avgRow = rows.find((item) => item.tid === 0x0B);
             if (!row) return;
             if (probing) {
                 misfireMids.push(mid);
                 misfireCounts.push(null);
                 misfireProbeMid++;
             }
+            if (avgRow && avgRow.value < 65535) { misfireAvg[misfireMids.indexOf(mid)] = avgRow.value; misfireAvgDirty = true; }
             if (row.value < 65535) misfireCounts[misfireMids.indexOf(mid)] = row.value;
             if (misfireCounts.some((value) => value !== null)) set(misfireCounts.slice(), 'live');
         }
@@ -1901,7 +2074,13 @@ mgu.run({
                         { label: 'FRONT RIGHT', value: '2.41 bar (26 °C)' },
                         { label: 'REAR LEFT', value: '2.55 bar (27 °C)' },
                         { label: 'REAR RIGHT', value: '2.56 bar (28 °C)' },
-                        { label: 'TARGET PRESSURE', value: '2.4 · 2.4 · 2.6 · 2.6 bar' },
+                    ],
+                    tyresMore: [
+                        { label: 'TARGET PRESSURE', value: '2.4 · 2.4 · 2.6 · 2.6 bar', detail: 'Partly loaded · summer · Automatic' },
+                        { label: 'FITTED TIRES', value: '245/40R18 / 275/35R19', detail: 'F 245/40R18 XL summer · R 275/35R19 XL summer | sensors say 245/40R18 (mounted)' },
+                        { label: 'TIRE DETECTION', value: 'Wheels found', detail: 'Every sensor is matched to a wheel.' },
+                        { label: 'TPMS RESET', value: 'Passed @ 47,812 km', detail: 'Reset from the iDrive menu' },
+                        { label: 'DSC', value: 'ON', detail: 'traction control · as the cluster shows it' },
                     ],
                 };
                 return demoRow[view] || [];
@@ -1928,6 +2107,23 @@ mgu.run({
                         if (!m || m.status !== 'live' || !Array.isArray(m.value) || now - m.at > CD_STALE) return null;
                         if (m.value.length && m.value.every((v) => v === 0)) return '0';
                         return m.value.map((v) => (v === null || v === undefined ? '-' : String(v))).join(' · ');
+                    })(), detail: (() => {
+                        const mt = misfireTracker.state;
+                        const parts = [];
+                        const drive = misfireTracker.driveTotal();
+                        const allTime = MisfireTrack.sum(mt.totals);
+                        if (drive > 0 || allTime > 0) parts.push('drive ' + drive + ' · all-time ' + allTime);
+                        const last = mt.events.length ? mt.events[mt.events.length - 1] : null;
+                        if (last) {
+                            const c = last.ctx || {};
+                            const bits = [last.cyl ? 'cyl ' + last.cyl : null, c.rpm ? Math.round(c.rpm) + ' rpm' : null,
+                                c.speed ? Math.round(c.speed) + ' km/h' : null, c.gear || null, c.mode || null].filter(Boolean);
+                            if (bits.length) parts.push('last ' + bits.join(' @ '));
+                        }
+                        const worst = misfireTracker.worst();
+                        if (worst) parts.push('worst cyl ' + worst);
+                        if (misfireAvg.some((v) => typeof v === 'number')) parts.push('avg10 ' + misfireAvg.map((v) => (v === null || v === undefined ? '-' : formatNumber(v, 1))).join(' · '));
+                        return parts.join(' | ') || '';
                     })() },
                     { label: 'COOLANT TEMP', value: cdu(cdNum('coolantTemp'), 0, '°C') },
                     { label: 'ENGINE OIL TEMP', value: cdu(cdNum('oilTemp'), 0, '°C') },
@@ -1988,7 +2184,38 @@ mgu.run({
                     { label: 'FRONT RIGHT', value: tyreWheel('tyrePFR', 'tyreTFR') },
                     { label: 'REAR LEFT', value: tyreWheel('tyrePRL', 'tyreTRL') },
                     { label: 'REAR RIGHT', value: tyreWheel('tyrePRR', 'tyreTRR') },
-                    { label: 'TARGET PRESSURE', value: tyreTarget ? tyreTarget + ' bar' : null },
+                ],
+                tyresMore: [
+                    { label: 'TARGET PRESSURE', value: tyreTarget ? tyreTarget + ' bar' : null,
+                        detail: (() => {
+                            const ts = tyreExtra.tyreState;
+                            if (!ts) return '';
+                            return [ts.loading, ts.season, ts.mode].filter(Boolean).join(' · ');
+                        })() },
+                    { label: 'FITTED TIRES', value: (() => {
+                        const f = tyreExtra.frontTire, r = tyreExtra.rearTire;
+                        if (!f && !r) return null;
+                        if (f && r && f.size === r.size) return f.size;
+                        return (f ? f.size : '?') + ' / ' + (r ? r.size : '?');
+                    })(), detail: (() => {
+                        const f = tyreExtra.frontTire, r = tyreExtra.rearTire;
+                        const parts = [];
+                        if (f && r && f.text !== r.text) parts.push('F ' + f.text + ' · R ' + r.text);
+                        else if (f) parts.push(f.text);
+                        const st = tyreExtra.sensorTire;
+                        if (st && st.tire) parts.push('sensors say ' + st.tire.size + (st.mounted ? ' (mounted)' : ''));
+                        else if (st) parts.push('sensors: ' + st.state);
+                        return parts.join(' | ');
+                    })() },
+                    { label: 'TIRE DETECTION', value: tyreExtra.detection ? tyreExtra.detection.title : null,
+                        detail: tyreExtra.detection ? tyreExtra.detection.text : '' },
+                    { label: 'TPMS RESET', value: (() => {
+                        const c = tyreExtra.calibration;
+                        if (!c) return null;
+                        return c.result + (c.mileage ? ' @ ' + Math.round(c.mileage).toLocaleString('en-US') + ' km' : '');
+                    })(), detail: tyreExtra.calibration ? tyreExtra.calibration.type : '' },
+                    { label: 'DSC', value: tyreExtra.dsc ? tyreExtra.dsc.state.toUpperCase() : null,
+                        detail: 'traction control · as the cluster shows it' },
                 ],
             };
             return rows[view] || [];
@@ -2009,6 +2236,7 @@ mgu.run({
                 rpm: peak('rpm', values.rpm), power: peak('power', values.power && values.power.value),
                 torque: peak('torque', values.torque), powerPct: peak('powerPct', values.powerPct),
                 torquePct: peak('torquePct', values.torquePct), boost: peak('boost', values.boost && values.boost.value),
+                speed: peak('speed', values.speed),
             };
         }
 
@@ -2099,20 +2327,68 @@ mgu.run({
             one(1110 + w + gap, 'GEARBOX OIL', s.gearbox);
         }
 
-        function drawMSoundButton(cv, t, enabled, active, run) {
-            const x = 1110, w = 466, h = 50;
-            // Anchor the bottom to the stretched page bottom so it stays level with
-            // the TORQUE panel, without growing thick itself.
-            const y = G.pageBottom(cv) - h, cy = y + h / 2;
+        // Mode buttons styled like the oil-bar scales above them: same slab geometry
+        // (SL=18, bottom edge x..x+bw), lighter top band, white end slash, scale line.
+        // DSC chip icons reuse the DYNAMIC CONFIG art (grey/blue); the red OFF icon
+        // would vanish on the red button, so OFF keeps the white variant.
+        const DSC_CHIP = { on: ['dscOn', 'DSC ON'], traction: ['dscMdm', 'DSC MDM'],
+            off: ['dscOffW', 'DSC OFF'] };
+        function drawModeButtons(cv, G, t, mEnabled, mActive, mRun, dscRun) {
+            const bh = 50, SL = 18, bw = 198;   // oil bars: w=216 -> bw=w-SL
+            const y = G.pageBottom(cv) - bh - 4, cy = y + bh / 2;
             const red = '#f32635';
-            const edge = active ? red : G.withAlpha('#c7cbd1', enabled ? 0.42 : 0.2);
-            cv.roundRect(x, y, w, h, 8, active ? G.withAlpha(red, 0.88) : G.withAlpha('#c7cbd1', 0.07));
-            cv.strokeRoundRect(x, y, w, h, 8, 2, edge);
-            cv.fillRect(x + 1, cy - 17, 4, 34, active ? red : G.withAlpha('#c7cbd1', enabled ? 0.48 : 0.24));
-            cv.text('M SOUND MODE', x + 24, cy + 7, 20, active ? '#ffffff' : (enabled ? t.text : t.dim),
-                { font: 'bold', spacing: 1.2, literal: true });
-            cv.circle(x + w - 28, cy, 7, active ? '#ffffff' : G.withAlpha('#c7cbd1', 0.34));
-            if (cv.own && run) cv.target(x, y, w, h, run, 'performance_m_sound_mode');
+            const top = 8, oT = Math.round(SL * (bh - top) / bh);  // slim light band so the icon never dips under it
+
+            const chipTop = (bx, liteC, capC) => {
+                cv.quad([[bx + SL, y], [bx + bw + SL, y], [bx + bw + oT, y + top], [bx + oT, y + top]], liteC);
+                cv.quad([[bx + bw - 10 + SL, y], [bx + bw - 7 + SL, y], [bx + bw - 7, y + bh], [bx + bw - 10, y + bh]], t.bg);
+                cv.quad([[bx + bw - 7 + SL, y], [bx + bw + SL, y], [bx + bw, y + bh], [bx + bw - 7, y + bh]], capC);
+            };
+            const chip = (bx, fillC, liteC, capC) => {
+                cv.quad([[bx + SL, y], [bx + bw + SL, y], [bx + bw, y + bh], [bx, y + bh]], fillC);
+                chipTop(bx, liteC, capC);
+            };
+            const mBgv = G.mix(t.bg, red, 0.88);
+            const mBg = '#' + mBgv.slice(0, 3).map((v) => ('0' + v.toString(16)).slice(-2)).join('');
+
+            // M SOUND chip — lights up when active
+            const mBase = mActive ? mBg : G.mix(t.bg, '#c7cbd1', 0.07);
+            chip(1110, mBase, mActive ? G.mix(mBgv, '#ffffff', 0.28) : G.mix(mBase, '#ffffff', 0.15),
+                mActive ? '#ffffff' : G.withAlpha('#c7cbd1', 0.34));
+            const mTextC = mActive ? '#ffffff' : (mEnabled ? t.text : t.dim);
+            const mTw = cv.textWidth('M SOUND MODE', 20, { font: 'bold', spacing: 1.0 });
+            const mTextX = 1110 + SL / 2 + Math.round((bw - (mTw + 16)) / 2) - 3;   // centred text+dot group, -3px left
+            cv.text('M SOUND MODE', mTextX, cy + 7, 20, mTextC, { font: 'bold', spacing: 1.0, literal: true });
+            cv.circle(mTextX + mTw + 11, cy, 5, mActive ? '#3ddb7f' : G.withAlpha('#c7cbd1', 0.5));
+            if (cv.own && mRun) cv.target(1110, y, 216, bh, mRun, 'performance_m_sound_mode');
+
+            // DSC chip — icon drawn under the light band so its baked bg never shows
+            cv.quad([[1360 + SL, y], [1360 + bw + SL, y], [1360 + bw, y + bh], [1360, y + bh]], mBg);
+            const state = tyreExtra.dsc && tyreExtra.dsc.state;
+            const dc = DSC_CHIP[state] || ['dscOnW', 'DSC —'];
+            const armed = dscWrite.armed;                          // OFF waits for the confirm tap
+            const label = armed ? DSC_LABEL[armed] + ' ?' : dc[1];
+            const art = FlapUi.sectionArt(dc[0], mBg);
+            const ih = 33, iw = art ? Math.round(ih * art.w / art.h) : 26;   // vector fallback is ~square
+            const dTw = cv.textWidth(dc[1], 20, { font: 'bold', spacing: 1.0 });
+            const dGroupX = 1360 + SL / 2 + Math.round((bw - (iw + 8 + dTw)) / 2);
+            const ix = dGroupX - 34, iy = y + top + Math.round((bh - top - ih) / 2) - 4;   // icon ~17% left, ~8% up
+            if (art) {
+                cv.image(art.id, ix, iy, iw, ih);
+                // mask any pixels hanging past the slanted left edge of the chip
+                const eT = 1360 + Math.round(SL * (1 - (iy - y) / bh));
+                const eB = 1360 + Math.round(SL * (1 - (iy + ih - y) / bh));
+                if (ix < Math.max(eT, eB))
+                    cv.quad([[ix - 2, iy - 1], [eT, iy - 1], [eB, iy + ih + 1], [ix - 2, iy + ih + 1]], t.bg);
+            } else {
+                // PNG missing on this renderer: draw the vector DSC pictogram instead
+                const kinds = { dscOn: 'DSC_ON', dscMdm: 'MDM', dscOff: 'DSC_OFF', dscOnW: 'DSC_ON', dscMdmW: 'MDM', dscOffW: 'DSC_OFF' };
+                FlapUi.modeIcon(cv, G, t, kinds[dc[0]] || 'DSC_ON', ix + iw / 2, iy + ih / 2, iw, '#ffffff', true);
+            }
+            const capC = armed && Math.floor(Date.now() / 350) % 2 ? '#7a0e1c' : '#ffffff';
+            chipTop(1360, G.mix(mBgv, '#ffffff', 0.28), capC);
+            cv.text(label, ix + iw + 8, cy + 7, 20, '#ffffff', { font: 'bold', spacing: 1.0, literal: true });   // right next to the icon
+            if (cv.own && dscRun) cv.target(1360, y, 216, bh, dscRun, 'performance_dsc_chip');
         }
 
         function drawEngine(cv, t, s, modeColor) {
@@ -2162,13 +2438,14 @@ mgu.run({
             G.bar(cv, t, speedX, speedY, speedW, 76, {
                 label: 'VEHICLE SPEED', value: s.speed, text: formatNumber(finite(s.speed) ? s.speed : 0, 0), unit: 'km/h',
                 min: 0, max: 300, step: 30, ticks: speedTicks,
-                decimals: 0, valueColor: gaugeColor,
+                decimals: 0, valueColor: gaugeColor, peak: s.peaks.speed,
                 color: modeColor ? gaugeColor : undefined, hang: modeColor ? gaugeColor : undefined, ramp: modeColor ? undefined : 'hot',
             });
             barLabels(speedX, speedY, speedW, 0, 300, speedTicks, (v) => String(v));
-            const gear = s.gear || '--';
-            const gearX = speedX + cv.textWidth('VEHICLE SPEED', 22, { font: 'bold', spacing: 2 }) + 18;
-            cv.text('GEAR ' + gear, gearX, speedY + 26, 16, modeColor ? gaugeColor : t.accent, { font: 'bold', spacing: 1, literal: true });
+            const speedPeak = s.peaks && s.peaks.speed;
+            if (finite(speedPeak) && (!finite(s.speed) || speedPeak > s.speed))
+                cv.text('PEAK ' + formatNumber(speedPeak, 0) + ' KM/H', speedX + cv.textWidth('VEHICLE SPEED', 22, { font: 'bold', spacing: 2 }) + 18,
+                    speedY + 26, 16, modeColor ? gaugeColor : t.accent, { font: 'bold', spacing: 1, literal: true });
             const boostLabel = 'Turbo Boost';
             const boostY = G.TOP + 258 + Math.round(extra * 0.48);
             const boostTicks = Calc.scaleTicks(BOOST_MAX_BAR, 5);
@@ -2185,7 +2462,10 @@ mgu.run({
             drawOilTemps(cv, t, s, modeColor, gaugeColor, G.TOP + 346 + Math.round(extra * 0.80));
             if (mSoundEnabled && !valveCanActuate()) resetMSound();
             const mSoundReady = valveCanActuate() && !valveController.state.busy && !mSoundBusy;
-            drawMSoundButton(cv, t, mSoundReady, mSoundActive(), toggleMSoundMode);
+            drawModeButtons(cv, G, t, mSoundReady, mSoundActive(), toggleMSoundMode, () => {
+                queueRender();
+                return dscCycle();   // tap cycles DSC ON -> MDM -> OFF from the live state
+            });
         }
 
         async function drawFrame() {
@@ -2219,7 +2499,13 @@ mgu.run({
                         color: driveModeLoading || vehicleDataReady ? 'dim' : 'crit' }])
                     .concat(notice ? [{ text: notice, color: 'crit' }] : []));
             } else if (page === 1) {
-                FlapUi.draw(cv, G, t, currentValveView(), Object.assign({}, valveActions, burbleActions),
+                const valveView = currentValveView();
+                valveView.dsc = {
+                    state: tyreExtra.dsc ? tyreExtra.dsc.state : null,
+                    busy: dscWrite.busy,
+                    status: dscWrite.status, warn: dscWrite.warn,
+                };
+                FlapUi.draw(cv, G, t, valveView, Object.assign({}, valveActions, burbleActions, dscActions),
                     selectedCarVisual({ bg: FlapUi.CAR_TILE_BG || t.bg }), Date.now(), engineConfigView, sectionActions);
             } else if (page === 2) {
                 RaceModesUi.draw(cv, G, t, {
@@ -2292,14 +2578,17 @@ mgu.run({
             } else if (page === 5) {
                 const sectionActions = {};
                 CarDataUi.SECTIONS.forEach((sec) => {
-                    sectionActions[sec.key] = () => { carDataView = sec.key; queueRender(); return render(); };
+                    sectionActions[sec.key] = () => { carDataView = sec.key; tyrePage = 'main'; queueRender(); return render(); };
                 });
+                const tyresRowsView = carDataView === 'tyres' && tyrePage === 'more' ? 'tyresMore' : carDataView;
                 CarDataUi.draw(cv, G, t, {
-                    view: carDataView, demo, rows: carDataRows(carDataView, demo, s),
+                    view: carDataView, demo, rows: carDataRows(tyresRowsView, demo, s), tyrePage,
                     // Composite onto the slab's pure black, not theme.bg, so no grey frame shows.
                     side: carDataView === 'menu' ? null : selectedCarSideVisual({ bg: '#000000' }),
                 }, Object.assign({
-                    back: () => { carDataView = 'menu'; queueRender(); return render(); },
+                    back: () => { carDataView = 'menu'; tyrePage = 'main'; queueRender(); return render(); },
+                    tyresMore: () => { tyrePage = 'more'; queueRender(); return render(); },
+                    tyresMain: () => { tyrePage = 'main'; queueRender(); return render(); },
                 }, sectionActions));
             } else if (page === 6) {
                 if (demo) {
@@ -2396,6 +2685,8 @@ mgu.run({
             if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
             if (valveNoticeTimer) { clearTimeout(valveNoticeTimer); valveNoticeTimer = null; }
             if (fuelReserveTimer) { clearTimeout(fuelReserveTimer); fuelReserveTimer = null; }
+            clearInterval(misfireSaveTimer);
+            misfireSave();
             stopDriveModePoll();
             valveAuto._stop();
             if (readOnlyLink) readOnlyLink.cancel();
@@ -2536,7 +2827,7 @@ mgu.run({
             ctx.display.onBack = () => {
                 // Step back one subpage level; on a top-level tab, return false so the app closes.
                 if (page === 1 && engineConfigView !== 'sections') {
-                    engineConfigView = 'sections'; queueRender(); render(); return true;
+                    engineConfigView = 'sections'; dscWrite.armed = null; queueRender(); render(); return true;
                 }
                 if (page === 3) {
                     if (dynoView !== 'sheet') { dynoView = 'sheet'; queueRender(); render(); return true; }
@@ -2547,6 +2838,7 @@ mgu.run({
                     setPage(2); return true;
                 }
                 if (page === 5 && carDataView !== 'menu') {
+                    if (tyrePage === 'more') { tyrePage = 'main'; queueRender(); render(); return true; }
                     carDataView = 'menu'; queueRender(); render(); return true;
                 }
                 return false;

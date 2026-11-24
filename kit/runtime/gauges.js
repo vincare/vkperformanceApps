@@ -218,7 +218,7 @@ function radialLive(cv, t, cx, cy, r, g, min, max, thick, v, sv, f) {
     }
     const big = Math.round(r * 0.62);
     cv.text(fmt(v, g.decimals), cx, cy + big * 0.32, big, isNum(v) ? t.text : t.dim, { align: 'center', font: 'num' });
-    if (isNum(g.peak) && g.showPeak !== false) cv.text('PEAK ' + fmt(g.peak, g.decimals), cx, cy + r * 0.82 + 32, 22, t.accent2, { align: 'center', font: 'label', spacing: 1 });
+    if (isNum(g.peak) && g.showPeak !== false && (!isNum(sv) || g.peak > sv)) cv.text('PEAK ' + fmt(g.peak, g.decimals), cx, cy + r * 0.82 + 32, 22, t.accent2, { align: 'center', font: 'label', spacing: 1 });
 }
 
 /* ---------------- needle dial ---------------- */
@@ -318,7 +318,7 @@ function bar(cv, t, x, y, w, h, g) {
         const uw = g.unit ? cv.textWidth(' ' + g.unit, 26) : 0, vs = g.text != null ? g.text : fmt(v, g.decimals);
         cv.text(vs, x + w - uw, y + 30, 44, g.valueColor ? t[g.valueColor] || g.valueColor : isNum(v) ? t.text : t.dim, { align: 'right', font: 'num' });
         if (g.unit) cv.text(' ' + g.unit, x + w, y + 30, 26, t.dim, { align: 'right' });
-        if (g.peakText && isNum(g.peak)) {
+        if (g.peakText && isNum(g.peak) && (!isNum(sv) || g.peak > sv)) {
             const ps = localizeLabel('PEAK') + ' ' + fmt(g.peak, g.decimals), po = { font: 'label', spacing: 1, literal: true };
             const px = x + cv.textWidth(label, 22, { font: 'bold', spacing: 2 }) + 22;
             if (px + cv.textWidth(ps, 20, po) <= x + w - uw - cv.textWidth(vs, 44, { font: 'num' }) - 18) cv.text(ps, px, y + 26, 20, (g.hang && (t[g.hang] || g.hang)) || t.hang || t.accent2 || t.dim, po);
