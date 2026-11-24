@@ -1,0 +1,5 @@
+# The app backgrounds use G20.png and Zones.png only (see bg_art.js).
+# Keep model reference photos in the source tree but out of the in-car package.
+G12.png
+G22.png
+G30.png
