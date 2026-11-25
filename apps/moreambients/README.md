@@ -2,6 +2,12 @@
 
 MoreAmbients is an iDrive 7 canvas app with three lighting views:
 
+## 0.2.14
+
+- Diagnostic operations now use the initialized TASU proxy even if the head unit's `available` notification is late or reports false during startup. The previous gate could prevent the module scan and every direct RGB/zone/restore command from being sent.
+- Ambient-module discovery retries BMW's confirmed UDS `BUSY` response and uses AmbientConfig's read-only BDC-address fallback when the default address does not answer. RGB writes and restore requests use the same transport retry settings as AmbientConfig.
+- UI, factory signal payloads, module mapping, RGB byte order, and all other lighting modes are unchanged. The app still reports acknowledgements, which do not prove that an LED visibly changed; an in-car check is required.
+
 - **OEM** follows the BMW ambience layout. Its 36 named colour choices are sent immediately when selected; no separate Apply step is needed. Background and accent brightness are separate for discovered lower and upper zones. Night reduction dims both zones.
 - **BMW palette** requests one of BMW's 12 factory colour slots through `ComfortFunctionIuK` and shows the slot reported by the vehicle.
 - **Colour Studio** offers custom RGB, brightness, zone choice, and six saved looks. Applying a Studio colour now saves the exact colour and target zones for reliable reapplication after a rescan or app restart.
