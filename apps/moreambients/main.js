@@ -11,6 +11,7 @@ const path = require('path');
 
 const W = 1600, H = 520;
 const LIGHT = 'de.bmw.infotainment.misc.ComfortFunctionIuK';
+const COLOR_REGISTRY = 'de.bmw.infotainment.colorregistryupdateservice.ColorRegistryUpdateService';
 const AMBIENT_LIGHT = 'de.bmw.body.interiorillumination.AmbientLight';
 const FES = 'de.bmw.infotainment.drivingexcitement.FES';
 const BDC = 0x40;
@@ -201,8 +202,11 @@ mgu.run({
             mColorDiagnostic: {
                 open: false, generation: 0, starting: false,
                 comfortAvailable: null, comfortStatus: null, comfortUpdatedAt: 0, comfortSource: '—',
+                comfortUserSetting: null, comfortUserUpdatedAt: 0,
                 ambientAvailable: null, ambient: Object.create(null), ambientUpdatedAt: 0,
+                registryAvailable: null, registryRows: [], registryCount: null, registryUpdatedAt: 0,
                 history: [], errors: [], legacyMColorSuppressed: false,
+                scroll: 0,
                 setterResponse: 'NOT SENT · READ-ONLY DIAGNOSTICS',
             },
             customByLocation: Object.create(null),
@@ -425,8 +429,7 @@ mgu.run({
             if (!d.comfortStatus) return 'WAITING FOR ComfortFunctionIuK STATUS';
             return diagnosticText(d.comfortStatus[field]);
         }
-        function diagnosticProfileText() {
-            const value = state.mColorDiagnostic.ambient.currentInteriorLightProfile;
+        function diagnosticProfileValueText(value) {
             if (value === undefined || value === null) return 'WAITING FOR AmbientLight PROFILE';
             const id = value && typeof value === 'object' ? value.currentLightProfileId : value;
             if (typeof id === 'string') return diagnosticText(id);
@@ -437,6 +440,17 @@ mgu.run({
                 return 'UNKNOWN PROFILE (' + id + ')';
             }
             return diagnosticText(value);
+        }
+        function diagnosticProfileText() {
+            return diagnosticProfileValueText(state.mColorDiagnostic.ambient.currentInteriorLightProfile);
+        }
+        function diagnosticProgramText(value) {
+            if (value === undefined || value === null) return 'WAITING FOR AmbientLight PROGRAM';
+            const id = value && typeof value === 'object' ? value.temporaryLightProgramId : value;
+            if (id === 0 || id === 'OFF') return 'OFF (0)';
+            if (id === 1 || id === 'VITALIZE') return 'VITALIZE (1)';
+            if (id === 2 || id === 'RELAX') return 'RELAX (2)';
+            return diagnosticText(id);
         }
         function diagnosticAvailability(value) {
             return value === true ? 'AVAILABLE' : value === false ? 'UNAVAILABLE' : 'CHECKING';
@@ -452,6 +466,7 @@ mgu.run({
             const mode = ambient.mModeAmbientLightActive;
             const active = ambient.ambientLightActive;
             const boolText = (v) => v === true ? 'ON' : v === false ? 'OFF' : 'UNKNOWN';
+            const user = d.comfortUserSetting || {};
             const history = d.history.slice(0, 2).map((h) =>
                 'slot=' + diagnosticText(h.sample.menu) + ' hue=' + diagnosticText(h.sample.hue)
                 + ' L1/L2/L3=' + diagnosticText(h.sample.layer1) + '/' + diagnosticText(h.sample.layer2) + '/' + diagnosticText(h.sample.layer3))
@@ -461,7 +476,8 @@ mgu.run({
                 { name: 'REFRESH READS', desc: d.starting ? 'CONNECTING · READ-ONLY SOME/IP GETS' : d.legacyMColorSuppressed
                     ? 'OLD M COLOR AUTO-APPLY BLOCKED · RESTART READ-ONLY WATCH' : 'RESTART THE READ-ONLY PROFILE WATCH', nav: true },
                 { name: 'SERVICE AVAILABILITY', desc: 'ComfortFunctionIuK ' + diagnosticAvailability(d.comfortAvailable)
-                    + ' · AmbientLight ' + diagnosticAvailability(d.ambientAvailable) },
+                    + ' · AmbientLight ' + diagnosticAvailability(d.ambientAvailable)
+                    + ' · ColorRegistry ' + diagnosticAvailability(d.registryAvailable) },
                 { name: 'OTHER APP OVERRIDE', desc: state.activeCustom
                     ? 'TEMPORARY BDC COLOR STILL TRACKED · LET IT EXPIRE BEFORE OEM COMPARISON'
                     : 'NO TEMPORARY BDC COLOR CURRENTLY TRACKED' },
@@ -472,11 +488,26 @@ mgu.run({
                 { name: 'LAYER 3 RAW · UInt8', desc: 'statusHueValueLayer3IndividualGroup = ' + diagnosticFieldText('layer3') },
                 { name: 'PROFILE / MODE', desc: diagnosticProfileText() + ' · M Mode ' + boolText(mode) + ' · ambient ' + boolText(active)
                     + ' · ' + diagnosticUpdatedAt(d.ambientUpdatedAt) },
+                { name: 'STARTUP FACTORY PROFILE', desc: diagnosticProfileValueText(ambient.startupInteriorLightProfile)
+                    + ' · read-only' },
+                { name: 'TEMPORARY LIGHT PROGRAM', desc: diagnosticProgramText(ambient.currentProgram)
+                    + ' · dimmed at night=' + boolText(ambient.dimmedWhileDrivingAtNight) },
                 { name: 'CONTROL MODES · RAW', desc: 'mode=' + diagnosticFieldText('mode') + ' · dynamic=' + diagnosticFieldText('dynamic')
                     + ' · ambient dynamic=' + diagnosticFieldText('dynamicAmbiente') },
                 { name: 'BRIGHTNESS · RAW UInt8', desc: 'ambient=' + diagnosticText(ambient.brightnessAmbientLight)
                     + ' · contour=' + diagnosticText(ambient.brightnessAmbientContourLine)
                     + ' · Comfort offset=' + diagnosticFieldText('brightness') },
+                { name: 'PANORAMIC ROOF HUE · RAW', desc: 'UserSetting hue UInt16='
+                    + diagnosticText(user.huePanoramicRoof) + ' · ' + diagnosticUpdatedAt(d.comfortUserUpdatedAt) },
+                { name: 'LIGHTSABER / ALEV4 · RAW', desc: 'brightness='
+                    + diagnosticText(user.brightnessLightsaber) + '/' + diagnosticText(user.brightnessAlev4)
+                    + ' · modes=' + diagnosticText(user.modeLightsaber) + '/' + diagnosticText(user.modeAlev4) },
+                { name: 'SIA CHARGE / CONDITION · RAW', desc: 'touch='
+                    + diagnosticText(user.touchCommandSia) + ' · condition=' + diagnosticText(user.condition) },
+                { name: 'COLOR REGISTRY', desc: d.registryCount === null
+                    ? 'WAITING FOR READ-ONLY COLOR REGISTRY · NO COLOR COMMANDS SENT'
+                    : d.registryCount + ' entries · raw Float RGBA and set names · updated '
+                        + diagnosticUpdatedAt(d.registryUpdatedAt) + ' · TAP TO INSPECT', nav: true },
                 { name: 'TARGET DASHBOARD', desc: '#0066B1 · RGB(0, 102, 177) · NOT SENT', c1: M_COLOR.dashboard },
                 { name: 'TARGET DOOR HANDLES', desc: '#003D78 · RGB(0, 61, 120) · NOT SENT', c1: M_COLOR.door },
                 { name: 'TARGET FOOTWELL', desc: '#E22718 · RGB(226, 39, 24) · NOT SENT', c1: M_COLOR.footwell },
@@ -486,6 +517,57 @@ mgu.run({
                 { name: 'OBSERVED OEM CHANGES', desc: history || 'CHANGE BMW FACTORY COLOR WHILE THIS PAGE IS OPEN' },
                 { name: 'LATEST ERROR', desc: error },
             ];
+        }
+        function recordMColorComfortUserSetting(value) {
+            if (!value || typeof value !== 'object') return;
+            const d = state.mColorDiagnostic;
+            d.comfortUserSetting = {
+                brightnessLightsaber: value.statusBrightnessLightsaberInteriorLighting,
+                brightnessAlev4: value.statusBrightnessALEV4InteriorLighting,
+                huePanoramicRoof: value.statusHueValueIndividualGroupPanoramicRoof,
+                modeLightsaber: value.statusModeLightsaberInteriorLighting,
+                modeAlev4: value.statusModeALEV4InteriorLighting,
+                touchCommandSia: value.statusTouchCommandSIACharging,
+                condition: value.statusConditionAmbienteInteriorLighting,
+            };
+            d.comfortUserUpdatedAt = Date.now();
+            if (d.open) queueRender();
+        }
+        function registryEntries(value) {
+            if (Array.isArray(value)) return value;
+            if (value && Array.isArray(value.data)) return value.data;
+            if (value && Array.isArray(value.value)) return value.value;
+            if (value && typeof value.length === 'number' && value.length >= 0) {
+                try { return Array.prototype.slice.call(value); } catch (e) { /* report below */ }
+            }
+            return null;
+        }
+        function recordMColorRegistry(value) {
+            const d = state.mColorDiagnostic;
+            const entries = registryEntries(value);
+            d.registryUpdatedAt = Date.now();
+            if (!entries) {
+                d.registryCount = null; d.registryRows = [];
+                diagnosticError('ColorRegistry payload', 'unexpected value shape: ' + diagnosticText(value));
+                return;
+            }
+            d.registryCount = entries.length;
+            d.registryRows = entries.slice(0, 250).map((entry, index) => {
+                const item = entry && typeof entry === 'object' ? entry : {};
+                const name = diagnosticText(item.colorname || ('ENTRY ' + (index + 1)));
+                return {
+                    name: name,
+                    desc: 'set=' + diagnosticText(item.colorSet) + ' · raw Float RGBA='
+                        + diagnosticText(item.r) + '/' + diagnosticText(item.g) + '/'
+                        + diagnosticText(item.b) + '/' + diagnosticText(item.a),
+                };
+            });
+            if (entries.length > 250) diagnosticError('ColorRegistry payload', 'schema permits up to 250 entries; extra entries omitted');
+            if (d.open) queueRender();
+        }
+        function mColorRegistryRows() {
+            const rows = state.mColorDiagnostic.registryRows;
+            return rows.length ? rows : [{ name: 'NO REGISTRY ENTRIES', desc: 'SERVICE AVAILABLE BUT NO COLOR DATA WAS RETURNED' }];
         }
         function shutdownMColorDiagnosticWatches() {
             const watches = mColorDiagnosticWatches.splice(0);
@@ -501,8 +583,11 @@ mgu.run({
             const generation = ++d.generation;
             shutdownMColorDiagnosticWatches();
             d.starting = true; d.errors = [];
-            d.comfortAvailable = null; d.ambientAvailable = null;
-            d.ambient = Object.create(null);
+            d.comfortAvailable = null; d.ambientAvailable = null; d.registryAvailable = null;
+            d.ambient = Object.create(null); d.ambientUpdatedAt = 0;
+            d.comfortStatus = null; d.comfortUpdatedAt = 0; d.comfortSource = '—';
+            d.comfortUserSetting = null; d.comfortUserUpdatedAt = 0;
+            d.registryRows = []; d.registryCount = null; d.registryUpdatedAt = 0;
             queueRender();
             const diagnosticEvent = (event) => {
                 if (!d.open || generation !== d.generation || !event) return;
@@ -510,16 +595,23 @@ mgu.run({
                 if (event.stage === 'provider_availability') {
                     if (event.iface === LIGHT) d.comfortAvailable = !!detail.available;
                     if (event.iface === AMBIENT_LIGHT) d.ambientAvailable = !!detail.available;
+                    if (event.iface === COLOR_REGISTRY) d.registryAvailable = !!detail.available;
                 }
                 if (event.iface === LIGHT && event.stage === 'payload_received'
                     && detail.field === 'statusAmbientLightInteriorColour') d.comfortSource = detail.source || 'SOME/IP status';
-                if (/_error$/.test(event.stage) && detail.error)
-                    diagnosticError((event.iface === LIGHT ? 'ComfortFunctionIuK' : 'AmbientLight') + ' ' + (detail.field || event.stage), detail.error);
+                if (/_error$/.test(event.stage) && detail.error) {
+                    const service = event.iface === LIGHT ? 'ComfortFunctionIuK'
+                        : event.iface === AMBIENT_LIGHT ? 'AmbientLight' : 'ColorRegistry';
+                    diagnosticError(service + ' ' + (detail.field || event.stage), detail.error);
+                }
             };
             const specs = [
                 [LIGHT, {
                     statusAmbientLightInteriorColour: (value) => {
                         if (d.open && generation === d.generation) recordMColorComfortStatus(value, d.comfortSource);
+                    },
+                    statusAmbientLightInteriorUserSetting: (value) => {
+                        if (d.open && generation === d.generation) recordMColorComfortUserSetting(value);
                     },
                 }, { pollMs: 2500, onAvailability: (available) => {
                     if (d.open && generation === d.generation) { d.comfortAvailable = !!available; queueRender(); }
@@ -527,11 +619,19 @@ mgu.run({
                 [AMBIENT_LIGHT, {
                     mModeAmbientLightActive: (value) => { if (d.open && generation === d.generation) { d.ambient.mModeAmbientLightActive = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
                     currentInteriorLightProfile: (value) => { if (d.open && generation === d.generation) { d.ambient.currentInteriorLightProfile = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
+                    startupInteriorLightProfile: (value) => { if (d.open && generation === d.generation) { d.ambient.startupInteriorLightProfile = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
+                    currentProgram: (value) => { if (d.open && generation === d.generation) { d.ambient.currentProgram = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
+                    dimmedWhileDrivingAtNight: (value) => { if (d.open && generation === d.generation) { d.ambient.dimmedWhileDrivingAtNight = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
                     brightnessAmbientLight: (value) => { if (d.open && generation === d.generation) { d.ambient.brightnessAmbientLight = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
                     brightnessAmbientContourLine: (value) => { if (d.open && generation === d.generation) { d.ambient.brightnessAmbientContourLine = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
                     ambientLightActive: (value) => { if (d.open && generation === d.generation) { d.ambient.ambientLightActive = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
                 }, { onAvailability: (available) => {
                     if (d.open && generation === d.generation) { d.ambientAvailable = !!available; queueRender(); }
+                } }],
+                [COLOR_REGISTRY, {
+                    colorRegistry: (value) => { if (d.open && generation === d.generation) recordMColorRegistry(value); },
+                }, { onAvailability: (available) => {
+                    if (d.open && generation === d.generation) { d.registryAvailable = !!available; queueRender(); }
                 } }],
             ];
             try {
@@ -546,14 +646,21 @@ mgu.run({
                         }
                         mColorDiagnosticWatches.push(result);
                         if (result.error) {
-                            if (iface === LIGHT) d.comfortAvailable = false; else d.ambientAvailable = false;
-                            diagnosticError(iface === LIGHT ? 'ComfortFunctionIuK watch' : 'AmbientLight watch', result.error);
+                            if (iface === LIGHT) d.comfortAvailable = false;
+                            else if (iface === AMBIENT_LIGHT) d.ambientAvailable = false;
+                            else d.registryAvailable = false;
+                            diagnosticError(iface === LIGHT ? 'ComfortFunctionIuK watch'
+                                : iface === AMBIENT_LIGHT ? 'AmbientLight watch' : 'ColorRegistry watch', result.error);
                         } else if (iface === LIGHT) d.comfortAvailable = !!result.available;
-                        else d.ambientAvailable = !!result.available;
+                        else if (iface === AMBIENT_LIGHT) d.ambientAvailable = !!result.available;
+                        else d.registryAvailable = !!result.available;
                         return result;
                     } catch (e) {
-                        if (iface === LIGHT) d.comfortAvailable = false; else d.ambientAvailable = false;
-                        diagnosticError(iface === LIGHT ? 'ComfortFunctionIuK watch' : 'AmbientLight watch', e);
+                        if (iface === LIGHT) d.comfortAvailable = false;
+                        else if (iface === AMBIENT_LIGHT) d.ambientAvailable = false;
+                        else d.registryAvailable = false;
+                        diagnosticError(iface === LIGHT ? 'ComfortFunctionIuK watch'
+                            : iface === AMBIENT_LIGHT ? 'AmbientLight watch' : 'ColorRegistry watch', e);
                         return null;
                     }
                 }));
@@ -1476,8 +1583,15 @@ mgu.run({
         async function pickDetailItem(i) {
             if (state.detail === 'mColorDiag') {
                 if (i === 0) return startMColorDiagnosticWatches();
+                if (i === 15) {
+                    state.mColorDiagnostic.scroll = state.detailScroll;
+                    state.detail = 'mColorRegistry'; state.detailScroll = 0; state.detailFocus = 0;
+                    if (ctx.display) { ctx.display.focusKey = 'tgt:drow0'; lastFocusKey = ctx.display.focusKey; }
+                    queueRender(); return;
+                }
                 return;
             }
+            if (state.detail === 'mColorRegistry') return;
             if (state.detail === 'zones') {
                 if (i === 0) return toggleZoneLighting();
                 const z = ZONE_ROWS[i - 1]; if (!z) return;
@@ -1605,6 +1719,12 @@ mgu.run({
             panelZones: () => { state.zoneColorReturn = null; state.detail = 'zones'; state.detailScroll = 0; state.detailFocus = 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow0'; lastFocusKey = ctx.display.focusKey; } queueRender(); },
             detailBack: () => {
                 const prev = state.detail;
+                if (prev === 'mColorRegistry') {
+                    state.detail = 'mColorDiag'; state.detailScroll = state.mColorDiagnostic.scroll || 0;
+                    state.detailFocus = 15;
+                    if (ctx.display) { ctx.display.focusKey = 'tgt:drow15'; lastFocusKey = ctx.display.focusKey; }
+                    queueRender(); return;
+                }
                 if (prev === 'mColorDiag') closeMColorDiagnostics();
                 // Combos lives inside the Color page: back returns to Color, then to the main list
                 if (prev === 'combos') {
@@ -1948,10 +2068,11 @@ mgu.run({
             if (state.detail) {
                 // Full page replaces the panel: back arrow returns to INTERIOR LIGHTING
                 const detailItems = state.detail === 'mColorDiag' ? mColorDiagnosticRows()
+                    : state.detail === 'mColorRegistry' ? mColorRegistryRows()
                     : state.detail === 'combos' ? COMBOS : state.detail === 'zones' ? zoneDetailRows()
                     : [{ name: 'Combos', nav: true }].concat(PALETTE);
                 const zoneHeaderColors = state.detail === 'zones' ? zonePreviewColors() : null;
-                let detailSel = state.detail === 'mColorDiag' ? -1
+                let detailSel = state.detail === 'mColorDiag' || state.detail === 'mColorRegistry' ? -1
                     : state.detail === 'combos' ? state.selCombo : state.detail === 'zones' ? (state.zoneLightingEnabled ? 0 : -1)
                     : (state.selColour >= 0 ? state.selColour + 1 : -1);
                 if (state.detail === 'colours' && state.zoneColorReturn) {
@@ -1960,13 +2081,14 @@ mgu.run({
                     detailSel = selectedPalette >= 0 ? selectedPalette + 1 : -1;
                 }
                 const det = Sheet.drawDetailPanel(cv, G, {
-                    title: state.detail === 'mColorDiag' ? 'M COLOR DIAGNOSTICS' : 'INTERIOR LIGHTING',
+                    title: state.detail === 'mColorDiag' ? 'M COLOR DIAGNOSTICS'
+                        : state.detail === 'mColorRegistry' ? 'BMW COLOR REGISTRY' : 'INTERIOR LIGHTING',
                     items: detailItems,
                     sel: detailSel,
                     focus: state.detailFocus,
                     imageInfo: state.detail === 'zones' ? { name: zoneName() } : null,
                     imageSwatches: zoneHeaderColors ? [zoneHeaderColors.dashboard, zoneHeaderColors.doors, zoneHeaderColors.footwell] : null,
-                    rowH: state.detail === 'mColorDiag' ? 50 : state.detail === 'zones' ? 72 : undefined,
+                    rowH: state.detail === 'mColorDiag' || state.detail === 'mColorRegistry' ? 50 : state.detail === 'zones' ? 72 : undefined,
                     scroll: state.detailScroll, extra: cv.extra || 0,
                 });
                 state.detailScrollMax = det.scroll.max;
@@ -1974,7 +2096,7 @@ mgu.run({
                 scr = det.scroll;
                 lastDetGeom = { offsets: det.offsets, rowHs: det.rowHs, avail: det.avail };
                 if (det.back) hitboxes.push({ x: det.back.x, y: det.back.y, w: det.back.w, h: det.back.h, key: 'detailBack' });
-                if (state.detail === 'mColorDiag') {
+                if (state.detail === 'mColorDiag' || state.detail === 'mColorRegistry') {
                     const back = { x: 514, y: 54, w: 116, h: 34 };
                     Sheet.drawChip(cv, G, back.x, back.y, back.w, 'BACK', { h: back.h, run: actions.detailBack, key: 'mcolor-back', size: 11 });
                     hitboxes.push(Object.assign({ key: 'detailBack' }, back));

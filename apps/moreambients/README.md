@@ -6,7 +6,7 @@ MoreAmbients is an iDrive 7 canvas app with three lighting views:
 - **BMW palette** requests one of BMW's 12 factory colour slots through `ComfortFunctionIuK` and shows the slot reported by the vehicle.
 - **Colour Studio** offers custom RGB, brightness, zone choice, and six saved looks. Applying a Studio colour now saves the exact colour and target zones for reliable reapplication after a rescan or app restart.
 - **Zones** stores independent dashboard, door and footwell colours. Combos can colour all lights, only the dashboard and doors, or only the footwells; each option previews the relevant combo colour.
-- **M Color Diagnostics** reads the OEM layer values and optional ambient-light profile without sending color or brightness commands. Its page shows the three requested M colors as “not sent” until the vehicle's layer encoding and physical-zone mapping are confirmed.
+- **M Color Diagnostics** reads OEM layer values, ambient-light profiles and the BMW color registry without sending color or brightness commands. Its pages show returned RGBA floats and the three requested M colors as “not sent” until the vehicle's layer encoding and physical-zone mapping are confirmed.
 
 A single colour selected from either palette is applied to every discovered healthy light module, regardless of the last zone selected. To keep different dashboard, door and footwell colours, turn on **Ambient Zones Lighting** and edit each zone there. Picking a global colour or combo exits that zone override so a later scan cannot restore stale zone colours.
 

@@ -12,6 +12,9 @@ The values below were extracted from the supplied `someip-interfaces (2).json`.
 - `ambientLightInteriorColour`: getter ID `0`, setter ID `26` (`0x001A`), no notifier; aggregate type `ControlAmbientLightInteriorColourWrapper`.
 - `statusAmbientLightInteriorColour`: getter ID `3` (`0x0003`), notifier ID `32771` (`0x8003`), event group `1`, no setter; aggregate type `StatusAmbientLightInteriorColourWrapper`.
 - Both fields use instance ID `1`. The schema does not mark the control setter reliable; the status getter and notifier are also marked `reliable: false`.
+- `ambientLightInteriorUserSetting`: getter ID `0`, setter ID `27`, no notifier; aggregate type `ControlAmbientLightInteriorUserSettingWrapper`.
+- `statusAmbientLightInteriorUserSetting`: getter ID `4`, notifier ID `32772` (`0x8004`), event group `1`, no setter; aggregate type `StatusAmbientLightInteriorUserSettingWrapper`.
+- The UserSetting status contains separate raw values for Lightsaber/ALEV4 brightness and modes, panoramic-roof hue, SIA charging touch command, and ambient condition. It can help identify related light subsystems; it does not define the M Color layer mapping.
 - Control and status members are aggregate fields, not independent SOME/IP fields or setters:
   - Hue: `UInt16`, default `4095`.
   - `control/statusHueValueLayer1IndividualGroup`, Layer 2 and Layer 3: each `UInt8`, default `255`.
@@ -30,16 +33,26 @@ The schema establishes the UInt8 container range only. It does not define layer 
 - `brightnessAmbientLight`: getter `23`, setter `24`, notifier `32791` (`0x8017`), event groups `1,2`.
 - `brightnessAmbientContourLine`: getter `25`, setter `26`, notifier `32793` (`0x8019`), event group `1`.
 - `ambientLightActive`: getter `3`, setter `4`, notifier `32771` (`0x8003`), event groups `1,2`.
+- `startupInteriorLightProfile`: getter `7`, setter `8`, notifier `32775` (`0x8007`), event group `1`; same profile struct as the current profile.
+- `currentProgram`: getter `30`, setter `31`, notifier `32796` (`0x801C`), event group `1`; enum `OFF=0`, `VITALIZE=1`, `RELAX=2`.
+- `dimmedWhileDrivingAtNight`: getter `27`, setter `28`, notifier `32795` (`0x801B`), event group `1`.
 - Profile enum: `NONE=0`, `COLOUR1..COLOUR50=1..50`, and `MODE0..MODE20=80..100`.
-- All five fields use instance ID `1`; the listed getters/notifiers/setters are marked `reliable: false` in the schema.
+- All listed fields use instance ID `1`; their getters/notifiers/setters are marked `reliable: false` in the schema.
 
 MoreAmbients declares these AmbientLight fields read-only (`rs`) and never calls their setters. Their brightness values are shown raw; the schema does not establish a conversion to a user percentage.
+
+### `de.bmw.infotainment.colorregistryupdateservice.ColorRegistryUpdateService`
+
+- Service ID `45251` (`0xB0C3`), interface version `1.0`, instance `1`.
+- `colorRegistry`: getter ID `1`, notifier ID `32769` (`0x8001`), event group `1`, no setter; the schema marks both reliable.
+- The value is an array (maximum 250 entries) of `{ colorname: Utf8D, r: Float, g: Float, b: Float, a: Float, colorSet: Utf8D }`.
+- The diagnostic page exposes the returned names, color sets, and channel values as raw data. The schema does not document the Float range or prove that this HMI color registry is the command encoding used by the body LED controller.
 
 ## Why arbitrary M colors are not sent yet
 
 The existing M Color implementation used BDC LIN writes (`2E DA5E` / `2E E3D1`) and inferred a physical-zone map from module locations. That code path has no confirmed on-car mapping for this HU_MGU/G20, so it is no longer reachable from the M Color row. The `ComfortFunctionIuK` aggregate offers three byte-sized layer values but the supplied schema alone cannot establish how to encode three independent RGB colors. Converting the requested HEX values, swapping RGB/BGR, or guessing gamma/brightness now would still be an unverified command.
 
-The diagnostic page watches the OEM status aggregate and optional AmbientLight profile/brightness only. It shows the target BMW colors as **not sent**, the raw returned values, service availability, observations while the user changes colors in the BMW menu, errors, and the explicitly unknown layer-to-zone map. The refresh button restarts only those read-only watchers. No BDC fallback is activated.
+The diagnostic pages watch the OEM status aggregates, AmbientLight current/startup profile and temporary light program, and ColorRegistry. They show target BMW colors as **not sent**, raw returned values, service availability, observations while the user changes colors in the BMW menu, errors, and the explicitly unknown layer-to-zone map. The ColorRegistry page shows raw Float RGBA entries. The refresh button restarts only those read-only watchers. No BDC fallback is activated.
 
 ## Reference comparison and license handling
 
