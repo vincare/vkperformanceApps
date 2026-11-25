@@ -222,11 +222,7 @@ function drawInteriorLighting(cv, G, opts) {
     // 1. Color + swatch(es): a picked combo shows its two zone colours, a colour one box
     const c1 = rowTop[1] + rows[1] / 2;
     cv.text('Color', lx, c1 + 8, 25, txtC(1), { font: 'bold', literal: true });
-    if (opts.featureLighting && opts.featureLighting.key === 'mColor') {
-        drawSwatch(cv, G, rx - 94, c1 - 14, 28, 28, opts.featureLighting.dashboard);
-        drawSwatch(cv, G, rx - 60, c1 - 14, 28, 28, opts.featureLighting.door);
-        drawSwatch(cv, G, rx - 26, c1 - 14, 28, 28, opts.featureLighting.footwell);
-    } else if (opts.featureLighting) {
+    if (opts.featureLighting) {
         drawSwatch(cv, G, rx - 96, c1 - 18, 96, 36, opts.featureLighting.dashboard);
     } else if (opts.combo) {
         drawSwatch(cv, G, rx - 132, c1 - 18, 62, 36, opts.combo.c1);   // dash · left
@@ -268,7 +264,7 @@ function drawInteriorLighting(cv, G, opts) {
     // 5..9: plain toggle rows
     const plain = [
         ['Reduced for night driving', 'night', !!opts.night], ['Dynamic light', 'dynamic', !!opts.dynamic],
-        ['M Color Mode', 'mColorMode', !!(opts.features && opts.features.mColor)],
+        ['M Color Diagnostics', 'mColorMode', false],
         ['Comfort Mode', 'comfortMode', !!(opts.features && opts.features.comfort)],
         ['Sport Mode', 'sportMode', !!(opts.features && opts.features.sport)],
         ['Eco Mode', 'ecoMode', !!(opts.features && opts.features.eco)]];
@@ -276,7 +272,10 @@ function drawInteriorLighting(cv, G, opts) {
         const i = 5 + k, cy = rowTop[i] + rows[i] / 2;
         cv.text(label, lx, cy + 8, 25, txtC(i), { font: 'bold', literal: true });
         const on = plain[k][2];
-        id7Toggle(cv, G, rx - 52, cy - 12, on, i >= 7);
+        if (i === 7) {
+            cv.line(rx - 18, cy - 8, rx - 8, cy, 2.5, txtC(i));
+            cv.line(rx - 8, cy, rx - 18, cy + 8, 2.5, txtC(i));
+        } else id7Toggle(cv, G, rx - 52, cy - 12, on, i >= 7);
     });
     cv.noclip();
 
@@ -435,7 +434,7 @@ function drawDetailPanel(cv, G, opts) {
     cv.fillRect(px, py, pw, headH, G.withAlpha('#262930', 0.92));
     cv.line(px, py, px + pw, py, 1.4, G.withAlpha('#cfd8ec', 0.55));
     const bcy = py + headH / 2;
-    cv.text('INTERIOR LIGHTING', lx - 14, bcy + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
+    cv.text(opts.title || 'INTERIOR LIGHTING', lx - 14, bcy + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
     cv.line(px, top0, px + pw, top0, 1, G.withAlpha('#9aa0ac', 0.14));
     const back = null;
 

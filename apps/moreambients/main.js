@@ -11,6 +11,7 @@ const path = require('path');
 
 const W = 1600, H = 520;
 const LIGHT = 'de.bmw.infotainment.misc.ComfortFunctionIuK';
+const AMBIENT_LIGHT = 'de.bmw.body.interiorillumination.AmbientLight';
 const FES = 'de.bmw.infotainment.drivingexcitement.FES';
 const BDC = 0x40;
 const BUSES = [
@@ -43,8 +44,6 @@ const LOWER_LOC = new Set([0x01, 0x02, 0x03, 0x04, 0x07, 0x08, 0x0b, 0x0e, 0x0f,
 // BMW BDC LIN location IDs from the vehicle's own ambient-light map.
 const DOOR_LOC = new Set([0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
     0x21, 0x22, 0x3f, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x62, 0x63, 0x64, 0x65]);
-// Only the four handle modules get the M blue; door strips stay with the dashboard colour.
-const DOOR_HANDLE_LOC = new Set([0x07, 0x0e, 0x21, 0x22]);
 const FOOTWELL_LOC = new Set([0x01, 0x02, 0x03, 0x04]);
 const M_COLOR = {
     dashboard: '#0066B1', door: '#003D78', footwell: '#E22718',
@@ -198,12 +197,20 @@ mgu.run({
             zoneLightingEnabled: false, zoneColorReturn: null, zoneRestorePending: false,
             favorites: [], favorite: 0, upperRead: null, lowerRead: null, customUpper: null, customLower: null, customOther: null,
             features: { mColor: false, comfort: false, sport: false, eco: false },
-            driveMode: null, activeFeatureLighting: null, mColorReturnSlot: null, modeSyncPending: false, modeSyncBusy: false,
+            driveMode: null, activeFeatureLighting: null, modeSyncPending: false, modeSyncBusy: false,
+            mColorDiagnostic: {
+                open: false, generation: 0, starting: false,
+                comfortAvailable: null, comfortStatus: null, comfortUpdatedAt: 0, comfortSource: '—',
+                ambientAvailable: null, ambient: Object.create(null), ambientUpdatedAt: 0,
+                history: [], errors: [], legacyMColorSuppressed: false,
+                setterResponse: 'NOT SENT · READ-ONLY DIAGNOSTICS',
+            },
             customByLocation: Object.create(null),
         };
         let stopped = false, renderTimer = null, autoScanTimer = null, renderQueued = false, loopOwnsRenders = false;
         let diagInitPromise = null, bgArtLoaded = false, bgArtLoading = false, bgArtLoadTimer = null;
         let pendingApplyTimer = null;
+        let mColorDiagnosticWatches = [];
         let lastAction = Object.create(null), hitboxes = [], wheelGeom = null;
         let lastHudGeom = null, lastDetGeom = null, lastFocusKey = null, focusPoll = null;
         let ambientTouchDown = null, ambientControlTouchDown = null;
@@ -220,10 +227,9 @@ mgu.run({
         const zoneName = () => state.zone === 'all' ? 'ALL LIGHTS' : state.zone === 'upper' ? 'UPPER / TRIM' : 'LOWER / FOOTWELLS';
         const zoneTargets = () => state.zone === 'all' ? ['upper', 'lower', 'other'] : [state.zone];
         const validHex = (value) => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
-        const anyAutoFeature = () => !!(state.features.mColor || state.features.comfort || state.features.sport || state.features.eco);
+        const anyAutoFeature = () => !!(state.features.comfort || state.features.sport || state.features.eco);
         function desiredFeatureLighting() {
             if (!state.oemEnabled) return null;
-            if (state.features.mColor) return { key: 'mColor', dashboard: M_COLOR.dashboard, door: M_COLOR.door, footwell: M_COLOR.footwell };
             if (state.driveMode && state.features[state.driveMode] && MODE_RGB[state.driveMode]) {
                 const c = hex(MODE_RGB[state.driveMode]);
                 return { key: state.driveMode, dashboard: c, door: c, footwell: c };
@@ -334,11 +340,13 @@ mgu.run({
                 state.selCombo = isFiniteNumber(saved.selCombo) ? saved.selCombo : -1;
                 state.previewChoice = saved.previewChoice || null;
                 if (saved.features && typeof saved.features === 'object') {
-                    state.features.mColor = !!saved.features.mColor;
+                    state.mColorDiagnostic.legacyMColorSuppressed = !!saved.features.mColor;
                     state.features.comfort = !!saved.features.comfort;
                     state.features.sport = !!saved.features.sport;
                     state.features.eco = !!saved.features.eco;
-                } else if (['mColor', 'comfort', 'sport', 'eco'].indexOf(saved.featureMode) >= 0) {
+                } else if (saved.featureMode === 'mColor') {
+                    state.mColorDiagnostic.legacyMColorSuppressed = true;
+                } else if (['comfort', 'sport', 'eco'].indexOf(saved.featureMode) >= 0) {
                     state.features[saved.featureMode] = true;
                 }
                 if (saved.zoneColors && typeof saved.zoneColors === 'object') {
@@ -374,6 +382,212 @@ mgu.run({
             } catch (e) { log.warn('look persist: ' + shortError(e)); }
         }
 
+        function diagnosticText(value) {
+            if (value === undefined || value === null || value === '') return 'WAITING FOR VEHICLE VALUE';
+            if (typeof value === 'object') {
+                try { return JSON.stringify(value); } catch (e) { return '[unreadable value]'; }
+            }
+            return String(value);
+        }
+        function diagnosticError(label, error) {
+            const d = state.mColorDiagnostic;
+            d.errors.unshift(label + ': ' + shortError(error));
+            if (d.errors.length > 5) d.errors.length = 5;
+            queueRender();
+        }
+        function recordMColorComfortStatus(value, source) {
+            if (!value || typeof value !== 'object') return;
+            const d = state.mColorDiagnostic;
+            const sample = {
+                hue: value.statusHueInteriorLighting,
+                menu: value.statusMenuAmbientePanoramicRoofInteriorLighting,
+                layer1: value.statusHueValueLayer1IndividualGroup,
+                layer2: value.statusHueValueLayer2IndividualGroup,
+                layer3: value.statusHueValueLayer3IndividualGroup,
+                brightness: value.statusBrightnessValueBrightnessOffsetAmbientePanoramicRoofInteriorLighting,
+                mode: value.statusModeAmbientePanoramicRoofInteriorLighting,
+                dynamic: value.statusDynamicInteriorLighting,
+                dynamicAmbiente: value.statusDynamicAmbienteIinteriorLighting,
+            };
+            const key = JSON.stringify(sample);
+            const previous = d.history[0];
+            d.comfortStatus = sample;
+            d.comfortUpdatedAt = Date.now();
+            d.comfortSource = source || d.comfortSource || 'SOME/IP status';
+            if (!previous || previous.key !== key) {
+                d.history.unshift({ key, sample, at: d.comfortUpdatedAt });
+                if (d.history.length > 6) d.history.length = 6;
+            }
+            if (d.open) queueRender();
+        }
+        function diagnosticFieldText(field) {
+            const d = state.mColorDiagnostic;
+            if (!d.comfortStatus) return 'WAITING FOR ComfortFunctionIuK STATUS';
+            return diagnosticText(d.comfortStatus[field]);
+        }
+        function diagnosticProfileText() {
+            const value = state.mColorDiagnostic.ambient.currentInteriorLightProfile;
+            if (value === undefined || value === null) return 'WAITING FOR AmbientLight PROFILE';
+            const id = value && typeof value === 'object' ? value.currentLightProfileId : value;
+            if (typeof id === 'string') return diagnosticText(id);
+            if (typeof id === 'number') {
+                if (id === 0) return 'NONE (0)';
+                if (id >= 1 && id <= 50) return 'COLOUR' + id + ' (' + id + ')';
+                if (id >= 80 && id <= 100) return 'MODE' + (id - 80) + ' (' + id + ')';
+                return 'UNKNOWN PROFILE (' + id + ')';
+            }
+            return diagnosticText(value);
+        }
+        function diagnosticAvailability(value) {
+            return value === true ? 'AVAILABLE' : value === false ? 'UNAVAILABLE' : 'CHECKING';
+        }
+        function diagnosticUpdatedAt(timestamp) {
+            if (!timestamp) return 'NO VALUE RECEIVED';
+            const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+            return 'UPDATED ' + seconds + 's AGO';
+        }
+        function mColorDiagnosticRows() {
+            const d = state.mColorDiagnostic;
+            const ambient = d.ambient;
+            const mode = ambient.mModeAmbientLightActive;
+            const active = ambient.ambientLightActive;
+            const boolText = (v) => v === true ? 'ON' : v === false ? 'OFF' : 'UNKNOWN';
+            const history = d.history.slice(0, 2).map((h) =>
+                'slot=' + diagnosticText(h.sample.menu) + ' hue=' + diagnosticText(h.sample.hue)
+                + ' L1/L2/L3=' + diagnosticText(h.sample.layer1) + '/' + diagnosticText(h.sample.layer2) + '/' + diagnosticText(h.sample.layer3))
+                .join(' · ');
+            const error = d.errors.length ? d.errors[0] : 'NONE REPORTED';
+            return [
+                { name: 'REFRESH READS', desc: d.starting ? 'CONNECTING · READ-ONLY SOME/IP GETS' : d.legacyMColorSuppressed
+                    ? 'OLD M COLOR AUTO-APPLY BLOCKED · RESTART READ-ONLY WATCH' : 'RESTART THE READ-ONLY PROFILE WATCH', nav: true },
+                { name: 'SERVICE AVAILABILITY', desc: 'ComfortFunctionIuK ' + diagnosticAvailability(d.comfortAvailable)
+                    + ' · AmbientLight ' + diagnosticAvailability(d.ambientAvailable) },
+                { name: 'OTHER APP OVERRIDE', desc: state.activeCustom
+                    ? 'TEMPORARY BDC COLOR STILL TRACKED · LET IT EXPIRE BEFORE OEM COMPARISON'
+                    : 'NO TEMPORARY BDC COLOR CURRENTLY TRACKED' },
+                { name: 'OEM SLOT / HUE · RAW', desc: diagnosticFieldText('menu') + ' · hue=' + diagnosticFieldText('hue')
+                    + ' · ' + d.comfortSource + ' · ' + diagnosticUpdatedAt(d.comfortUpdatedAt) },
+                { name: 'LAYER 1 RAW · UInt8', desc: 'statusHueValueLayer1IndividualGroup = ' + diagnosticFieldText('layer1') },
+                { name: 'LAYER 2 RAW · UInt8', desc: 'statusHueValueLayer2IndividualGroup = ' + diagnosticFieldText('layer2') },
+                { name: 'LAYER 3 RAW · UInt8', desc: 'statusHueValueLayer3IndividualGroup = ' + diagnosticFieldText('layer3') },
+                { name: 'PROFILE / MODE', desc: diagnosticProfileText() + ' · M Mode ' + boolText(mode) + ' · ambient ' + boolText(active)
+                    + ' · ' + diagnosticUpdatedAt(d.ambientUpdatedAt) },
+                { name: 'CONTROL MODES · RAW', desc: 'mode=' + diagnosticFieldText('mode') + ' · dynamic=' + diagnosticFieldText('dynamic')
+                    + ' · ambient dynamic=' + diagnosticFieldText('dynamicAmbiente') },
+                { name: 'BRIGHTNESS · RAW UInt8', desc: 'ambient=' + diagnosticText(ambient.brightnessAmbientLight)
+                    + ' · contour=' + diagnosticText(ambient.brightnessAmbientContourLine)
+                    + ' · Comfort offset=' + diagnosticFieldText('brightness') },
+                { name: 'TARGET DASHBOARD', desc: '#0066B1 · RGB(0, 102, 177) · NOT SENT', c1: M_COLOR.dashboard },
+                { name: 'TARGET DOOR HANDLES', desc: '#003D78 · RGB(0, 61, 120) · NOT SENT', c1: M_COLOR.door },
+                { name: 'TARGET FOOTWELL', desc: '#E22718 · RGB(226, 39, 24) · NOT SENT', c1: M_COLOR.footwell },
+                { name: 'PHYSICAL ZONE MAP', desc: 'LAYER 1/2/3 → DASH / HANDLES / FOOTWELL: UNKNOWN IN JSON' },
+                { name: 'VALUE ENCODING', desc: 'UInt8 only defines 0–255; meaning, RGB/BGR, gamma and scaling are undocumented' },
+                { name: 'SETTER RESPONSE', desc: d.setterResponse },
+                { name: 'OBSERVED OEM CHANGES', desc: history || 'CHANGE BMW FACTORY COLOR WHILE THIS PAGE IS OPEN' },
+                { name: 'LATEST ERROR', desc: error },
+            ];
+        }
+        function shutdownMColorDiagnosticWatches() {
+            const watches = mColorDiagnosticWatches.splice(0);
+            watches.forEach((sub) => {
+                const index = ctx._moreAmbientWatches.indexOf(sub);
+                if (index >= 0) ctx._moreAmbientWatches.splice(index, 1);
+                try { if (sub && sub.shutdown) Promise.resolve(sub.shutdown()).catch((e) => diagnosticError('watch shutdown', e)); }
+                catch (e) { diagnosticError('watch shutdown', e); }
+            });
+        }
+        async function startMColorDiagnosticWatches() {
+            const d = state.mColorDiagnostic;
+            const generation = ++d.generation;
+            shutdownMColorDiagnosticWatches();
+            d.starting = true; d.errors = [];
+            d.comfortAvailable = null; d.ambientAvailable = null;
+            d.ambient = Object.create(null);
+            queueRender();
+            const diagnosticEvent = (event) => {
+                if (!d.open || generation !== d.generation || !event) return;
+                const detail = event.detail || {};
+                if (event.stage === 'provider_availability') {
+                    if (event.iface === LIGHT) d.comfortAvailable = !!detail.available;
+                    if (event.iface === AMBIENT_LIGHT) d.ambientAvailable = !!detail.available;
+                }
+                if (event.iface === LIGHT && event.stage === 'payload_received'
+                    && detail.field === 'statusAmbientLightInteriorColour') d.comfortSource = detail.source || 'SOME/IP status';
+                if (/_error$/.test(event.stage) && detail.error)
+                    diagnosticError((event.iface === LIGHT ? 'ComfortFunctionIuK' : 'AmbientLight') + ' ' + (detail.field || event.stage), detail.error);
+            };
+            const specs = [
+                [LIGHT, {
+                    statusAmbientLightInteriorColour: (value) => {
+                        if (d.open && generation === d.generation) recordMColorComfortStatus(value, d.comfortSource);
+                    },
+                }, { pollMs: 2500, onAvailability: (available) => {
+                    if (d.open && generation === d.generation) { d.comfortAvailable = !!available; queueRender(); }
+                } }],
+                [AMBIENT_LIGHT, {
+                    mModeAmbientLightActive: (value) => { if (d.open && generation === d.generation) { d.ambient.mModeAmbientLightActive = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
+                    currentInteriorLightProfile: (value) => { if (d.open && generation === d.generation) { d.ambient.currentInteriorLightProfile = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
+                    brightnessAmbientLight: (value) => { if (d.open && generation === d.generation) { d.ambient.brightnessAmbientLight = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
+                    brightnessAmbientContourLine: (value) => { if (d.open && generation === d.generation) { d.ambient.brightnessAmbientContourLine = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
+                    ambientLightActive: (value) => { if (d.open && generation === d.generation) { d.ambient.ambientLightActive = value; d.ambientUpdatedAt = Date.now(); queueRender(); } },
+                }, { onAvailability: (available) => {
+                    if (d.open && generation === d.generation) { d.ambientAvailable = !!available; queueRender(); }
+                } }],
+            ];
+            try {
+                const results = await Promise.all(specs.map(async ([iface, handlers, options]) => {
+                    try {
+                        const result = await ctx.signals.watch(iface, '1', handlers, log,
+                            Object.assign({}, options, { onDiagnostic: diagnosticEvent }));
+                        if (!result) return null;
+                        if (!d.open || generation !== d.generation) {
+                            if (result.shutdown) Promise.resolve(result.shutdown()).catch(() => {});
+                            return null;
+                        }
+                        mColorDiagnosticWatches.push(result);
+                        if (result.error) {
+                            if (iface === LIGHT) d.comfortAvailable = false; else d.ambientAvailable = false;
+                            diagnosticError(iface === LIGHT ? 'ComfortFunctionIuK watch' : 'AmbientLight watch', result.error);
+                        } else if (iface === LIGHT) d.comfortAvailable = !!result.available;
+                        else d.ambientAvailable = !!result.available;
+                        return result;
+                    } catch (e) {
+                        if (iface === LIGHT) d.comfortAvailable = false; else d.ambientAvailable = false;
+                        diagnosticError(iface === LIGHT ? 'ComfortFunctionIuK watch' : 'AmbientLight watch', e);
+                        return null;
+                    }
+                }));
+                if (d.open && generation === d.generation && results) d.starting = false;
+            } finally {
+                if (d.open && generation === d.generation) { d.starting = false; queueRender(); }
+            }
+        }
+        function openMColorDiagnostics() {
+            state.features.mColor = false;
+            state.activeFeatureLighting = state.activeFeatureLighting && state.activeFeatureLighting.key === 'mColor'
+                ? null : state.activeFeatureLighting;
+            clearInterval(state.oemKeepalive); state.oemKeepalive = null;
+            clearTimeout(state.oemBrightnessTimer); state.oemBrightnessTimer = null;
+            clearTimeout(state.renewTimer); state.renewTimer = null; state.renewInterval = 0;
+            clearTimeout(pendingApplyTimer); pendingApplyTimer = null; state.pendingCustomApply = null;
+            state.detail = 'mColorDiag'; state.detailScroll = 0; state.detailFocus = 0;
+            state.mColorDiagnostic.open = true;
+            if (ctx.display) { ctx.display.focusKey = 'tgt:drow0'; lastFocusKey = 'tgt:drow0'; }
+            queueRender();
+            startMColorDiagnosticWatches().catch((e) => diagnosticError('diagnostic setup', e));
+        }
+        function closeMColorDiagnostics() {
+            const d = state.mColorDiagnostic;
+            d.open = false; d.generation++;
+            d.starting = false;
+            shutdownMColorDiagnosticWatches();
+            if (stopped) return;
+            scheduleOemKeepalive();
+            if (state.activeCustom) scheduleCustomRenewal();
+            retryOemToggleWhenIdle(); retryOemBrightnessWhenIdle();
+            if (state.modeSyncPending) setTimeout(() => syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e))), 0);
+        }
+
         BgArt.setOnUpdate(queueRender);
         function setNotice(text, color) { state.notice = text; state.noticeColor = color || C.muted; queueRender(); }
         function queueRender() {
@@ -387,18 +601,18 @@ mgu.run({
             }, 55);
         }
         function retryOemToggleWhenIdle() {
-            if (!state.oemRetryPending || state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying || stopped) return;
+            if (state.mColorDiagnostic.open || !state.oemRetryPending || state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying || stopped) return;
             if (!state.proxy && !(state.modules.length && state.diag && state.diag.available)) return;
             state.oemRetryPending = false;
             setTimeout(() => { if (!stopped) setOemLightingEnabled(state.oemEnabled); }, 0);
         }
         function retryOemBrightnessWhenIdle() {
-            if (!state.oemBrightnessPending || state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying || stopped) return;
+            if (state.mColorDiagnostic.open || !state.oemBrightnessPending || state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying || stopped) return;
             state.oemBrightnessPending = false;
             clearTimeout(state.oemBrightnessTimer);
             state.oemBrightnessTimer = setTimeout(() => {
                 state.oemBrightnessTimer = null;
-                if (stopped) return;
+                if (stopped || state.mColorDiagnostic.open) { state.oemBrightnessPending = true; return; }
                 if (state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying) {
                     state.oemBrightnessPending = true;
                     return;
@@ -411,6 +625,7 @@ mgu.run({
             clearTimeout(state.oemBrightnessTimer);
             state.oemBrightnessTimer = setTimeout(() => {
                 state.oemBrightnessTimer = null;
+                if (state.mColorDiagnostic.open) { state.oemBrightnessPending = true; return; }
                 if (state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying) return;
                 state.oemBrightnessPending = false;
                 Promise.resolve(applyOemBrightness()).catch((e) => log.warn('ambient brightness: ' + shortError(e)));
@@ -426,6 +641,7 @@ mgu.run({
                 state.renewTimer = null;
                 state.renewInterval = 0;
                 if (stopped || !state.activeCustom) return;
+                if (state.mColorDiagnostic.open) return;
                 if (state.applyBusy || state.scanBusy || state.busy || state.blackoutApplying) {
                     scheduleCustomRenewal(700);
                     return;
@@ -445,13 +661,13 @@ mgu.run({
         // ON keeps the lights lit (and the LIN overrides working: the modules go
         // dark with the car's ambient state), OFF keeps the car side dark.
         function scheduleOemKeepalive() {
-            const need = !!state.proxy && !stopped;
+            const need = !!state.proxy && !stopped && !state.mColorDiagnostic.open;
             if (!need) { clearInterval(state.oemKeepalive); state.oemKeepalive = null; return; }
             if (state.oemKeepalive) return;
             state.oemKeepalive = setInterval(() => {
                 // Factory brightness is global and can overwrite the LIN modules'
                 // per-zone colour/brightness. Custom looks have their own LIN renewal.
-                if (stopped || !state.proxy || state.activeCustom || state.blackoutOverride
+                if (stopped || state.mColorDiagnostic.open || !state.proxy || state.activeCustom || state.blackoutOverride
                     || state.applyBusy || state.busy || state.scanBusy || state.oemSignalBusy || state.oemToggleBusy) return;
                 state.oemSignalBusy = true;
                 const level = state.oemEnabled ? Math.round(effectiveOemBrightness(state.oemBackground) * 2.54) : 0;
@@ -496,16 +712,16 @@ mgu.run({
                             // an unproven zero status cannot tell on from off — keep the app's state
                         }
                         scheduleOemKeepalive();
-                        if (state.oemEnabled && anyAutoFeature() && state.activeFeatureLighting === null) {
+                        if (!state.mColorDiagnostic.open && state.oemEnabled && anyAutoFeature() && state.activeFeatureLighting === null) {
                             setTimeout(() => syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e))), 0);
                         }
                         // OEM menu colour pick (slot changed) while our LIN look is applied
                         // + Ambient lighting ON → overwrite it back. OFF toggle lets OEM through.
-                        if (slotChanged && state.oemEnabled && state.activeFeatureLighting && anyAutoFeature() && !state.oemLockBusy
+                        if (!state.mColorDiagnostic.open && slotChanged && state.oemEnabled && state.activeFeatureLighting && anyAutoFeature() && !state.oemLockBusy
                             && Date.now() - lastOemLockAt > 4000) {
                             lastOemLockAt = Date.now();
                             syncModeLighting(true).catch((e) => log.warn('drive-mode ambience lock: ' + shortError(e)));
-                        } else if (slotChanged && state.oemEnabled && state.look && state.activeCustom && !state.activeFeatureLighting && !state.oemLockBusy
+                        } else if (!state.mColorDiagnostic.open && slotChanged && state.oemEnabled && state.look && state.activeCustom && !state.activeFeatureLighting && !state.oemLockBusy
                             && Date.now() - lastOemLockAt > 4000) {
                             lastOemLockAt = Date.now(); state.oemLockBusy = true;
                             reapplyLook('OEM MENU CHANGE OVERRIDDEN · APP COLOUR KEPT').finally(() => { state.oemLockBusy = false; });
@@ -578,7 +794,7 @@ mgu.run({
                 if (state.pendingCustomApply) schedulePendingCustomApply();
                 else if (state.zoneLightingEnabled && state.modules.length) {
                     setTimeout(() => applyZoneLighting(true, 'ZONE LIGHTING RESTORED'), 0);
-                } else if (state.oemEnabled && anyAutoFeature() && state.modules.length) {
+                } else if (!state.mColorDiagnostic.open && state.oemEnabled && anyAutoFeature() && state.modules.length) {
                     setTimeout(() => syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e))), 0);
                 } else if (state.oemEnabled && state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
             }
@@ -588,6 +804,7 @@ mgu.run({
             return [0, 1, 2].map((i) => Math.round(list.reduce((sum, m) => sum + m.rgb[i], 0) / list.length));
         }
         async function sendFrame(bus, nad, colour) {
+            if (state.mColorDiagnostic.open) return { ok: false, why: 'read-only M Color diagnostics active' };
             const did = BUSES[bus].write;
             const data = frameFor(bus, nad, colour.rgb, colour.brightness, HOLD_SECONDS);
             const reply = await state.diag.physical(BDC, 0x2e, data, 1800, acceptReply(0x2e, did),
@@ -595,6 +812,7 @@ mgu.run({
             return { ok: !!(reply && reply[0] === 0x6e && reply[1] === did[0] && reply[2] === did[1]), why: acceptedText(reply) };
         }
         async function sendRestore(bus, nad) {
+            if (state.mColorDiagnostic.open) return false;
             const did = BUSES[bus].write;
             const data = restoreFrame(bus, nad);
             const reply = await state.diag.physical(BDC, 0x2e, data, 1800, acceptReply(0x2e, did),
@@ -623,11 +841,11 @@ mgu.run({
             return copy;
         }
         function schedulePendingCustomApply() {
-            if (pendingApplyTimer || !state.pendingCustomApply || stopped || state.scanBusy || state.applyBusy || state.busy
+            if (state.mColorDiagnostic.open || pendingApplyTimer || !state.pendingCustomApply || stopped || state.scanBusy || state.applyBusy || state.busy
                 || state.blackoutApplying || state.scan === 'not scanned') return;
             pendingApplyTimer = setTimeout(() => {
                 pendingApplyTimer = null;
-                if (!state.pendingCustomApply || stopped || state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying) return;
+                if (state.mColorDiagnostic.open || !state.pendingCustomApply || stopped || state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying) return;
                 const pending = state.pendingCustomApply;
                 state.pendingCustomApply = null;
                 if (!state.modules.length) {
@@ -639,7 +857,7 @@ mgu.run({
             }, 35);
         }
         async function applyCustom(isRenewal, requestedColour, requestedZones, allowWhileMoving, requestedLabel) {
-            if (stopped) return false;
+            if (stopped || state.mColorDiagnostic.open) return false;
             if (state.applyBusy || state.scanBusy || state.busy) {
                 if (isRenewal && state.activeCustom) scheduleCustomRenewal(700);
                 else if (!isRenewal && !state.blackoutApplying) {
@@ -849,57 +1067,15 @@ mgu.run({
         function makeFeaturePayload(feature) {
             const upperBrightness = state.oemBrightnessTouched ? upperOemBrightness() : effectiveOemBrightness(100);
             const lowerBrightness = effectiveOemBrightness(state.oemBrightnessTouched ? state.oemBackground : 100);
-            if (feature.key !== 'mColor') {
-                const c = MODE_RGB[feature.key].slice();
-                return { byZone: {
-                    upper: { rgb: c, brightness: upperBrightness },
-                    lower: { rgb: c, brightness: lowerBrightness },
-                    other: { rgb: c, brightness: Math.min(lowerBrightness, Math.round((upperBrightness + lowerBrightness) / 2)) },
-                } };
-            }
-            const dashboard = { rgb: hexToRgbBdc(M_COLOR.dashboard), brightness: upperBrightness };
-            const door = { rgb: hexToRgbBdc(M_COLOR.door), brightness: lowerBrightness };
-            const footwell = { rgb: hexToRgbBdc(M_COLOR.footwell), brightness: lowerBrightness };
-            const byLocation = Object.create(null);
-            state.modules.filter((m) => !m.fault).forEach((m) => {
-                byLocation[String(m.location)] = DOOR_HANDLE_LOC.has(m.location) ? door
-                    : FOOTWELL_LOC.has(m.location) ? footwell : dashboard;
-            });
-            return {
-                byZone: { upper: dashboard, lower: footwell, other: dashboard },
-                byLocation,
-            };
-        }
-        async function restoreMColorFactoryProfile() {
-            const slot = state.mColorReturnSlot;
-            const modulesRestored = await restoreBmw();
-            if (slot === null || slot === undefined) {
-                state.mColorReturnSlot = null;
-                return modulesRestored;
-            }
-            if (!state.proxy) {
-                state.mColorReturnSlot = null;
-                if (modulesRestored) setNotice('BMW FACTORY LIGHTING RESTORED · VEHICLE SLOT WAS NOT REPORTED', C.amber);
-                return modulesRestored;
-            }
-            try {
-                // Restore the slot observed before M Color; brightness remains unchanged (255 = no change).
-                await ctx.signals.set(state.proxy, 'ambientLightInteriorColour', factoryRequest(slot));
-                state.slot = slot;
-                state.mColorReturnSlot = null;
-                setNotice(modulesRestored
-                    ? 'PREVIOUS BMW FACTORY PROFILE RESTORED · SLOT ' + String(slot).padStart(2, '0')
-                    : 'FACTORY SLOT RESTORED · SOME MODULES DID NOT CONFIRM RELEASE', modulesRestored ? C.green : C.amber);
-                return modulesRestored;
-            } catch (e) {
-                state.mColorReturnSlot = null;
-                setNotice('BMW MODULES RELEASED · FACTORY SLOT NOT CONFIRMED · ' + shortError(e).slice(0, 42), C.amber);
-                log.warn('M Color factory profile restore: ' + shortError(e));
-                return false;
-            }
+            const c = MODE_RGB[feature.key].slice();
+            return { byZone: {
+                upper: { rgb: c, brightness: upperBrightness },
+                lower: { rgb: c, brightness: lowerBrightness },
+                other: { rgb: c, brightness: Math.min(lowerBrightness, Math.round((upperBrightness + lowerBrightness) / 2)) },
+            } };
         }
         async function syncModeLighting(force) {
-            if (stopped) return false;
+            if (stopped || state.mColorDiagnostic.open) return false;
             if (state.modeSyncBusy) { state.modeSyncPending = true; return false; }
             state.modeSyncBusy = true;
             let result = false;
@@ -914,9 +1090,6 @@ mgu.run({
                     const feature = desiredFeatureLighting();
                     if (feature) {
                         state.oemWantApply = false;
-                        const replacingMColor = feature.key !== 'mColor' && state.activeFeatureLighting && state.activeFeatureLighting.key === 'mColor';
-                        if (feature.key === 'mColor' && (!state.activeFeatureLighting || state.activeFeatureLighting.key !== 'mColor'))
-                            state.mColorReturnSlot = Number.isInteger(state.liveSlot) ? state.liveSlot : null;
                         if (!force && state.activeFeatureLighting && state.activeFeatureLighting.key === feature.key && state.activeCustom && !state.blackoutOverride) {
                             result = true;
                             continue;
@@ -928,17 +1101,15 @@ mgu.run({
                         }
                         const payload = makeFeaturePayload(feature);
                         result = await applyCustom(false, payload, ['upper', 'lower', 'other'], true,
-                            feature.key === 'mColor' ? 'M COLOR · 3 ZONES' : feature.key.toUpperCase() + ' MODE');
+                            feature.key.toUpperCase() + ' MODE');
                         if (result) {
                             state.activeFeatureLighting = feature;
-                            if (replacingMColor) state.mColorReturnSlot = null;
-                            setNotice(feature.key === 'mColor' ? 'M COLOR APPLIED · DASH / DOORS / FOOTWELLS' : feature.key.toUpperCase() + ' MODE COLOUR APPLIED', C.green);
+                            setNotice(feature.key.toUpperCase() + ' MODE COLOUR APPLIED', C.green);
                             queueRender();
                         }
                     } else if (state.activeFeatureLighting) {
-                        const wasMColor = state.activeFeatureLighting.key === 'mColor';
                         state.activeFeatureLighting = null;
-                        result = wasMColor ? await restoreMColorFactoryProfile() : await restoreBmw();
+                        result = await restoreBmw();
                     } else if (state.features.comfort || state.features.sport || state.features.eco) {
                         const waitingFor = ['comfort', 'sport', 'eco'].find((mode) => state.features[mode]);
                         if (waitingFor) setNotice(waitingFor.toUpperCase() + ' MODE COLOUR ARMED · WAITING FOR ' + waitingFor.toUpperCase(), C.cyan);
@@ -961,29 +1132,25 @@ mgu.run({
             saveLook(); queueRender();
         }
         async function toggleFeatureMode(featureKey) {
-            if (['mColor', 'comfort', 'sport', 'eco'].indexOf(featureKey) < 0) return;
+            if (['comfort', 'sport', 'eco'].indexOf(featureKey) < 0) return;
             const turningOn = !state.features[featureKey];
             if (turningOn) {
                 state.pendingCustomApply = null;
                 state.zoneLightingEnabled = false; state.zoneRestorePending = false;
             }
-            if (featureKey === 'mColor') {
-                state.features = { mColor: turningOn, comfort: false, sport: false, eco: false };
-                if (turningOn) state.mColorReturnSlot = Number.isInteger(state.liveSlot) ? state.liveSlot : null;
-            } else state.features = { mColor: false, comfort: false, sport: false, eco: false,
+            state.features = { mColor: false, comfort: false, sport: false, eco: false,
                 [featureKey]: turningOn };
             if (turningOn) state.oemWantApply = false;
             state.modeSyncPending = true;
             saveLook(); queueRender();
-            if (state.features.mColor) setNotice('M COLOR SELECTED · APPLYING THE 3-ZONE PALETTE', C.cyan);
-            else if (turningOn && state.driveMode !== featureKey) {
+            if (turningOn && state.driveMode !== featureKey) {
                 setNotice(featureKey.toUpperCase() + ' MODE COLOUR ARMED · WAITING FOR ' + featureKey.toUpperCase(), C.cyan);
             }
             if (turningOn && !state.oemEnabled && !await setOemLightingEnabled(true)) return;
             await syncModeLighting();
         }
         async function applyBlackoutOverride() {
-            if (state.blackoutApplying || stopped || state.oemEnabled || state.blackoutOverride) return false;
+            if (state.mColorDiagnostic.open || state.blackoutApplying || stopped || state.oemEnabled || state.blackoutOverride) return false;
             state.blackoutApplying = true;
             state.blackoutLastAttemptAt = Date.now();
             state.activeFeatureLighting = null;
@@ -1003,6 +1170,7 @@ mgu.run({
             } finally { state.blackoutApplying = false; retryOemToggleWhenIdle(); retryOemBrightnessWhenIdle(); }
         }
         async function restoreBmw() {
+            if (state.mColorDiagnostic.open) return false;
             state.pendingCustomApply = null;
             if (state.applyBusy || state.scanBusy || state.busy) return false;
             clearTimeout(state.renewTimer); state.renewTimer = null; state.activeCustom = false; state.blackoutOverride = false;
@@ -1054,6 +1222,7 @@ mgu.run({
             }
         }
         async function setFactorySlot(n) {
+            if (state.mColorDiagnostic.open) return false;
             state.pendingCustomApply = null;
             disableAutomaticModesForManual(zoneTargets());
             if (state.activeCustom) await restoreBmw();
@@ -1070,6 +1239,7 @@ mgu.run({
             return request;
         }
         async function sendOemLightingRequest(enabled, previewOnly) {
+            if (state.mColorDiagnostic.open) return false;
             if (!enabled) state.pendingCustomApply = null;
             const canBlackoutWithModules = !enabled && state.modules.length && state.diag && state.diag.available;
             const hadModuleOverride = state.activeCustom || state.blackoutOverride || state.oemRestoreRequested;
@@ -1108,9 +1278,11 @@ mgu.run({
                         if (enabled) {
                             // The colour-slot request is what BMW's own menu sends: persistent
                             // in the BDC, and it switches the ambient on at its stored colour.
+                            if (state.mColorDiagnostic.open) return false;
                             await ctx.signals.set(state.proxy, 'ambientLightInteriorColour',
                                 factoryRequest(state.liveSlot || state.slot));
                         }
+                        if (state.mColorDiagnostic.open) return false;
                         // 255 means "leave unchanged" in BMW's signal structure; the app's
                         // brightness sliders map onto the 0-254 offset the keep-alive re-asserts.
                         await ctx.signals.set(state.proxy, 'ambientLightInteriorColour', brightnessRequest(enabled
@@ -1156,6 +1328,7 @@ mgu.run({
             }
         }
         async function setOemLightingEnabled(enabled) {
+            if (state.mColorDiagnostic.open) return false;
             const target = !!enabled;
             const previewOnly = !!ctx.preview && !state.proxy;
             // Reflect the tap immediately. Additional taps replace the pending target and are not dropped
@@ -1301,6 +1474,10 @@ mgu.run({
         }
         /** A tap on the open right panel: a combo applies both zones, a colour applies it to all zones. */
         async function pickDetailItem(i) {
+            if (state.detail === 'mColorDiag') {
+                if (i === 0) return startMColorDiagnosticWatches();
+                return;
+            }
             if (state.detail === 'zones') {
                 if (i === 0) return toggleZoneLighting();
                 const z = ZONE_ROWS[i - 1]; if (!z) return;
@@ -1343,6 +1520,7 @@ mgu.run({
             await applyColourLook(c, 'COLOUR ' + c.name.toUpperCase() + ' · APPLYING TO ' + zoneName() + '…');
         }
         async function applyOemBrightness() {
+            if (state.mColorDiagnostic.open) return false;
             if (state.activeFeatureLighting && anyAutoFeature()) return syncModeLighting(true);
             if (state.zoneLightingEnabled && state.look && state.look.type === 'zone-colours')
                 return applyZoneLighting(true, 'ZONE BRIGHTNESS UPDATED');
@@ -1427,6 +1605,7 @@ mgu.run({
             panelZones: () => { state.zoneColorReturn = null; state.detail = 'zones'; state.detailScroll = 0; state.detailFocus = 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow0'; lastFocusKey = ctx.display.focusKey; } queueRender(); },
             detailBack: () => {
                 const prev = state.detail;
+                if (prev === 'mColorDiag') closeMColorDiagnostics();
                 // Combos lives inside the Color page: back returns to Color, then to the main list
                 if (prev === 'combos') {
                     state.detail = 'colours'; state.detailScroll = 0;
@@ -1442,7 +1621,7 @@ mgu.run({
                     saveLook(); queueRender(); return;
                 }
                 state.detail = null; state.detailScroll = 0; state.detailFocus = -1;
-                const returnRow = prev === 'colours' ? 1 : prev === 'zones' ? 2 : 0;
+                const returnRow = prev === 'colours' ? 1 : prev === 'zones' ? 2 : prev === 'mColorDiag' ? 7 : 0;
                 state.oemFocus = returnRow;
                 if (ctx.display) { ctx.display.focusKey = 'tgt:row' + returnRow; lastFocusKey = 'tgt:row' + returnRow; }
                 queueRender();
@@ -1458,7 +1637,7 @@ mgu.run({
             },
             oemNight: async () => { state.oemNight = !state.oemNight; saveLook(); queueRender(); await applyOemBrightness(); },
             oemDynamic: () => { state.oemDynamic = !state.oemDynamic; saveLook(); queueRender(); },
-            mColorMode: () => toggleFeatureMode('mColor'),
+            mColorMode: openMColorDiagnostics,
             comfortMode: () => toggleFeatureMode('comfort'),
             sportMode: () => toggleFeatureMode('sport'),
             ecoMode: () => toggleFeatureMode('eco'),
@@ -1768,10 +1947,12 @@ mgu.run({
             let scr = null;
             if (state.detail) {
                 // Full page replaces the panel: back arrow returns to INTERIOR LIGHTING
-                const detailItems = state.detail === 'combos' ? COMBOS : state.detail === 'zones' ? zoneDetailRows()
+                const detailItems = state.detail === 'mColorDiag' ? mColorDiagnosticRows()
+                    : state.detail === 'combos' ? COMBOS : state.detail === 'zones' ? zoneDetailRows()
                     : [{ name: 'Combos', nav: true }].concat(PALETTE);
                 const zoneHeaderColors = state.detail === 'zones' ? zonePreviewColors() : null;
-                let detailSel = state.detail === 'combos' ? state.selCombo : state.detail === 'zones' ? (state.zoneLightingEnabled ? 0 : -1)
+                let detailSel = state.detail === 'mColorDiag' ? -1
+                    : state.detail === 'combos' ? state.selCombo : state.detail === 'zones' ? (state.zoneLightingEnabled ? 0 : -1)
                     : (state.selColour >= 0 ? state.selColour + 1 : -1);
                 if (state.detail === 'colours' && state.zoneColorReturn) {
                     const selectedColor = zonePreviewColors()[state.zoneColorReturn.target];
@@ -1779,13 +1960,13 @@ mgu.run({
                     detailSel = selectedPalette >= 0 ? selectedPalette + 1 : -1;
                 }
                 const det = Sheet.drawDetailPanel(cv, G, {
-                    title: 'INTERIOR LIGHTING',
+                    title: state.detail === 'mColorDiag' ? 'M COLOR DIAGNOSTICS' : 'INTERIOR LIGHTING',
                     items: detailItems,
                     sel: detailSel,
                     focus: state.detailFocus,
                     imageInfo: state.detail === 'zones' ? { name: zoneName() } : null,
                     imageSwatches: zoneHeaderColors ? [zoneHeaderColors.dashboard, zoneHeaderColors.doors, zoneHeaderColors.footwell] : null,
-                    rowH: state.detail === 'zones' ? 72 : undefined,
+                    rowH: state.detail === 'mColorDiag' ? 50 : state.detail === 'zones' ? 72 : undefined,
                     scroll: state.detailScroll, extra: cv.extra || 0,
                 });
                 state.detailScrollMax = det.scroll.max;
@@ -1793,6 +1974,11 @@ mgu.run({
                 scr = det.scroll;
                 lastDetGeom = { offsets: det.offsets, rowHs: det.rowHs, avail: det.avail };
                 if (det.back) hitboxes.push({ x: det.back.x, y: det.back.y, w: det.back.w, h: det.back.h, key: 'detailBack' });
+                if (state.detail === 'mColorDiag') {
+                    const back = { x: 514, y: 54, w: 116, h: 34 };
+                    Sheet.drawChip(cv, G, back.x, back.y, back.w, 'BACK', { h: back.h, run: actions.detailBack, key: 'mcolor-back', size: 11 });
+                    hitboxes.push(Object.assign({ key: 'detailBack' }, back));
+                }
                 det.rows.forEach((r) => hitboxes.push({ x: r.x, y: r.y, w: r.w, h: r.h, key: 'detailItem', i: r.i }));
                 (det.swatches || []).forEach((s) => hitboxes.push({ x: s.x, y: s.y, w: s.w, h: s.h, key: 'zoneColor', zone: s.zone, row: s.row }));
                 if (cv.own) {
@@ -1965,7 +2151,8 @@ mgu.run({
                 if (stopped) return;
                 scanModules().then(() => {
                     // The car remembers the last app look: re-apply it once modules are known.
-                    if (stopped || !state.look || state.zoneLightingEnabled || (!state.oemEnabled && !state.zoneLightingEnabled) || anyAutoFeature()) return;
+                    if (stopped || state.mColorDiagnostic.open || state.mColorDiagnostic.legacyMColorSuppressed
+                        || !state.look || state.zoneLightingEnabled || (!state.oemEnabled && !state.zoneLightingEnabled) || anyAutoFeature()) return;
                     if (state.modules.length) reapplyLook('LAST AMBIENT LOOK RESTORED', !!state.zoneLightingEnabled);
                 }).catch((e) => log.warn('automatic ambient scan: ' + shortError(e)));
             }, 250);
@@ -2047,6 +2234,7 @@ mgu.run({
         }, 90);
         if (ctx.app && typeof ctx.app.on === 'function') ctx.app.on('shutdown', () => {
             stopped = true; clearTimeout(state.renewTimer); clearTimeout(state.oemBrightnessTimer); clearTimeout(pendingApplyTimer);
+            closeMColorDiagnostics();
             clearInterval(state.oemKeepalive); state.oemKeepalive = null;
             clearTimeout(renderTimer); clearTimeout(autoScanTimer); clearTimeout(bgArtLoadTimer);
             if (ctx.display && ccuWrapper && ctx.display._ccu === ccuWrapper) {

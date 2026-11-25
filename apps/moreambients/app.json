@@ -1,8 +1,8 @@
 {
   "id": "moreambients",
   "title": "MoreAmbients",
-  "description": "BMW-style OEM ambience page with instant named colours, automatic module discovery, zone brightness and the original palette",
-  "version": "0.2.10",
+  "description": "BMW ambience controls with named colours, zone brightness, factory palette and read-only M Color diagnostics",
+  "version": "0.2.11",
   "vendor": "VKPERFORMANCE",
   "loggingId": "OAA7",
   "iconGlyph": "ambient",
@@ -12,6 +12,14 @@
     "de.bmw.infotainment.misc.ComfortFunctionIuK": {
       "ambientLightInteriorColour": "w",
       "statusAmbientLightInteriorColour": "rs"
+    },
+    "de.bmw.body.interiorillumination.AmbientLight": {
+      "_optional": "Read-only M Color investigation; setters intentionally not declared",
+      "mModeAmbientLightActive": "rs",
+      "currentInteriorLightProfile": "rs",
+      "brightnessAmbientLight": "rs",
+      "brightnessAmbientContourLine": "rs",
+      "ambientLightActive": "rs"
     },
     "de.bmw.infotainment.drivingexcitement.FES": {
       "_optional": "the current driving mode for Comfort, Sport and Eco ambient colours",
