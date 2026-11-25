@@ -1,6 +1,6 @@
 # PERFORMANCE
 
-PERFORMANCE 0.6.55 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
+PERFORMANCE 0.6.58 is a BMW HU_MGU / iDrive 7 monitor. The black-and-
 red display places live **HORSE POWER · EST.** and **TORQUE** gauges in the large left
 area. The right area shows **DYNO RUN**, Vehicle Speed with the selected gear,
 and **TURBO BOOST**. The dyno card shows the latest valid saved run. The two gauge limits can be changed
@@ -257,12 +257,15 @@ packages are not included in this repository branch. Shared MIT licensing and
 attribution are retained in `LICENSE` and the relevant source comments.
 
 The engine monitor and boost candidates use SOME/IP subscriptions and read-only
-UDS/OBD requests. Exhaust flap control is the only write path, isolated behind
-its disarmed-by-default setting, a matching DME capability check, and a manual
-page action. The setting is visible in Settings, and its saved value is reset to
-Off once for this update so an older saved Armed value cannot survive the safety
-default change. Demo is off by default; dyno recording pauses in Demo and the screen
-clearly marks simulated live readings.
+UDS/OBD requests. Exhaust flap control remains isolated behind its disarmed-by-
+default setting, a matching DME capability check, and a manual page action.
+Dynamic Config sends only the documented DSC ON/OFF requests; DSC OFF requires
+the car to be stopped and a second tap. MDM is shown from the cluster when
+available, but this app does not send an unverified MDM request. The gearbox
+temperature prefers BMW's BasicDataSet value and uses a read-only EGS fallback;
+the fallback still needs comparison with this car's native diagnostic reading.
+Demo is off by default; dyno recording pauses in Demo and the screen clearly
+marks simulated live readings.
 
 ## Local checks and preview
 

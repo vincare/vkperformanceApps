@@ -55,7 +55,7 @@ function sectionsFor(s) {
 
 function slab(cv, G, y0, y1) {
     const h = y1 - y0;
-    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
     Sheet.para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
@@ -214,6 +214,61 @@ function traceChart(cv, G, t, s, trace, rect, marks) {
     }
 }
 
+// Dragy-style round speedo for the live sheet: dark dial face, thick red 270°
+// ring with a glow, inside ticks + numbers, tapered needle, speed + RESET below.
+const GAUGE_MARKS = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330];
+function dragyGauge(cv, G, t, s, gx, gy, R, actions) {
+    const A0 = 225, SPAN = 270, VMAX = 330, THK = 26;
+    const r0 = R - THK / 2, r1 = R + THK / 2, F = r1 + 12, S = F + 3;
+    const mph = s.speedUnit === 'mph';
+    const raw = Number.isFinite(s.speed) ? s.speed : 0;
+    const v = Math.max(0, Math.min(VMAX, raw * (mph ? 0.621371 : 1)));
+    const pt = (a, r, ox, oy) => [ox + Math.sin(a * Math.PI / 180) * r, oy - Math.cos(a * Math.PI / 180) * r];
+    const aOf = (val) => A0 + val / VMAX * SPAN;
+
+    // The dial face, rim, grey track and numbers are static — bake them into a
+    // layer once instead of scanning ~100k pixels for them every frame (the
+    // head unit killed/restarted the app on the unbaked version).
+    const L = G.layer(['dragy', R, VMAX, t.name].join('|'), 2 * S, 2 * S, (c) => {
+        c.circle(S, S, F, '#0c0f15');
+        c.arc(S, S, F - 4, F - 1, A0, A0 + SPAN, G.withAlpha('#ffffff', 0.10));
+        c.circle(S, S, 58, G.withAlpha('#ffffff', 0.025));
+        c.arc(S, S, r0, r1, A0, A0 + SPAN, G.withAlpha('#c7cbd1', 0.20), { round: true });
+        GAUGE_MARKS.forEach((m) => {
+            const [nx, ny] = pt(aOf(m), r0 - 24, S, S);
+            c.text(String(m), nx, ny + 5, m % 90 === 0 ? 15 : 13, '#7d8592',
+                { align: 'center', font: 'bold' });
+        });
+    }, cv.textScale);
+    cv.blit(L, gx - S, gy - S);
+
+    // dynamic: glowing red fill + numbers lighting up once passed
+    if (v > 0.5) {
+        cv.arc(gx, gy, r0 - 5, r1 + 5, A0, aOf(v), G.withAlpha(RED, 0.16), { round: true });
+        cv.arc(gx, gy, r0, r1, A0, aOf(v), RED, { round: true });
+        cv.arc(gx, gy, r1 - 9, r1, A0, aOf(v), G.withAlpha('#ff8b96', 0.35), { round: true });
+        GAUGE_MARKS.forEach((m) => {
+            if (m === 0 || !(v >= m - 0.5)) return;
+            const [nx, ny] = pt(aOf(m), r0 - 24, gx, gy);
+            cv.text(String(m), nx, ny + 5, m % 90 === 0 ? 15 : 13, RED,
+                { align: 'center', font: 'bold' });
+        });
+    }
+
+    // Dragy-style digital speed in the middle of the dial, unit right under it
+    cv.text(String(Math.round(v)), gx, gy + 13, 38, t.text, { align: 'center', font: 'bold' });
+    cv.text(mph ? 'MPH' : 'KM/H', gx, gy + 30, 11, G.withAlpha(t.dim, 0.7),
+        { align: 'center', font: 'bold', spacing: 1, literal: true });
+
+    // live run timer under the speed — what matters while the ring fills
+    if (s.timerState === 'run' && typeof s.elapsed === 'number')
+        cv.text(s.elapsed.toFixed(2) + ' S', gx, gy + 72, 16, G.withAlpha('#ff8595', 0.9),
+            { align: 'center', font: 'bold', spacing: 1, literal: true });
+
+    Sheet.drawChip(cv, G, gx - 59, gy + F + 16, 118, 'RESET',
+        { icon: 'reset', run: actions && actions.reset, key: 'performance_drag_gauge_reset' });
+}
+
 // Live sheet: same shell as DYNO RUN — tag, chips, slanted stage with the trace,
 // right ribbon with result rows and the status block.
 function drawSheet(cv, G, t, s, car, actions) {
@@ -232,27 +287,25 @@ function drawSheet(cv, G, t, s, car, actions) {
     Sheet.drawHexMesh(cv, G, y0, y1, false);
 
     // 2. Slanted black stage — identical geometry to the DYNO sheet
-    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
     Sheet.para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
 
-    cv.text('ACCELERATION TRACE', 316, y0 + 36, 15, t.dim, { font: 'bold', spacing: 1.4, literal: true });
+    cv.text('SPEEDOMETER', 316, y0 + 36, 15, t.dim, { font: 'bold', spacing: 1.4, literal: true });
     cv.roundRect(316, y0 + 56, 18, 5, 2, RED);
-    cv.text('SPEED', 341, y0 + 63, 12, t.dim, { font: 'bold', spacing: 0.5, literal: true });
-    traceChart(cv, G, t, s, isRun ? s.trace : (current && current.trace), { x: 338, y: y0 + 106, w: 560, h: 270 });
+    cv.text(unitL, 341, y0 + 63, 12, t.dim, { font: 'bold', spacing: 0.5, literal: true });
+    dragyGauge(cv, G, t, s, 606, y0 + 230, 144, actions);
     drawCar(cv, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
 
     // 3. Title tag and actions
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUN', 27, 196), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUN', 34, 196), tagH = 52, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUN', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('DRAG RUN', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'DRAG HISTORY',
         { icon: 'fwd', run: actions && actions.toggleView, key: 'performance_drag_runs' });
-    Sheet.drawChip(cv, G, tagX, tagY + tagH + 68, 118, 'RESET',
-        { icon: 'reset', run: actions && actions.reset, key: 'performance_drag_reset' });
 
     // 4. Right ribbon — same diagonal bands as DYNO RUN
     const ribX = 1128;
@@ -260,17 +313,6 @@ function drawSheet(cv, G, t, s, car, actions) {
     Sheet.para(cv, ribX + 210, y0, 112, y1, SLANT, '#1b070c');
     Sheet.para(cv, ribX + 322, y0, 62,  y1, SLANT, '#8c1122');
     Sheet.para(cv, ribX + 384, y0, 56,  y1, SLANT, '#d91c33');
-
-    // VALID/INVALID sticker at the right of the timing values: it sits inside the dark
-    // ribbon band (baked on that band's colour, 50% ink), beside the first rows.
-    const hasLiveTimes = hasTimedResults(current) || Object.keys(s.rolling || {}).some((key) =>
-        typeof s.rolling[key] === 'number' && isFinite(s.rolling[key]) && s.rolling[key] > 0);
-    const liveStamp = hasLiveTimes ? stampArt(s.slope == null || s.slope >= -1.0, '#1b070c') : null;
-    if (liveStamp) {
-        const ih = 120, iw = Math.round(ih * liveStamp.w / liveStamp.h);
-        const iy = y0 + 26;
-        cv.image(liveStamp.id, xAt(ribX + 266, iy + ih / 2) - iw / 2, iy, iw, ih);
-    }
 
     // 5. Result rows: the five timed splits — speed intervals then the two mile marks
     const res = (key) => {
@@ -307,39 +349,27 @@ function drawSheet(cv, G, t, s, car, actions) {
             { font: 'bold', spacing: 0.4, literal: true });
     });
 
-    // 6. Status block — pulsing green READY TO LAUNCH when armed (like draggy),
-    // otherwise the red timing / standby state.
-    const setupY = y1 - 84, setupX = xAt(ribX + 12, setupY);
+    // 6. Only show the ready-to-launch cue. Timing/state copy is intentionally omitted.
+    const setupY = y1 - 84;
     const ready = s.timerState === 'ready';
     if (ready) {
-        const btnY = setupY + 30, bx = xAt(ribX + 12, btnY);
+        const btnY = setupY + 37, bx = xAt(ribX + 12, btnY);
         const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 160);
         const bw = 198, bh = 34;
         Sheet.para(cv, bx, btnY, bw, btnY + bh, 10,
             G.withAlpha('#2ee06f', 0.10 + 0.12 * pulse));
-        cv.line(bx, btnY, bx + bw, btnY, 2,
+        cv.line(bx + 1, btnY, bx + bw - 1, btnY, 2,
             G.withAlpha('#2ee06f', 0.35 + 0.55 * pulse));
-        cv.line(bx + bw - 10, btnY + bh, bx - 10, btnY + bh, 2,
+        cv.line(bx + bw - 1, btnY + 1, bx + bw - 9, btnY + bh - 1, 2,
+            G.withAlpha('#2ee06f', 0.28 + 0.42 * pulse));
+        cv.line(bx - 9, btnY + bh - 1, bx - 1, btnY + 1, 2,
+            G.withAlpha('#2ee06f', 0.28 + 0.42 * pulse));
+        cv.line(bx + bw - 11, btnY + bh, bx - 9, btnY + bh, 2,
             G.withAlpha('#2ee06f', 0.2 + 0.3 * pulse));
         cv.circle(bx + 18, btnY + bh / 2, 3.6,
             Math.floor(Date.now() / 300) % 2 ? '#2ee06f' : G.withAlpha('#2ee06f', 0.3));
         cv.text('READY TO LAUNCH', bx + bw / 2 + 6, btnY + bh / 2 + 6, 16, '#2ee06f',
             { align: 'center', font: 'bold', spacing: 1.2, literal: true });
-    } else {
-        const stateLabel = isRun ? 'TIMING' : 'STANDBY';
-        cv.text('STATE · ' + stateLabel, setupX, setupY + 14, 20, '#ffffff',
-            { font: 'bold', spacing: 1.1, literal: true });
-        if (isRun) {
-            const tw = cv.textWidth('STATE · TIMING', 20, { font: 'bold', spacing: 1.1 });
-            cv.circle(setupX + tw + 18, setupY + 8, 5,
-                Math.floor(Date.now() / 300) % 2 ? '#ff243b' : G.withAlpha('#ff243b', 0.3));
-        }
-        const sub = isRun
-            ? (typeof s.elapsed === 'number' ? s.elapsed.toFixed(2) + ' S ELAPSED' : 'TIMING…')
-            : current ? runStamp(current.at) : 'STOP TO ARM · HOLD BRAKE';
-        cv.text(sub, setupX, setupY + 40, 13, '#ff8595', { font: 'bold', spacing: 0.8, literal: true });
-        cv.text(s.demo ? 'DEMO · TIMING PAUSED' : (s.rollout ? 'ROLLOUT 1 FT · ' : '') + 'FULL THROTTLE LAUNCH',
-            setupX, setupY + 64, 10.5, G.withAlpha('#e8c8ce', 0.5), { font: 'bold', spacing: 0.5, literal: true });
     }
 }
 
@@ -352,45 +382,57 @@ function drawSections(cv, G, t, s, actions) {
 
     cv.fillRect(0, y0, W, h, t.bg);
     Sheet.drawHexMesh(cv, G, y0, y1, false);
-    slab(cv, G, y0, y1);
+    const sb = slab(cv, G, y0, y1);
 
-    cv.text('DRAG HISTORY', 316, y0 + 36, 15, t.dim, { font: 'bold', spacing: 1.4, literal: true });
-    cv.text(runs.length + (runs.length === 1 ? ' SAVED RUN' : ' SAVED RUNS'), 316, y0 + 58, 12,
-        G.withAlpha('#ff8595', 0.75), { font: 'bold', spacing: 0.6, literal: true });
+    const histX = sb.x + sb.w - 28;   // right-aligned inside the slab, matching SAVED DYNO RUNS
+    cv.text('DRAG HISTORY', histX, y0 + 36, 15, t.dim,
+        { align: 'right', font: 'bold', spacing: 1.4, literal: true });
+    cv.text(runs.length + (runs.length === 1 ? ' SAVED RUN' : ' SAVED RUNS'), histX, y0 + 58, 12,
+        G.withAlpha('#ff8595', 0.75), { align: 'right', font: 'bold', spacing: 0.6, literal: true });
 
     sectionsFor(s).forEach((sec, i) => {
         const count = runs.filter((run) => run.result && run.result[sec.key] != null).length;
         const best = s.best && s.best[DragRun.bestKey(sec.key, unit, !!s.rollout)];
         const ry = y0 + 100 + i * 78;
-        const rx = 330;
-        if (i) cv.line(320, ry - 42, 900, ry - 42, 1, G.withAlpha('#ff8595', 0.1));
+        const rx = 378;
+        const press = !!(count && actions && actions.openSection);
+        // Button look: slanted chip body + light top edge + a chevron that invites the tap.
+        // Sized to stay clear of the slab's slanted right edge even on the bottom row.
+        Sheet.para(cv, rx - 22, ry - 36, 576, ry + 30, 12,
+            G.withAlpha('#ffffff', press ? 0.07 : 0.028));
+        cv.line(rx - 22 + 12, ry - 36, rx - 22 + 576, ry - 36, 1.5, G.withAlpha('#ffffff', press ? 0.16 : 0.07));
+        if (press) {
+            const cx0 = rx - 22 + 576 - 30, cy0 = ry - 3;
+            cv.line(cx0 - 5, cy0 - 9, cx0 + 3, cy0, 2.4, '#ffffff');
+            cv.line(cx0 + 3, cy0, cx0 - 5, cy0 + 9, 2.4, '#ffffff');
+        }
         Sheet.modeIcon(cv, G, t, sec.icon, rx + 12, ry - 4, 32,
             count ? G.withAlpha('#c8ced8', 0.9) : G.withAlpha('#c8ced8', 0.38));
         cv.text(sec.label, rx + 52, ry + 4, 21,
             count ? '#ffffff' : G.withAlpha('#e8c8ce', 0.45),
             { font: 'bold', spacing: 1.2, literal: true });
-        cv.text(count + (count === 1 ? ' RECORD' : ' RECORDS'), rx + 52, ry + 30, 12,
+        cv.text(count + (count === 1 ? ' RECORD' : ' RECORDS'), rx + 52, ry + 22, 12,
             G.withAlpha('#e8c8ce', 0.5), { font: 'bold', spacing: 0.6, literal: true });
-        cv.text(best ? DragRunSeconds(best.s) + ' S' : '--.--', 900, ry + 10, 26,
+        cv.text(best ? DragRunSeconds(best.s) + ' S' : '--.--', rx + 468, ry + 10, 26,
             best ? '#ff243b' : G.withAlpha('#8c94a0', 0.45),
             { align: 'right', font: 'num', literal: true });
-        cv.text('BEST', 900, ry + 30, 11,
+        cv.text('BEST', rx + 468, ry + 24, 11,
             best ? G.withAlpha('#ff8595', 0.7) : G.withAlpha('#e8c8ce', 0.3),
             { align: 'right', font: 'bold', spacing: 0.8, literal: true });
         if (cv.own && count && actions && actions.openSection) {
-            cv.target(300, ry - 38, 640, 72,
+            cv.target(rx - 22, ry - 36, 576, 66,
                 () => actions.openSection(sec.key), 'performance_dragsec_' + sec.key, 10, true);
         }
     });
 
     // Title tag and clear-history action
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 27, 216), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 34, 216), tagH = 52, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196,
         s.clearArmed ? 'CONFIRM CLEAR' : 'CLEAR HISTORY',
-        { icon: 'reset', run: actions && actions.clear, key: 'performance_dragsecs_clear' });
+        { run: actions && actions.clear, key: 'performance_dragsecs_clear' });
 
     // Right ribbon — the five best results
     const ribX = ribbon(cv, G, y0, y1);
@@ -440,13 +482,15 @@ function drawRuns(cv, G, t, s, actions) {
 
     cv.fillRect(0, y0, W, h, t.bg);
     Sheet.drawHexMesh(cv, G, y0, y1, false);
-    slab(cv, G, y0, y1);
+    const sb = slab(cv, G, y0, y1);
 
-    cv.text(sec.label + ' · RUNS', 316, y0 + 36, 15, t.dim,
-        { font: 'bold', spacing: 1.4, literal: true });
+    const histX = sb.x + sb.w - 28;   // same right edge as DRAG HISTORY / SAVED DYNO RUNS
+    cv.text(sec.label + ' · RUNS', histX, y0 + 36, 15, t.dim,
+        { align: 'right', font: 'bold', spacing: 1.4, literal: true });
     cv.text(all.length + (all.length === 1 ? ' RECORD' : ' RECORDS')
         + (best ? '   ·   BEST ' + DragRunSeconds(best.s) + ' S' : ''),
-        316, y0 + 58, 12, G.withAlpha('#ff8595', 0.75), { font: 'bold', spacing: 0.6, literal: true });
+        histX, y0 + 58, 12, G.withAlpha('#ff8595', 0.75),
+        { align: 'right', font: 'bold', spacing: 0.6, literal: true });
 
     if (!shown.length) {
         cv.text('NO RUNS YET', 610, y0 + 236, 20, t.dim,
@@ -459,14 +503,14 @@ function drawRuns(cv, G, t, s, actions) {
         const sel = selRun && run.at === selRun.at;
         const isBest = best && best.at === run.at;
         if (sel) {
-            Sheet.para(cv, 306, ry - 30, 616, ry + 34, 20, G.withAlpha('#ffffff', 0.1));
-            Sheet.para(cv, 306, ry - 30, 6, ry + 34, 20, '#ff243b');
+            Sheet.para(cv, 370, ry - 30, 592, ry + 34, 20, G.withAlpha('#ffffff', 0.1));
+            Sheet.para(cv, 370, ry - 30, 6, ry + 34, 20, '#ff243b');
         }
         const rowNo = pg * RUNS_PER_PAGE + i + 1;
-        cv.text('#' + rowNo, 336, ry + 8, 18,
+        cv.text('#' + rowNo, 400, ry + 8, 18,
             sel ? '#ff243b' : G.withAlpha('#c8ced8', 0.45),
             { font: 'num', spacing: 0.5, literal: true });
-        cv.text(runStamp(run.at), 388, ry, 18, sel ? '#ffffff' : G.withAlpha('#e8c8ce', 0.85),
+        cv.text(runStamp(run.at), 452, ry, 18, sel ? '#ffffff' : G.withAlpha('#e8c8ce', 0.85),
             { font: 'bold', spacing: 0.8, literal: true });
         const trapV = run.trap && run.trap[sec.key];
         const uStr = unit === 'mph' ? 'mph' : 'km/h';
@@ -475,21 +519,21 @@ function drawRuns(cv, G, t, s, actions) {
         if (trapV) parts.push('TRAP ' + number(DragRunSpeed(trapV, unit), 0) + ' ' + uStr);
         if (peakG != null) parts.push('G PEAK ' + number(peakG, 2));
         if (run.vmax != null) parts.push('SPEED ' + number(DragRunSpeed(run.vmax, unit), 0) + uStr);
-        cv.text(parts.join('   ·   '), 388, ry + 26, 14, G.withAlpha('#e8c8ce', 0.6),
+        cv.text(parts.join('   ·   '), 452, ry + 26, 14, G.withAlpha('#e8c8ce', 0.6),
             { font: 'bold', spacing: 0.5, literal: true });
         const secT = run.result && run.result[sec.key];
         const secTxt = secT != null ? DragRunSeconds(secT) + ' S' : '--.--';
-        cv.text(secTxt, 856, ry + 14, 28,
+        cv.text(secTxt, 920, ry + 14, 28,
             isBest ? '#ff243b' : '#ffffff', { align: 'right', font: 'num', literal: true });
         if (isBest) {
             const vw = cv.textWidth(secTxt, 28, { font: 'num', spacing: 0.5 });
-            const bw = 54, bx = 856 - vw - 14 - bw;
+            const bw = 54, bx = 920 - vw - 14 - bw;
             Sheet.para(cv, bx, ry - 2, bw, ry + 18, 8, '#c8192b');
             cv.text('BEST', bx + bw / 2 - 4, ry + 13, 12, '#ffffff',
                 { align: 'center', font: 'bold', spacing: 0.8, literal: true });
         }
         if (cv.own && actions && actions.openReport) {
-            cv.target(300, ry - 30, 632, 64,
+            cv.target(364, ry - 30, 566, 64,
                 () => actions.openReport(run.at), 'performance_dragrun_' + i, 10, true);
         }
     });
@@ -521,14 +565,14 @@ function drawRuns(cv, G, t, s, actions) {
 
     // Title tag and clear-section action
     const shortName = sec.label.replace(/ KM\/H| MPH/g, '');
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 27, 216), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUNS', 34, 216), tagH = 52, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('DRAG RUNS', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     const clearLines = s.clearArmed ? ['CONFIRM CLEAR'] : ['CLEAR ' + shortName, 'HISTORY'];
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 242,
         clearLines.join(' '),
-        { icon: 'reset', run: actions && actions.clearSection, key: 'performance_dragruns_clear', lines: clearLines });
+        { run: actions && actions.clearSection, key: 'performance_dragruns_clear', lines: clearLines });
 
     // Right ribbon — TOP 3 RUNS leaderboard (crown on #1)
     const ribX = ribbon(cv, G, y0, y1);
@@ -621,16 +665,19 @@ function drawReport(cv, G, t, s, actions) {
 
     cv.fillRect(0, y0, W, h, t.bg);
     Sheet.drawHexMesh(cv, G, y0, y1, false);
-    slab(cv, G, y0, y1);
+    const sb = slab(cv, G, y0, y1);
 
-    cv.text('PERFORMANCE REPORT', 316, y0 + 36, 15, t.dim, { font: 'bold', spacing: 1.4, literal: true });
+    const repX = sb.x + sb.w - 28;   // right-aligned like the other sheet headers
+    cv.text('PERFORMANCE REPORT', repX, y0 + 36, 15, t.dim,
+        { align: 'right', font: 'bold', spacing: 1.4, literal: true });
     cv.text(run ? runStamp(run.at) : '',
-        316, y0 + 48, 12, G.withAlpha('#ff8595', 0.75), { font: 'bold', spacing: 0.6, literal: true });
+        repX, y0 + 48, 12, G.withAlpha('#ff8595', 0.75),
+        { align: 'right', font: 'bold', spacing: 0.6, literal: true });
 
     // Compact chart (h=190) so TIME · SECONDS at y0+314 clears the stat tiles at y0+358.
     const secDef = (s.splits || []).find((sp) => sp.key === sec.key);
     const marks = secDef && !secDef.dist ? [secDef.from, secDef.to] : null;
-    traceChart(cv, G, t, s, run && run.trace, { x: 338, y: y0 + 82, w: 560, h: 190 }, marks);
+    traceChart(cv, G, t, s, run && run.trace, { x: 450, y: y0 + 82, w: 560, h: 190 }, marks);
 
     // Three stat tiles — distance (446.13m), split time (6.07s), slope (-0.45%).
     const splitS = run && run.result && run.result[sec.key];
@@ -657,13 +704,11 @@ function drawReport(cv, G, t, s, actions) {
         cv.text(val, tx + 18, ty + 72, 32, '#ffffff', { font: 'num', spacing: 0.5, literal: true });
     });
 
-    // Left title tag and next-run action
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'REPORT', 27, 196), tagH = 46, tagSlant = 15;
+    // Left title tag
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG REPORT', 34, 196), tagH = 52, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('REPORT', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
-    Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 156, 'NEXT RUN',
-        { icon: 'fwd', run: actions && actions.nextRun, key: 'performance_dragreport_next' });
+    cv.text('DRAG REPORT', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
 
     // Right ribbon — VALID/INVALID stamp sticker + 2-column sub-split breakdown
     const ribX = ribbon(cv, G, y0, y1);
@@ -671,7 +716,7 @@ function drawReport(cv, G, t, s, actions) {
     const hasTimes = hasTimedResults(run);
     const stamp = hasTimes ? stampArt(valid) : null;
     if (stamp) {
-        const ih = 140, iw = Math.round(ih * stamp.w / stamp.h);
+        const ih = 108, iw = Math.round(ih * stamp.w / stamp.h);
         const iy = y0 + 22;
         cv.image(stamp.id, xAt(ribX + 105, iy + ih / 2) - iw / 2, iy, iw, ih);
     } else if (hasTimes) {

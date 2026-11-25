@@ -1,9 +1,9 @@
 {
   "id": "performance",
   "title": "PERFORMANCE",
-  "backBtnX": 11,
+  "backBtnX": 21,
   "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
-  "version": "0.6.55",
+  "version": "0.6.58",
   "assets": [
     {
       "file": "assets/car-models/M340i_Black.png",
@@ -89,6 +89,11 @@
       "file": "assets/ui/drivetrain-badge.png",
       "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/assets/ui/drivetrain-badge.png",
       "sha256": "44bf8a5a67e33040d21d07a938191679b4df24fc34609c3c55cb0c8301f2d2a7"
+    },
+    {
+      "file": "assets/ui/dynamic-config-badge.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dynamic-config-badge.png",
+      "sha256": "4016bfc5213eae47b39ef848185123bf4748aca80a821a68a8faaa07f705c40c"
     },
     {
       "file": "assets/ui/dyno-run-badge.png",
@@ -204,6 +209,51 @@
       "file": "designs/TYRESINFO-WHEEL.png",
       "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/723445ba7abec815f81db84272a17cab38bd4922/apps/performance/designs/TYRESINFO-WHEEL.png",
       "sha256": "f7590aa2e3cc03883c3d6ae93e4a6af30a505eaef9ae4366bc12ca760e24672e"
+    },
+    {
+      "file": "assets/ui/dsc-on.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-on.png",
+      "sha256": "38df676cfa4c72e6202057de4293a893a3517edb7184e3f147ec9cf5959f044e"
+    },
+    {
+      "file": "assets/ui/dsc-mdm.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-mdm.png",
+      "sha256": "d5ab7c8b6bec8d7555ab21eb83fb1174d6f9b313cba22f92bdc5dee0c2a2ce37"
+    },
+    {
+      "file": "assets/ui/dsc-off.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-off.png",
+      "sha256": "3c5e819728968fbadd4a2a9e52ae6fc6350ea04bf7814a6b05978bc93d5116dd"
+    },
+    {
+      "file": "assets/ui/dsc-on-dim.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-on-dim.png",
+      "sha256": "59497a1b659f3d957a6863415d2537f34bc5efe7a9701a55fd5798dc4c1ca1f8"
+    },
+    {
+      "file": "assets/ui/dsc-mdm-dim.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-mdm-dim.png",
+      "sha256": "f23a5eb17ea2df637dd335497e2d4228f873ab9434641238cb125cf53f42af4b"
+    },
+    {
+      "file": "assets/ui/dsc-off-dim.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-off-dim.png",
+      "sha256": "e21bd64bbb0875942c383e5cd761f51db1191d55e80bffe6f8915c0ba271a42e"
+    },
+    {
+      "file": "assets/ui/dsc-on-w.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-on-w.png",
+      "sha256": "f75cc956fa65cca2ea3353cf3fc19a1caf8627f7a48978c226016e826f96a3e0"
+    },
+    {
+      "file": "assets/ui/dsc-mdm-w.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-mdm-w.png",
+      "sha256": "8f40da20846e2798f8624865bdcb4cc011d9ae994bad73c2ce0a9b2af8a6cbd3"
+    },
+    {
+      "file": "assets/ui/dsc-off-w.png",
+      "url": "https://raw.githubusercontent.com/vincare/vkperformanceApps/b9134afe43aca12dcaf0b1b4a79e22ac3588ecbe/apps/performance/assets/ui/dsc-off-w.png",
+      "sha256": "df1ea93057ebe80cfc71558768ccb7eeaed538a166ee610124281735eca85744"
     }
   ],
   "maxDiskUsage": 134217728,
@@ -249,7 +299,8 @@
       "statusActualValueTorque2": "rs",
       "statusVehicleDynamicEngine": "rs",
       "statusSwitchDriveDynamicSport2": "rs",
-      "statusFESVehicleDynamicSwitchHMI": "rs"
+      "statusFESVehicleDynamicSwitchHMI": "rs",
+      "statusDSCSwitchHMI": "rs"
     },
     "de.bmw.infrastructure.EnvironmentalInformation": {
       "ExteriorTemperature": "s"
@@ -264,7 +315,17 @@
     "de.bmw.infotainment.vehicle.TPMS": {
       "statusTyrePressure": "rs",
       "statusTyreTemperature": "rs",
-      "statusTargetTyrePressure": "rs"
+      "statusTargetTyrePressure": "rs",
+      "statusTyreState": "rs",
+      "chassisControl": "w"
+    },
+    "de.bmw.infotainment.vehicle.TPMSInternalData": {
+      "_optional": "fitted tire sizes, sensor-reported tires, auto-detect status, last reset",
+      "statusWheelTypeChange": "rs",
+      "tpmsCalibrationData": "rs",
+      "statusFrontAxleTyre": "rs",
+      "statusRearAxleTyre": "rs",
+      "tpmsErfsActualTireData": "rs"
     },
     "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
       "_instances": "SystemFunctionsInternalTasuInst1",
@@ -1355,17 +1416,6 @@
           "min": -40,
           "max": 160,
           "note": "ZF 8HP EGS temperature, deg C + 40"
-        },
-        {
-          "ecu": 24,
-          "did": "DA12",
-          "bytes": 1,
-          "at": 0,
-          "factor": 1,
-          "offset": -48,
-          "min": -40,
-          "max": 160,
-          "note": "EGS transmission oil temperature, deg C + 48"
         }
       ],
       "misfire": {

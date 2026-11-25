@@ -104,10 +104,28 @@ function chart(cv, G, t, s, current, rect) {
     cv.line(sx(x, y + h), y + h, sx(x + w, y + h), y + h, 2, G.withAlpha('#ffffff', 0.68));
     if (!curves.length) {
         const cx = sx(x + w / 2, y + 100);
-        cv.text(s.pullStatus === 'recording' ? 'RECORDING ROAD PULL' : 'NO DYNO RUN RECORDED', cx, y + 100, 22, t.dim,
+        if (s.pullStatus === 'recording') {
+            cv.text('RECORDING ROAD PULL', cx, y + 104, 24, '#ffffff',
+                { align: 'center', font: 'bold', spacing: 1.1 });
+            cv.text('Keep one gear steady through the pull', cx, y + 134, 14, t.dim,
+                { align: 'center' });
+            return;
+        }
+        cv.text('NO DYNO RUN RECORDED', cx, y + 86, 24, G.withAlpha('#c8ced8', 0.9),
             { align: 'center', font: 'bold', spacing: 1.1 });
-        cv.text(s.pullStatus === 'recording' ? 'Keep one gear steady through the pull' : 'Hold one gear · flat road · full throttle · 1,500 rpm sweep',
-            cx, y + 130, 14, t.dim, { align: 'center' });
+        const steps = [
+            'FIND A FLAT, OPEN ROAD',
+            'HOLD ONE GEAR · FULL THROTTLE',
+            'SWEEP FROM ~1,500 RPM TO REDLINE',
+        ];
+        const stepW = Math.max.apply(null,
+            steps.map((line) => cv.textWidth(line, 13, { font: 'bold', spacing: 1.0, literal: true }))) + 24;
+        steps.forEach((line, i) => {
+            const sy = y + 126 + i * 30, tx = cx - stepW / 2;
+            cv.text(String(i + 1), tx, sy, 13, '#ff243b', { font: 'bold', literal: true });
+            cv.text(line, tx + 24, sy, 13, G.withAlpha('#e8c8ce', 0.62),
+                { font: 'bold', spacing: 1.0, literal: true });
+        });
         return;
     }
     function linePoints(run, key, mapY) {
@@ -189,7 +207,7 @@ function drawSheet(cv, G, t, s, car, current, actions) {
     Sheet.drawHexMesh(cv, G, y0, y1, false);
 
     // 2. Slanted black stage slab — the dyno chart is the hero on it
-    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
     Sheet.para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
@@ -201,10 +219,10 @@ function drawSheet(cv, G, t, s, car, current, actions) {
     drawCar(cv, G, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
 
     // 3. Title tag and saved-runs action
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DYNO RUN', 27, 196), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DYNO RUN', 34, 196), tagH = 52, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DYNO RUN', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('DYNO RUN', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'ALL DYNO RUNS',
         { icon: 'fwd', run: actions && actions.toggleView, key: 'performance_dyno_runs' });
 
@@ -240,7 +258,7 @@ function drawSheet(cv, G, t, s, car, current, actions) {
         ['SPEED', 'SPEED', speedValue, detailSpeed, POWER],
     ];
     rows.forEach(([iconKey, label, value, detail, color], i) => {
-        const ry = y0 + 58 + i * 80;
+        const ry = y0 + 50 + i * 96;
         const rx = xAt(ribX + 26, ry);
         Sheet.modeIcon(cv, G, t, iconKey, rx + 12, ry + 13, 32,
             hasData ? G.withAlpha('#c8ced8', 0.9) : G.withAlpha('#c8ced8', 0.5));
@@ -253,22 +271,6 @@ function drawSheet(cv, G, t, s, car, current, actions) {
         Sheet.drawBarSegs(cv, G, rx + 44, ry + 62, hasData);
     });
 
-    // 6. Lower status block: pull state, last run stamp and gate hint
-    const setupY = y1 - 84, setupX = xAt(ribX + 12, setupY);
-    const stateLabel = isPull ? 'LIVE' : current ? 'LAST RUN' : 'STANDBY';
-    cv.text('STATE · ' + stateLabel, setupX, setupY + 14, 20, '#ffffff',
-        { font: 'bold', spacing: 1.1, literal: true });
-    if (isPull) {
-        const tw = cv.textWidth('STATE · LIVE', 20, { font: 'bold', spacing: 1.1 });
-        cv.circle(setupX + tw + 18, setupY + 8, 5,
-            Math.floor(Date.now() / 300) % 2 ? '#ff243b' : G.withAlpha('#ff243b', 0.3));
-    }
-    const sub = isPull ? 'RECORDING ROAD PULL'
-        : current ? runStamp(current.at)
-        : 'HOLD ONE GEAR · FLAT ROAD';
-    cv.text(sub, setupX, setupY + 40, 13, '#ff8595', { font: 'bold', spacing: 0.8, literal: true });
-    cv.text(s.gateText || (isPull ? 'KEEP ONE GEAR STEADY' : 'FULL THROTTLE · 1,500 RPM SWEEP'),
-        setupX, setupY + 64, 10.5, G.withAlpha('#e8c8ce', 0.5), { font: 'bold', spacing: 0.5, literal: true });
 }
 
 // Saved-runs list: same shell as the dyno sheet (hex mesh, slanted slab, red tag,
@@ -282,13 +284,14 @@ function drawRuns(cv, G, t, s, actions) {
     cv.fillRect(0, y0, W, h, t.bg);
     Sheet.drawHexMesh(cv, G, y0, y1, false);
 
-    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
     Sheet.para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
 
-    cv.text('SAVED DYNO RUNS', 316, y0 + 36, 15, t.dim, { font: 'bold', spacing: 1.4, literal: true });
+    cv.text('SAVED DYNO RUNS', slabX + slabW - 28, y0 + 36, 15, t.dim,
+        { align: 'right', font: 'bold', spacing: 1.4, literal: true });
     if (!runs.length) {
         cv.text('NO RUNS YET', 610, y0 + 236, 20, t.dim,
             { align: 'center', font: 'bold', spacing: 1.1, literal: true });
@@ -318,10 +321,10 @@ function drawRuns(cv, G, t, s, actions) {
     });
 
     // Title tag
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'SAVED RUNS', 27, 216), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'SAVED RUNS', 34, 216), tagH = 52, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('SAVED RUNS', tagX + (tagW - tagSlant) / 2, tagY + 34, 27, '#ffffff',
-        { align: 'center', font: 'num', spacing: 1.6, literal: true });
+    cv.text('SAVED RUNS', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
 
     // Right ribbon — control rows, same style as the mode rows
     const ribX = 1128;
