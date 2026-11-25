@@ -11,7 +11,8 @@
   "signals": {
     "de.bmw.infotainment.misc.ComfortFunctionIuK": {
       "ambientLightInteriorColour": "w",
-      "statusAmbientLightInteriorColour": "rs"
+      "statusAmbientLightInteriorColour": "rs",
+      "statusAmbientLightInteriorUserSetting": "rs"
     },
     "de.bmw.infotainment.drivingexcitement.FES": {
       "_optional": "the current driving mode for Comfort, Sport and Eco ambient colours",

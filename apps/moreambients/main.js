@@ -588,6 +588,7 @@ mgu.run({
             return [0, 1, 2].map((i) => Math.round(list.reduce((sum, m) => sum + m.rgb[i], 0) / list.length));
         }
         async function sendFrame(bus, nad, colour) {
+            if (state.mColorDiagnostic.open) return { ok: false, why: 'read-only M Color diagnostics active' };
             const did = BUSES[bus].write;
             const data = frameFor(bus, nad, colour.rgb, colour.brightness, HOLD_SECONDS);
             const reply = await state.diag.physical(BDC, 0x2e, data, 1800, acceptReply(0x2e, did),
@@ -595,6 +596,7 @@ mgu.run({
             return { ok: !!(reply && reply[0] === 0x6e && reply[1] === did[0] && reply[2] === did[1]), why: acceptedText(reply) };
         }
         async function sendRestore(bus, nad) {
+            if (state.mColorDiagnostic.open) return false;
             const did = BUSES[bus].write;
             const data = restoreFrame(bus, nad);
             const reply = await state.diag.physical(BDC, 0x2e, data, 1800, acceptReply(0x2e, did),
@@ -983,7 +985,7 @@ mgu.run({
             await syncModeLighting();
         }
         async function applyBlackoutOverride() {
-            if (state.blackoutApplying || stopped || state.oemEnabled || state.blackoutOverride) return false;
+            if (state.mColorDiagnostic.open || state.blackoutApplying || stopped || state.oemEnabled || state.blackoutOverride) return false;
             state.blackoutApplying = true;
             state.blackoutLastAttemptAt = Date.now();
             state.activeFeatureLighting = null;
@@ -1156,6 +1158,7 @@ mgu.run({
             }
         }
         async function setOemLightingEnabled(enabled) {
+            if (state.mColorDiagnostic.open) return false;
             const target = !!enabled;
             const previewOnly = !!ctx.preview && !state.proxy;
             // Reflect the tap immediately. Additional taps replace the pending target and are not dropped
@@ -1301,6 +1304,17 @@ mgu.run({
         }
         /** A tap on the open right panel: a combo applies both zones, a colour applies it to all zones. */
         async function pickDetailItem(i) {
+            if (state.detail === 'mColorDiag') {
+                if (i === 0) return startMColorDiagnosticWatches();
+                if (i === 15) {
+                    state.mColorDiagnostic.scroll = state.detailScroll;
+                    state.detail = 'mColorRegistry'; state.detailScroll = 0; state.detailFocus = 0;
+                    if (ctx.display) { ctx.display.focusKey = 'tgt:drow0'; lastFocusKey = ctx.display.focusKey; }
+                    queueRender(); return;
+                }
+                return;
+            }
+            if (state.detail === 'mColorRegistry') return;
             if (state.detail === 'zones') {
                 if (i === 0) return toggleZoneLighting();
                 const z = ZONE_ROWS[i - 1]; if (!z) return;
@@ -1427,6 +1441,13 @@ mgu.run({
             panelZones: () => { state.zoneColorReturn = null; state.detail = 'zones'; state.detailScroll = 0; state.detailFocus = 0; if (ctx.display) { ctx.display.focusKey = 'tgt:drow0'; lastFocusKey = ctx.display.focusKey; } queueRender(); },
             detailBack: () => {
                 const prev = state.detail;
+                if (prev === 'mColorRegistry') {
+                    state.detail = 'mColorDiag'; state.detailScroll = state.mColorDiagnostic.scroll || 0;
+                    state.detailFocus = 15;
+                    if (ctx.display) { ctx.display.focusKey = 'tgt:drow15'; lastFocusKey = ctx.display.focusKey; }
+                    queueRender(); return;
+                }
+                if (prev === 'mColorDiag') closeMColorDiagnostics();
                 // Combos lives inside the Color page: back returns to Color, then to the main list
                 if (prev === 'combos') {
                     state.detail = 'colours'; state.detailScroll = 0;
@@ -1442,7 +1463,7 @@ mgu.run({
                     saveLook(); queueRender(); return;
                 }
                 state.detail = null; state.detailScroll = 0; state.detailFocus = -1;
-                const returnRow = prev === 'colours' ? 1 : prev === 'zones' ? 2 : 0;
+                const returnRow = prev === 'colours' ? 1 : prev === 'zones' ? 2 : prev === 'mColorDiag' ? 7 : 0;
                 state.oemFocus = returnRow;
                 if (ctx.display) { ctx.display.focusKey = 'tgt:row' + returnRow; lastFocusKey = 'tgt:row' + returnRow; }
                 queueRender();
@@ -1793,6 +1814,11 @@ mgu.run({
                 scr = det.scroll;
                 lastDetGeom = { offsets: det.offsets, rowHs: det.rowHs, avail: det.avail };
                 if (det.back) hitboxes.push({ x: det.back.x, y: det.back.y, w: det.back.w, h: det.back.h, key: 'detailBack' });
+                if (state.detail === 'mColorDiag' || state.detail === 'mColorRegistry') {
+                    const back = { x: 514, y: 54, w: 116, h: 34 };
+                    Sheet.drawChip(cv, G, back.x, back.y, back.w, 'BACK', { h: back.h, run: actions.detailBack, key: 'mcolor-back', size: 11 });
+                    hitboxes.push(Object.assign({ key: 'detailBack' }, back));
+                }
                 det.rows.forEach((r) => hitboxes.push({ x: r.x, y: r.y, w: r.w, h: r.h, key: 'detailItem', i: r.i }));
                 (det.swatches || []).forEach((s) => hitboxes.push({ x: s.x, y: s.y, w: s.w, h: s.h, key: 'zoneColor', zone: s.zone, row: s.row }));
                 if (cv.own) {

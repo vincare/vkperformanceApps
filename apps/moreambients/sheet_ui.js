@@ -435,7 +435,7 @@ function drawDetailPanel(cv, G, opts) {
     cv.fillRect(px, py, pw, headH, G.withAlpha('#262930', 0.92));
     cv.line(px, py, px + pw, py, 1.4, G.withAlpha('#cfd8ec', 0.55));
     const bcy = py + headH / 2;
-    cv.text('INTERIOR LIGHTING', lx - 14, bcy + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
+    cv.text(opts.title || 'INTERIOR LIGHTING', lx - 14, bcy + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
     cv.line(px, top0, px + pw, top0, 1, G.withAlpha('#9aa0ac', 0.14));
     const back = null;
 
