@@ -159,9 +159,10 @@ function id8CardBg(cv, G, x, y, w, h) {
 }
 
 /** Small framed swatch: the colour fills the box cleanly, with a light border and outer glow. */
-function drawSwatch(cv, G, x, y, w, h, c) {
+function drawSwatch(cv, G, x, y, w, h, c, disabled) {
     cv.fillRect(x - 2, y - 2, w + 4, h + 4, G.withAlpha(c, 0.35));
     cv.fillRect(x, y, w, h, c);
+    if (disabled) cv.fillRect(x, y, w, h, G.withAlpha('#05070B', 0.58));
     cv.strokeRoundRect(x, y, w, h, 1, 1.2, G.withAlpha('#e8f6ff', 0.85));
 }
 
@@ -172,7 +173,7 @@ function drawSwatch(cv, G, x, y, w, h, c) {
  */
 function drawInteriorLighting(cv, G, opts) {
     const px = 88, pw = 560;
-    const baseRows = [62, 72, 72, 118, 118, 72, 72, 72, 72, 72];
+    const baseRows = [62, 72, 72, 118, 118, 72, 72, 72, 72, 72, 72];
     const basePh = baseRows.reduce((a, b) => a + b, 0);
     const py = 40;
     const bottom = H + (opts.extra || 0) - 4;
@@ -221,7 +222,13 @@ function drawInteriorLighting(cv, G, opts) {
     // 1. Color + swatch(es): a picked combo shows its two zone colours, a colour one box
     const c1 = rowTop[1] + rows[1] / 2;
     cv.text('Color', lx, c1 + 8, 25, txtC(1), { font: 'bold', literal: true });
-    if (opts.combo) {
+    if (opts.featureLighting && opts.featureLighting.key === 'mColor') {
+        drawSwatch(cv, G, rx - 94, c1 - 14, 28, 28, opts.featureLighting.dashboard);
+        drawSwatch(cv, G, rx - 60, c1 - 14, 28, 28, opts.featureLighting.door);
+        drawSwatch(cv, G, rx - 26, c1 - 14, 28, 28, opts.featureLighting.footwell);
+    } else if (opts.featureLighting) {
+        drawSwatch(cv, G, rx - 96, c1 - 18, 96, 36, opts.featureLighting.dashboard);
+    } else if (opts.combo) {
         drawSwatch(cv, G, rx - 132, c1 - 18, 62, 36, opts.combo.c1);   // dash · left
         drawSwatch(cv, G, rx - 62, c1 - 18, 62, 36, opts.combo.c2);    // footwells · right
     } else {
@@ -260,12 +267,16 @@ function drawInteriorLighting(cv, G, opts) {
 
     // 5..9: plain toggle rows
     const plain = [
-        ['Reduced for night driving', 'night'], ['Dynamic light', 'dynamic'],
-        ['M Color Mode', null], ['Comfort Mode', null], ['Sport Mode', null]];
-    plain.forEach(([label, flag], k) => {
+        ['Reduced for night driving', 'night', !!opts.night], ['Dynamic light', 'dynamic', !!opts.dynamic],
+        ['M Color Mode', 'mColorMode', !!(opts.features && opts.features.mColor)],
+        ['Comfort Mode', 'comfortMode', !!(opts.features && opts.features.comfort)],
+        ['Sport Mode', 'sportMode', !!(opts.features && opts.features.sport)],
+        ['Eco Mode', 'ecoMode', !!(opts.features && opts.features.eco)]];
+    plain.forEach(([label], k) => {
         const i = 5 + k, cy = rowTop[i] + rows[i] / 2;
         cv.text(label, lx, cy + 8, 25, txtC(i), { font: 'bold', literal: true });
-        id7Toggle(cv, G, rx - 52, cy - 12, flag ? !!opts[flag] : false, false);
+        const on = plain[k][2];
+        id7Toggle(cv, G, rx - 52, cy - 12, on, i >= 7);
     });
     cv.noclip();
 
@@ -290,7 +301,7 @@ function drawInteriorLighting(cv, G, opts) {
         const y = Math.max(top, r.y);
         return { x: r.x, y, w: r.w, h: Math.min(py + ph, r.y + r.h) - y, i: r.i, key: r.key };
     };
-    const rowKeys = ['oemLight', 'panelColour', 'panelZones', null, null, 'oemNight', 'oemDynamic', null, null, null];
+    const rowKeys = ['oemLight', 'panelColour', 'panelZones', null, null, 'oemNight', 'oemDynamic', 'mColorMode', 'comfortMode', 'sportMode', 'ecoMode'];
     return {
         rows: rows.map((h, i) => vis({ x: px, y: rowTop[i], w: pw, h, i, key: rowKeys[i] })).filter((r) => r.h > 0),
         // unclipped geometry of EVERY row: the controller must be able to land on rows that are
@@ -298,9 +309,10 @@ function drawInteriorLighting(cv, G, opts) {
         targets: rows.map((h, i) => ({ x: px, y: rowTop[i], w: pw, h, i, key: rowKeys[i] })),
         bgMinus: vis({ x: lx - 8, y: byBg - 22, w: 44, h: 44, key: 'bgDown', i: 3 }),
         bgPlus:  vis({ x: rx - 32, y: byBg - 22, w: 44, h: 44, key: 'bgUp', i: 3 }),
+        bgBar:   vis({ x: segX0, y: byBg - 20, w: segX1 - segX0, h: 40, key: 'oemBrightness', zone: 'background', i: 3 }),
         minus:   vis({ x: lx - 8, y: byAc - 22, w: 44, h: 44, key: 'accentDown', i: 4 }),
         plus:    vis({ x: rx - 32, y: byAc - 22, w: 44, h: 44, key: 'accentUp', i: 4 }),
-        bar:     vis({ x: segX0, y: byAc - 20, w: segX1 - segX0, h: 40, key: 'oemBrightness', zone: 'accent', i: 4 }),
+        accentBar: vis({ x: segX0, y: byAc - 20, w: segX1 - segX0, h: 40, key: 'oemBrightness', zone: 'accent', i: 4 }),
         scroll: { y: pin0 + pinH, max: maxScroll, cur: scrollY, bar: sbar },
         box: { x: px, y: py, w: pw, h: ph },
         offsets: rows.map((h, i) => i ? rows.slice(1, i).reduce((a, b) => a + b, 0) : 0),
@@ -318,8 +330,10 @@ function drawDetailPanel(cv, G, opts) {
     const bottom = H + (opts.extra || 0) - 4;
     const avail = bottom - py;
     const headH = 69;
-    const rowH = 66;
-    const imgH = opts.image ? 150 : 0;
+    const rowH = opts.rowH || 66;
+    const hasHeaderSwatches = !!(opts.imageSwatches && opts.imageSwatches.length >= 2);
+    const infoBand = !!(opts.image || opts.imageInfo || hasHeaderSwatches);
+    const imgH = opts.image ? 150 : hasHeaderSwatches ? 110 : infoBand ? 150 : 0;
     const contentH = imgH + opts.items.length * rowH;
     const maxScroll = Math.max(0, contentH - avail + headH);
     const scrollY = Math.max(0, Math.min(maxScroll, opts.scroll || 0));
@@ -335,16 +349,38 @@ function drawDetailPanel(cv, G, opts) {
         const y = contentTop + imgH + i * rowH;
         if (y >= top0 && y <= py + avail) cv.line(divX0, y, divX1, y, 1.2, lineC);
     }
-    if (opts.image) {
-        const im = opts.image, iw = 240, ih = Math.round(iw * im.h / im.w);
-        const ix = px + (pw - iw) / 2, iy = contentTop + (imgH - ih) / 2;
-        if (iy + ih > top0 && iy < py + avail) {
-            cv.fillRect(ix - 2, iy - 2, iw + 4, ih + 4, G.withAlpha('#5ac8ff', 0.25));
-            cv.image(im.id, ix + 4, iy + 2, iw - 8, ih - 4);
-            cv.strokeRoundRect(ix, iy, iw, ih, 1, 1.2, G.withAlpha('#e8f6ff', 0.85));
+    if (infoBand) {
+        if (opts.image) {
+            const im = opts.image, iw = opts.imageInfo ? 198 : 240, ih = Math.round(iw * im.h / im.w);
+            const ix = opts.imageInfo ? px + 28 : px + (pw - iw) / 2, iy = contentTop + (imgH - ih) / 2;
+            if (iy + ih > top0 && iy < py + avail) {
+                cv.fillRect(ix - 2, iy - 2, iw + 4, ih + 4, G.withAlpha('#5ac8ff', 0.25));
+                cv.image(im.id, ix + 4, iy + 2, iw - 8, ih - 4);
+                cv.strokeRoundRect(ix, iy, iw, ih, 1, 1.2, G.withAlpha('#e8f6ff', 0.85));
+            }
+        }
+        if (hasHeaderSwatches) {
+            // Zones header: selected colours span the full section, with no labels.
+            const pad = 2, gap = 4, swatchCount = opts.imageSwatches.length;
+            const swX = px + pad, swY = contentTop + pad;
+            const swW = Math.floor((pw - pad * 2 - gap * (swatchCount - 1)) / swatchCount), swH = imgH - pad * 2;
+            opts.imageSwatches.forEach((colour, i) => drawSwatch(cv, G, swX + i * (swW + gap), swY, swW, swH, colour));
+        } else if (opts.imageInfo) {
+            const infoX = px + 256;
+            cv.text('NEXT APPLY TARGET', infoX, contentTop + 48, 11, G.withAlpha('#d6ddea', 0.6),
+                { font: 'bold', spacing: 1, literal: true });
+            cv.text(opts.imageInfo.name, infoX, contentTop + 84, 20, '#ffffff', { font: 'bold', literal: true });
+            cv.text('Choose a zone below to preview its colour', infoX, contentTop + 112, 10.5,
+                G.withAlpha('#d6ddea', 0.55), { literal: true });
         }
         cv.line(divX0, contentTop + imgH, divX1, contentTop + imgH, 1.2, lineC);
     }
+    const swatches = [];
+    const addZoneSwatch = (x, y, w, h, row, zone) => {
+        const x0 = Math.max(px, x), y0 = Math.max(top0, y);
+        const x1 = Math.min(px + pw, x + w), y1 = Math.min(py + avail, y + h);
+        if (x1 > x0 && y1 > y0) swatches.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, row, zone });
+    };
     opts.items.forEach((it, i) => {
         const y = contentTop + imgH + i * rowH;
         if (y + rowH < top0 || y > py + avail) return;
@@ -354,15 +390,33 @@ function drawDetailPanel(cv, G, opts) {
         const lit = foc || (!(opts.focus >= 0) && sel);
         if (lit) id7Highlight(cv, G, px, y, pw, rowH);
         const cy = y + rowH / 2;
-        cv.text(it.name, lx, cy + 8, 25, lit || sel ? '#ffffff' : '#eef2fa', { font: 'bold', literal: true });
-        if (it.nav) {
+        if (it.desc) {
+            cv.text(it.name, lx, cy - 3, 21, lit || sel ? '#ffffff' : '#eef2fa', { font: 'bold', literal: true });
+            cv.text(it.desc, lx, cy + 22, 11, G.withAlpha('#d6ddea', 0.56), { literal: true });
+        } else {
+            cv.text(it.name, lx, cy + 8, 25, lit || sel ? '#ffffff' : '#eef2fa', { font: 'bold', literal: true });
+        }
+        if (it.toggle) {
+            const sx = rx - 72, sy = cy - 17, on = !!it.enabled;
+            cv.roundRect(sx, sy, 64, 34, 17, on ? '#35C85A' : '#59616D');
+            cv.strokeRoundRect(sx, sy, 64, 34, 17, 1.2, G.withAlpha('#F2F6FC', 0.7));
+            cv.circle(on ? sx + 46 : sx + 18, cy, 12, '#F7F9FC');
+        } else if (it.nav) {
             cv.line(rx - 14, cy - 10, rx - 5, cy, 3, '#d8e0ec');
             cv.line(rx - 5, cy, rx - 14, cy + 10, 3, '#d8e0ec');
         } else if (it.c2) {
-            drawSwatch(cv, G, rx - 132, cy - 18, 62, 36, it.c1);   // dash · left
-            drawSwatch(cv, G, rx - 62, cy - 18, 62, 36, it.c2);    // footwells · right
+            const leftX = rx - 132, rightX = rx - 62, swY = cy - 18;
+            drawSwatch(cv, G, leftX, swY, 62, 36, it.c1);   // dash · left
+            drawSwatch(cv, G, rightX, swY, 62, 36, it.c2);  // footwells · right
+            if (it.zone === 'all') {
+                addZoneSwatch(leftX, swY, 62, 36, i, 'upper');
+                addZoneSwatch(rightX, swY, 62, 36, i, 'lower');
+            }
         } else if (it.c1) {
-            drawSwatch(cv, G, rx - 96, cy - 18, 96, 36, it.c1);
+            const swX = rx - 96, swY = cy - 18;
+            drawSwatch(cv, G, swX, swY, 96, 36, it.c1, it.disabled);
+            if (!it.disabled && ['dashboard', 'doors', 'footwell'].indexOf(it.zone) >= 0)
+                addZoneSwatch(swX, swY, 96, 36, i, it.zone);
         }
         if (sel && !lit) {
             const markX = it.nav ? rx - 34 : it.c2 ? rx - 160 : it.c1 ? rx - 124 : rx - 34;
@@ -400,7 +454,7 @@ function drawDetailPanel(cv, G, opts) {
     }).filter((r) => r.h > 0);
     // unclipped: controller targets for every item, even the ones scrolled off-screen
     const targets = opts.items.map((it, i) => ({ x: px, y: contentTop + imgH + i * rowH, w: pw, h: rowH, i }));
-    return { rows, targets, back, scroll: { y: top0, max: maxScroll, cur: scrollY, bar: sbar },
+    return { rows, targets, swatches, back, scroll: { y: top0, max: maxScroll, cur: scrollY, bar: sbar },
         offsets: opts.items.map((it, i) => imgH + i * rowH), rowHs: opts.items.map(() => rowH), avail: avail - headH };
 }
 
