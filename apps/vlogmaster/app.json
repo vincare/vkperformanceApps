@@ -1,0 +1,83 @@
+{
+  "id": "vlogmaster",
+  "title": "VLogMaster",
+  "vendor": "VKPERFORMANCE",
+  "description": "Read-only BMW live data logger, log analyzer and evidence-based health overview for MGU / iDrive 7",
+  "version": "0.1.0",
+  "loggingId": "VLM1",
+  "iconGlyph": "VLM",
+  "mguHmi": ["ID7"],
+  "requires": {
+    "idrive7-renderd": "2.1.18",
+    "mgu-inputgate": "1.1.0"
+  },
+  "signals": {
+    "de.bmw.infotainment.vehicle.CDS": {
+      "statusEngineSpeed2": "rs",
+      "statusEngineTemperature": "rs",
+      "statusEngineStatus": "rs",
+      "statusBattery2": "rs"
+    },
+    "de.bmw.infotainment.vehicle.Vehicle": {
+      "statusNewCurrentUnitsStatusExt": "rs"
+    },
+    "de.bmw.infotainment.vehicle.Vehicle2": {
+      "statusCarSpeed2": "rs",
+      "statusVehicleMass": "rs"
+    },
+    "de.bmw.infrastructure.VehicleInformation": {
+      "statusGearboxDrive": "s"
+    },
+    "de.bmw.infotainment.drivingexcitement.FES": {
+      "statusActualValueTorque2": "rs"
+    },
+    "de.bmw.infrastructure.analytics.BasicDataSet": {
+      "basicDataSet": "rs"
+    },
+    "de.bmw.infrastructure.EnvironmentalInformation": {
+      "ExteriorTemperature": "s"
+    },
+    "de.bmw.infotainment.vehicle.CDS2": {
+      "statusLongitudinalAccelerationMassCenter": "rs"
+    },
+    "de.bmw.infotainment.KombiIF": {
+      "statusRangeTankStatus": "rs"
+    },
+    "de.bmw.infotainment.vehicle.TPMS": {
+      "statusTyrePressure": "rs",
+      "statusTyreTemperature": "rs",
+      "statusTargetTyrePressure": "rs"
+    },
+    "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
+      "_instances": "SystemFunctionsInternalTasuInst1",
+      "_methods": ["sendTasuRequest"],
+      "_broadcasts": ["sendTasuResponse"]
+    }
+  },
+  "settings": [
+    {
+      "key": "vehicleProfile",
+      "label": "Vehicle profile",
+      "desc": "User-selected reference vehicle. Values still depend on signals actually present in this car.",
+      "type": "choice",
+      "default": "m340i-g20-b58tu",
+      "options": [
+        ["m340i-g20-b58tu", "BMW M340i G20 · B58TU · reference"],
+        ["auto", "Other BMW · discover available signals"]
+      ]
+    }
+  ],
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "VLogMaster",
+      "buttons": [
+        ["BTN_ACTION", "Start / action"],
+        ["BTN_PREV", "Previous"],
+        ["BTN_NEXT", "Next"],
+        ["BTN_SETTINGS", "Settings"]
+      ]
+    }
+  ]
+}
