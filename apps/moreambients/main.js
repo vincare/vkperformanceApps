@@ -19,6 +19,7 @@ const BUSES = [
 ];
 const RECORDS = 26, RECORD_BYTES = 10;
 const HOLD_SECONDS = 60, RENEW_MS = 40000;
+const BUSY_TRIES = 6, BUSY_MS = 400;
 const FAVOURITES = 6;
 const C = {
     bg: '#07090E', panel: '#11151E', panel2: '#171D28', edge: '#293241',
@@ -180,7 +181,7 @@ mgu.run({
         const { ui, settings, log } = ctx;
         const state = {
             page: 'studio', zone: 'all', slot: 1, liveSlot: null,
-            proxy: null, diag: null, modules: [], scan: 'not scanned',
+            proxy: null, diag: null, bdcAddress: BDC, modules: [], scan: 'not scanned',
             busy: false, notice: 'Module scan starts automatically when the app opens.', noticeColor: C.muted,
             scanBusy: false, applyBusy: false, activeCustom: false, renewTimer: null, renewInterval: 0,
             oemBrightnessTimer: null, oemBrightnessPending: false,
@@ -220,6 +221,8 @@ mgu.run({
         const zoneName = () => state.zone === 'all' ? 'ALL LIGHTS' : state.zone === 'upper' ? 'UPPER / TRIM' : 'LOWER / FOOTWELLS';
         const zoneTargets = () => state.zone === 'all' ? ['upper', 'lower', 'other'] : [state.zone];
         const validHex = (value) => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+        const hasDiagnosticProxy = () => !!(state.diag && state.diag.p);
+        const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const anyAutoFeature = () => !!(state.features.mColor || state.features.comfort || state.features.sport || state.features.eco);
         function desiredFeatureLighting() {
             if (!state.oemEnabled) return null;
@@ -388,7 +391,7 @@ mgu.run({
         }
         function retryOemToggleWhenIdle() {
             if (!state.oemRetryPending || state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying || stopped) return;
-            if (!state.proxy && !(state.modules.length && state.diag && state.diag.available)) return;
+            if (!state.proxy && !(state.modules.length && hasDiagnosticProxy())) return;
             state.oemRetryPending = false;
             setTimeout(() => { if (!stopped) setOemLightingEnabled(state.oemEnabled); }, 0);
         }
@@ -541,7 +544,9 @@ mgu.run({
         async function scanModules() {
             if (state.scanBusy || state.applyBusy || state.busy || stopped) return;
             if (state.activeCustom || state.blackoutOverride) await restoreBmw();
-            state.scanBusy = true; state.scan = 'scanning'; state.modules = [];
+            // Keep the last confirmed map while refreshing, as AmbientConfig does. A
+            // transiently silent LIN bus must not make all controls forget known modules.
+            state.scanBusy = true; state.scan = 'scanning';
             setNotice('READING THE TWO BMW BODY-CONTROLLER LIGHT BUSES…', C.cyan);
             const found = [];
             try {
@@ -551,21 +556,46 @@ mgu.run({
                     diagInitPromise = state.diag.init();
                 }
                 if (diagInitPromise) await diagInitPromise;
-                if (!state.diag.available) throw new Error(state.diag.error || 'BMW diagnostic link is unavailable');
+                // `available` is an asynchronous status notification, not a prerequisite for
+                // making a request. AmbientConfig uses the initialized TASU proxy directly;
+                // on some MGU builds the first notification arrives after startup scanning.
+                if (!hasDiagnosticProxy()) throw new Error(state.diag.error || 'BMW diagnostic proxy is unavailable');
                 for (let bus = 0; bus < BUSES.length; bus++) {
                     const did = BUSES[bus].read;
-                    const reply = await state.diag.physical(BDC, 0x22, did, 15000, acceptReply(0x22, did),
-                        { pendingTimeoutMs: 15000 });
+                    const reply = await physicalWithBusyRetry(state.bdcAddress, 0x22, did, 15000,
+                        acceptReply(0x22, did), { pendingTimeoutMs: 15000 });
                     const parsed = parseModules(bus, reply);
                     if (parsed) found.push.apply(found, parsed);
                     else if (reply && reply[0] === 0x7f) log.info('ambient scan: bus ' + (bus + 1) + ' returned NRC ' + (reply[2] || 0).toString(16));
                 }
-                state.modules = found;
-                state.scan = found.length ? found.length + ' MODULES FOUND' : 'NO MODULES ANSWERED';
-                state.upperRead = average(found.filter((m) => m.part === 'upper' && !m.fault));
-                state.lowerRead = average(found.filter((m) => m.part === 'lower' && !m.fault));
-                if (found.length) setNotice('READ ' + found.length + ' LIGHT MODULES · NO COLOUR WAS CHANGED', C.green);
-                else setNotice('NO RGB MODULES REPLIED · TRY THE BMW FACTORY PALETTE', C.amber);
+                if (!found.length) {
+                    const detected = await discoverBdcAddress();
+                    if (detected !== null && detected !== state.bdcAddress) {
+                        state.bdcAddress = detected;
+                        log.info('ambient scan: BDC ambient service found at 0x' + detected.toString(16).toUpperCase());
+                        for (let bus = 0; bus < BUSES.length; bus++) {
+                            const did = BUSES[bus].read;
+                            const reply = await physicalWithBusyRetry(state.bdcAddress, 0x22, did, 15000,
+                                acceptReply(0x22, did), { pendingTimeoutMs: 15000 });
+                            const parsed = parseModules(bus, reply);
+                            if (parsed) found.push.apply(found, parsed);
+                            else if (reply && reply[0] === 0x7f) log.info('ambient scan: alternate BDC bus ' + (bus + 1) + ' returned NRC ' + (reply[2] || 0).toString(16));
+                        }
+                    }
+                }
+                if (found.length) {
+                    state.modules = found;
+                    state.upperRead = average(found.filter((m) => m.part === 'upper' && !m.fault));
+                    state.lowerRead = average(found.filter((m) => m.part === 'lower' && !m.fault));
+                    state.scan = found.length + ' MODULES FOUND';
+                    setNotice('READ ' + found.length + ' LIGHT MODULES · NO COLOUR WAS CHANGED', C.green);
+                } else if (state.modules.length) {
+                    state.scan = 'NO NEW RESPONSE · KEEPING ' + state.modules.length + ' KNOWN MODULES';
+                    setNotice('BDC DID NOT REPLY · KEEPING THE LAST CONFIRMED LIGHT MAP', C.amber);
+                } else {
+                    state.scan = 'NO MODULES ANSWERED';
+                    setNotice('NO RGB MODULES REPLIED · TRY THE BMW FACTORY PALETTE', C.amber);
+                }
             } catch (e) {
                 state.scan = 'SCAN FAILED';
                 setNotice('SCAN FAILED · ' + shortError(e).slice(0, 76), C.red);
@@ -583,6 +613,47 @@ mgu.run({
                 } else if (state.oemEnabled && state.oemWantApply && state.modules.length) setTimeout(() => applyOemSelection(), 0);
             }
         }
+        async function physicalWithBusyRetry(target, sid, data, timeoutMs, accept, options) {
+            let reply = null;
+            for (let attempt = 0; ; attempt++) {
+                reply = await state.diag.physical(target, sid, data, timeoutMs, accept, options);
+                if (!(reply && reply[0] === 0x7f && reply[1] === sid && reply[2] === 0x21)
+                    || attempt >= BUSY_TRIES) return reply;
+                log.info('ambient UDS 0x' + sid.toString(16) + ' BUSY at 0x' + target.toString(16)
+                    + ' · retry ' + (attempt + 1) + '/' + BUSY_TRIES);
+                await pause(BUSY_MS * (attempt + 1));
+            }
+        }
+        async function discoverBdcAddress() {
+            // Read-only fallback copied from AmbientConfig: first prove whether the
+            // expected BDC answers at all, then identify alternate BDCs via F150.
+            let bodyReply = null;
+            try {
+                bodyReply = await state.diag.physical(BDC, 0x22, [0xf1, 0x86], 5000,
+                    acceptReply(0x22, [0xf1, 0x86]));
+            } catch (e) { log.info('ambient BDC probe 0x40: ' + shortError(e)); }
+            if (bodyReply) {
+                log.info('ambient BDC probe: 0x40 answers, ambient buses are unavailable there');
+                return null;
+            }
+            let units = new Map();
+            try { units = await state.diag.functional(0x22, [0xf1, 0x50], { idleMs: 3000, maxMs: 15000 }); }
+            catch (e) { log.info('ambient BDC identification: ' + shortError(e)); }
+            const identity = (reply) => reply && reply[0] === 0x62
+                ? reply.slice(3, 6).map((byte) => byte.toString(16).toUpperCase().padStart(2, '0')).join('') : null;
+            const bodyIds = ['0F2680', '0F2050', '0F19C0'];
+            const candidates = [0x10].concat(Array.from(units.keys()).filter((address) => address !== BDC && address !== 0x10
+                && bodyIds.indexOf(identity(units.get(address))) >= 0));
+            for (const address of candidates) {
+                const did = BUSES[0].read;
+                try {
+                    const reply = await physicalWithBusyRetry(address, 0x22, did, 15000,
+                        acceptReply(0x22, did), { pendingTimeoutMs: 15000 });
+                    if (parseModules(0, reply)) return address;
+                } catch (e) { log.info('ambient BDC candidate 0x' + address.toString(16) + ': ' + shortError(e)); }
+            }
+            return null;
+        }
         function average(list) {
             if (!list || !list.length) return null;
             return [0, 1, 2].map((i) => Math.round(list.reduce((sum, m) => sum + m.rgb[i], 0) / list.length));
@@ -590,15 +661,15 @@ mgu.run({
         async function sendFrame(bus, nad, colour) {
             const did = BUSES[bus].write;
             const data = frameFor(bus, nad, colour.rgb, colour.brightness, HOLD_SECONDS);
-            const reply = await state.diag.physical(BDC, 0x2e, data, 1800, acceptReply(0x2e, did),
-                { retryBaseMs: 80, maxRetries: 2 });
+            const reply = await physicalWithBusyRetry(state.bdcAddress, 0x2e, data, 1800, acceptReply(0x2e, did),
+                { retryBaseMs: 20, maxRetries: 10 });
             return { ok: !!(reply && reply[0] === 0x6e && reply[1] === did[0] && reply[2] === did[1]), why: acceptedText(reply) };
         }
         async function sendRestore(bus, nad) {
             const did = BUSES[bus].write;
             const data = restoreFrame(bus, nad);
-            const reply = await state.diag.physical(BDC, 0x2e, data, 1800, acceptReply(0x2e, did),
-                { retryBaseMs: 80, maxRetries: 2 });
+            const reply = await physicalWithBusyRetry(state.bdcAddress, 0x2e, data, 1800, acceptReply(0x2e, did),
+                { retryBaseMs: 20, maxRetries: 10 });
             return !!(reply && reply[0] === 0x6e && reply[1] === did[0] && reply[2] === did[1]);
         }
         function activeZoneLooks() {
@@ -1007,7 +1078,7 @@ mgu.run({
             if (state.applyBusy || state.scanBusy || state.busy) return false;
             clearTimeout(state.renewTimer); state.renewTimer = null; state.activeCustom = false; state.blackoutOverride = false;
             state.activeFeatureLighting = null; state.customByLocation = Object.create(null);
-            if (!state.modules.length || !state.diag || !state.diag.available) {
+            if (!state.modules.length || !hasDiagnosticProxy()) {
                 state.upperRead = null; state.lowerRead = null; state.customUpper = null; state.customLower = null; state.customOther = null;
                 setNotice('RESTORE LINK UNAVAILABLE · THE SHORT BMW OVERRIDE WILL EXPIRE BY ITSELF', C.amber);
                 return false;
@@ -1071,9 +1142,9 @@ mgu.run({
         }
         async function sendOemLightingRequest(enabled, previewOnly) {
             if (!enabled) state.pendingCustomApply = null;
-            const canBlackoutWithModules = !enabled && state.modules.length && state.diag && state.diag.available;
+            const canBlackoutWithModules = !enabled && state.modules.length && hasDiagnosticProxy();
             const hadModuleOverride = state.activeCustom || state.blackoutOverride || state.oemRestoreRequested;
-            const canRestoreWithModules = enabled && state.modules.length && state.diag && state.diag.available;
+            const canRestoreWithModules = enabled && state.modules.length && hasDiagnosticProxy();
             if (!state.proxy && !previewOnly && !canBlackoutWithModules && !canRestoreWithModules && !state.scanBusy) {
                 setNotice('BMW AMBIENT CONTROL UNAVAILABLE · CHECK THE VEHICLE LINK', C.amber);
                 return false;
@@ -1094,9 +1165,9 @@ mgu.run({
                 // while BMW's request fades the lights in and out over seconds.
                 let moduleBlackout = false;
                 let moduleRestore = false;
-                if (!enabled && !previewOnly && state.modules.length && state.diag && state.diag.available) {
+                if (!enabled && !previewOnly && state.modules.length && hasDiagnosticProxy()) {
                     moduleBlackout = await applyBlackoutOverride();
-                } else if (enabled && !previewOnly && state.modules.length && state.diag && state.diag.available
+                } else if (enabled && !previewOnly && state.modules.length && hasDiagnosticProxy()
                     && (hadModuleOverride || !state.proxy)) {
                     moduleRestore = await restoreBmw();
                     if (moduleRestore) state.oemRestoreRequested = false;
@@ -2055,7 +2126,7 @@ mgu.run({
             }
             clearInterval(focusPoll);
             ctx._moreAmbientWatches.forEach((sub) => { try { if (sub && sub.shutdown) Promise.resolve(sub.shutdown()).catch(() => {}); } catch (e) {} });
-            if (state.activeCustom && !state.blackoutOverride && state.diag && state.diag.available) {
+            if (state.activeCustom && !state.blackoutOverride && hasDiagnosticProxy()) {
                 (async () => {
                     for (let bus = 0; bus < BUSES.length; bus++) {
                         if (!state.modules.some((m) => m.bus === bus)) continue;
