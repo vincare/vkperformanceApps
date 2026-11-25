@@ -27,6 +27,9 @@ const rec = require('./record');
 const SOCKETS = process.env.MGU_RENDERD_SOCKET ? [process.env.MGU_RENDERD_SOCKET] : ['/run/mgu-renderd/renderd.sock', '/run/mgu-render/render.sock'];
 const SOCKET = SOCKETS[0];
 const isSocket = (p) => { try { return fs.statSync(p).isSocket(); } catch (e) { return false; } };
+// MGU_RENDERD_SOCKET may name a localhost TCP endpoint (the PC emulator on Windows, no AF_UNIX): 'tcp://host:port'
+const TCP_SOCK = /^tcp:\/\/([^:/]+):(\d+)$/;
+const usable = (p) => isSocket(p) || TCP_SOCK.test(p);
 const M = { HELLO: 1, PLACE: 2, SHOW: 3, ATLAS: 4, RAMP: 5, LAYER: 6, FRAME: 7, DROP_LAYER: 8, IMAGE: 9, GRAB: 10 };
 const E = { READY: 101, TICK: 102, ERROR: 103, STATS: 104, CCU: 105 };
 // touch (mgu-render, IterioDev's mgu-renderd): message 9 is CLAIM there; 105 and 106 come back as TOUCH and CLOSED
@@ -143,7 +146,7 @@ class RenderClient extends EventEmitter {
     }
 
     /** Socket exists (the renderer is installed and running)? */
-    static available(path) { return path ? isSocket(path) : SOCKETS.some(isSocket); }
+    static available(path) { return path ? usable(path) : SOCKETS.some(usable); }
 
     connect() {
         if (this.opts.file) {
@@ -160,11 +163,12 @@ class RenderClient extends EventEmitter {
             return this;
         }
         // the first socket there; one nobody listens on (a stopped renderer's) passes to the next
-        const list = this.opts.socket ? [this.opts.socket] : SOCKETS.filter(isSocket);
+        const list = this.opts.socket ? [this.opts.socket] : SOCKETS.filter(usable);
         if (!list.length) list.push(SOCKET);
         const path = list[(this.at || 0) % list.length];
         if (path !== this.path) { this.path = path; this.log.info('renderd: socket ' + path); }
-        const s = net.createConnection(path);
+        const tm = TCP_SOCK.exec(path);
+        const s = tm ? net.createConnection({ host: tm[1], port: Number(tm[2]) }) : net.createConnection(path);
         this.sock = s;
         s.on('connect', () => {
             this.connected = true;
@@ -399,12 +403,19 @@ class RenderClient extends EventEmitter {
                 }
                 return;
             }
-            const sent = this.sent.image.get(id);
-            if (sent && sent.ver === im.ver) return;
-            if (!sent || sent.w !== im.w || sent.h !== im.h) {
+            // Transparent RGBA overlays (for example the ambient-light colour
+            // masks) must use PIX_RGBA_PREMUL. Sending them as opaque pixmaps
+            // turns every transparent pixel black and covers the image below.
+              const sent = this.sent.image.get(id);
+              if (sent && sent.ver === im.ver) return;
+            let transparent = false;
+            for (let i = 3; i < im.data.length; i += 4) {
+                if (im.data[i] !== 255) { transparent = true; break; }
+            }
+            const format = transparent ? 1 : 2;
+            if (!sent || sent.w !== im.w || sent.h !== im.h || sent.format !== format) {
                 // Native mgu-render/1 uses a pixel-map descriptor, then one or more pixel regions.
-                // Format 2 is opaque RGBA; these recorded images are already composited by the app.
-                this._write(this._u32msg(X.PIXMAP, [id, im.w, im.h, 2, 1]));
+                this._write(this._u32msg(X.PIXMAP, [id, im.w, im.h, format, 1]));
             }
             const n = im.w * im.h * 4;
             const b = this._imageBuf(8 + 24 + n);
@@ -412,9 +423,18 @@ class RenderClient extends EventEmitter {
             b.writeUInt32LE(id, 8); b.writeUInt32LE(1, 12);
             b.writeUInt32LE(0, 16); b.writeUInt32LE(0, 20);
             b.writeUInt32LE(im.w, 24); b.writeUInt32LE(im.h, 28);
-            Buffer.from(im.data.buffer, im.data.byteOffset, n).copy(b, 32);
+            const pixels = Buffer.from(im.data.buffer, im.data.byteOffset, n);
+            if (format === 1) {
+                for (let i = 0; i < n; i += 4) {
+                    const a = pixels[i + 3];
+                    b[32 + i] = Math.round(pixels[i] * a / 255);
+                    b[33 + i] = Math.round(pixels[i + 1] * a / 255);
+                    b[34 + i] = Math.round(pixels[i + 2] * a / 255);
+                    b[35 + i] = a;
+                }
+            } else pixels.copy(b, 32);
             this._write(b);
-            this.sent.image.set(id, { ver: im.ver, w: im.w, h: im.h });
+            this.sent.image.set(id, { ver: im.ver, w: im.w, h: im.h, format });
             return;
         }
         if (this.sent.image.get(id) === im.ver) return;

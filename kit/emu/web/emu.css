@@ -50,7 +50,8 @@ body[data-dock="bottom"] #log { flex: 1 1 0px; min-height: 260px; max-height: no
 /* its underline continues the app's header line (display.js: FULL.headH 80, a 2 px line at 78..80) */
 .hmi-homecell { position: absolute; left: 0; top: 0; width: calc(var(--u) * 84); height: calc(var(--u) * 80); background: linear-gradient(#d6d6d6, #d6d6d6) bottom / 100% calc(var(--u) * 2) no-repeat, #1a1b1d; }
 #stage:not(.pk) .hmi-badge { display: none; }     /* (the car shows the profile number in its app list, not over an app) */
-.hmi-back-app { position: absolute; left: calc(var(--u) * 30); top: calc(var(--u) * 386); width: calc(var(--u) * 19); height: calc(var(--u) * 38); color: #f2f2f2; }
+.hmi-back-app { position: absolute; left: calc(var(--u) * 40); top: calc(var(--u) * 372); width: calc(var(--u) * 56); height: calc(var(--u) * 66); padding: calc(var(--u) * 14) calc(var(--u) * 16); color: #ffffff; background: linear-gradient(135deg, #2b2f38 0%, #1c1f26 100%); border: calc(var(--u) * 2) solid #d8e2f488; border-radius: calc(var(--u) * 10); box-shadow: 0 calc(var(--u) * 4) calc(var(--u) * 16) #000c, inset 0 calc(var(--u) * 1) 0 #ffffff40; cursor: pointer; filter: drop-shadow(0 0 calc(var(--u) * 4) #ffffff33); }
+.hmi-back-app:hover { background: linear-gradient(135deg, #a31224 0%, #5e0c18 100%); border-color: #ffccd4; }
 #stage.pk #screen, #stage.pk #soft { visibility: hidden; }    /* (the app is not on screen while the picker shows) */
 #stage:not(.pk) .hmi-up, #stage:not(.pk) #hmi-col, #stage.pk .hmi-homecell, #stage.pk .hmi-back-app { display: none; }
 .hmi-up { position: absolute; left: calc(var(--u) * 1126); top: calc(var(--u) * 30); width: calc(var(--u) * 26); height: calc(var(--u) * 15); color: var(--hmi-red); }
@@ -78,6 +79,11 @@ body[data-dock="bottom"] #log { flex: 1 1 0px; min-height: 260px; max-height: no
 .pk-bar { position: absolute; right: calc(var(--u) * 40); top: calc(var(--u) * 100); bottom: calc(var(--u) * 30); width: calc(var(--u) * 4); pointer-events: none; }
 .pk-thumb { position: absolute; left: 0; width: 100%; background: #d9d9d9; border-radius: calc(var(--u) * 2); }
 #bgimg { inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#ambient-preview { inset: 0; pointer-events: none; --ambient-upper-dim: .24; --ambient-lower-dim: .24; }
+.ambient-dim { position: absolute; pointer-events: none; background: #000; opacity: var(--ambient-upper-dim); transition: opacity 100ms linear; mix-blend-mode: multiply; }
+.ambient-dash { left: 54%; top: 13%; width: 27%; height: 22%; clip-path: polygon(0 86%, 100% 0, 100% 12%, 0 100%); }
+.ambient-door { left: 78%; top: 28%; width: 18%; height: 19%; clip-path: polygon(0 0, 100% 82%, 100% 94%, 0 12%); }
+.ambient-footwell { left: 43%; top: 42%; width: 55%; height: 52%; background: radial-gradient(ellipse at 50% 52%, #000 0%, #000 38%, transparent 78%); opacity: var(--ambient-lower-dim); }
 /* the HMI's own image component of a canvas screen (124, 82, 1600 x 520): the software path draws there */
 #soft { left: 6.458%; top: 11.389%; width: 83.333%; height: 72.222%; }
 #screen { inset: 0; width: 100%; height: 100%; display: block; }
@@ -134,8 +140,12 @@ select { text-overflow: ellipsis; }
 #settings { display: flex; flex-direction: column; gap: 6px; }
 .set-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .set-row label { flex: 1 1 8em; min-width: 0; overflow-wrap: break-word; hyphens: auto; }
+.set-txt { flex: 1 1 8em; min-width: 0; }
+.set-txt label { display: block; }
+.set-desc { font-size: 0.78em; color: #8a9099; margin-top: 2px; line-height: 1.3; }
 .set-row select, .set-row input:not([type=checkbox]) { flex: none; margin-left: auto; max-width: 100%; min-width: 0; }
 .set-row input[type=checkbox] { flex: none; margin-left: auto; }
+.set-head { margin-top: 8px; font-weight: bold; color: #e8212f; letter-spacing: 0.5px; border-top: 1px solid #333; padding-top: 8px; }
 
 .sigmode { gap: 14px; }
 .slider { display: grid; grid-template-columns: 64px minmax(0, 1fr) 62px; align-items: center; gap: 8px; margin: 4px 0; }

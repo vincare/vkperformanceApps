@@ -89,6 +89,7 @@ function shortError(error) { return String(error && error.message || error || 'u
 mgu.run({
     async start(ctx) {
         const { ui, settings, log } = ctx;
+        FlapUi.setArtCacheDir(ctx.dataDir, ctx.spec && ctx.spec.version);
         const diagnostics = () => settings.get('performanceDiagnostics') === true;
         const config = ctx.spec && ctx.spec.config || {};
         const scaling = config.scaling || {};
@@ -2371,10 +2372,7 @@ mgu.run({
 
         // Mode buttons styled like the oil-bar scales above them: same slab geometry
         // (SL=18, bottom edge x..x+bw), lighter top band, white end slash, scale line.
-        // DSC chip icons reuse the DYNAMIC CONFIG art (grey/blue); the red OFF icon
-        // would vanish on the red button, so OFF keeps the white variant.
-        const DSC_CHIP = { on: ['dscOn', 'DSC ON'], traction: ['dscMdm', 'DSC MDM'],
-            off: ['dscOffW', 'DSC OFF'] };
+        const DSC_CHIP = { on: 'DSC ON', traction: 'DSC MDM', off: 'DSC OFF' };
         function drawModeButtons(cv, G, t, mEnabled, mActive, mRun, dscRun) {
             const bh = 50, SL = 18, bw = 198;   // oil bars: w=216 -> bw=w-SL
             const y = G.pageBottom(cv) - bh - 4, cy = y + bh / 2;
@@ -2404,32 +2402,16 @@ mgu.run({
             cv.circle(mTextX + mTw + 11, cy, 5, mActive ? '#3ddb7f' : G.withAlpha('#c7cbd1', 0.5));
             if (cv.own && mRun) cv.target(1110, y, 216, bh, mRun, 'performance_m_sound_mode');
 
-            // DSC chip — icon drawn under the light band so its baked bg never shows
+            // DSC chip — text-only, centred on the slab
             cv.quad([[1360 + SL, y], [1360 + bw + SL, y], [1360 + bw, y + bh], [1360, y + bh]], mBg);
             const state = tyreExtra.dsc && tyreExtra.dsc.state;
-            const dc = DSC_CHIP[state] || ['dscOnW', 'DSC —'];
             const armed = dscWrite.armed;                          // OFF waits for the confirm tap
-            const label = armed ? DSC_LABEL[armed] + ' ?' : dc[1];
-            const art = FlapUi.sectionArt(dc[0], mBg);
-            const ih = 33, iw = art ? Math.round(ih * art.w / art.h) : 26;   // vector fallback is ~square
-            const dTw = cv.textWidth(dc[1], 20, { font: 'bold', spacing: 1.0 });
-            const dGroupX = 1360 + SL / 2 + Math.round((bw - (iw + 8 + dTw)) / 2);
-            const ix = dGroupX - 34, iy = y + top + Math.round((bh - top - ih) / 2) - 4;   // icon ~17% left, ~8% up
-            if (art) {
-                cv.image(art.id, ix, iy, iw, ih);
-                // mask any pixels hanging past the slanted left edge of the chip
-                const eT = 1360 + Math.round(SL * (1 - (iy - y) / bh));
-                const eB = 1360 + Math.round(SL * (1 - (iy + ih - y) / bh));
-                if (ix < Math.max(eT, eB))
-                    cv.quad([[ix - 2, iy - 1], [eT, iy - 1], [eB, iy + ih + 1], [ix - 2, iy + ih + 1]], t.bg);
-            } else {
-                // PNG missing on this renderer: draw the vector DSC pictogram instead
-                const kinds = { dscOn: 'DSC_ON', dscMdm: 'MDM', dscOff: 'DSC_OFF', dscOnW: 'DSC_ON', dscMdmW: 'MDM', dscOffW: 'DSC_OFF' };
-                FlapUi.modeIcon(cv, G, t, kinds[dc[0]] || 'DSC_ON', ix + iw / 2, iy + ih / 2, iw, '#ffffff', true);
-            }
+            const label = armed ? DSC_LABEL[armed] + ' ?' : (DSC_CHIP[state] || 'DSC —');
+            const dTw = cv.textWidth(label, 20, { font: 'bold', spacing: 1.0 });
             const capC = armed && Math.floor(Date.now() / 350) % 2 ? '#7a0e1c' : '#ffffff';
             chipTop(1360, G.mix(mBgv, '#ffffff', 0.28), capC);
-            cv.text(label, ix + iw + 8, cy + 7, 20, '#ffffff', { font: 'bold', spacing: 1.0, literal: true });   // right next to the icon
+            cv.text(label, 1360 + SL / 2 + Math.round((bw - dTw) / 2), cy + 7, 20, '#ffffff',
+                { font: 'bold', spacing: 1.0, literal: true });
             if (cv.own && dscRun) cv.target(1360, y, 216, bh, dscRun, 'performance_dsc_chip');
         }
 
@@ -2665,6 +2647,9 @@ mgu.run({
             if (renderInFlight) return renderInFlight;
 
             const now = Date.now();
+            // Exhaust smoke, burble flames and the valve-blade tween are time-driven:
+            // while one of those views is up, every loop tick is a fresh frame.
+            if (page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles')) renderDirty = true;
             // The renderer maintains its own frame keepalive. Do not rebuild a
             // screen unless app data, navigation, or layout actually changed.
             const renderInterval = page === 0 ? ENGINE_DATA_RENDER_MS : RENDER_MS;

@@ -27,19 +27,19 @@ function sectionOf(key) { return SECTIONS.find((s) => s.key === key) || SECTIONS
 
 /** Small slanted nav chip under a sheet's title tag; fwd=true draws a '>' chevron, false a '<'. */
 function navChip(cv, G, x, y, label, fwd, run, key) {
-    const w = Math.max(150, Math.ceil(cv.textWidth(label, 15, { font: 'bold', spacing: 1.4, literal: true }) + 58));
-    Sheet.para(cv, x, y, w, y + 42, 12, G.withAlpha('#ffffff', 0.08));
-    const cy = y + 21;
+    const w = Math.max(170, Math.ceil(cv.textWidth(label, 17, { font: 'bold', spacing: 1.4, literal: true }) + 64));
+    Sheet.para(cv, x, y, w, y + 50, 14, G.withAlpha('#ffffff', 0.08));
+    const cy = y + 25;
     if (fwd) {
-        cv.line(x + w - 24, cy - 10, x + w - 16, cy, 2.4, '#ffffff');
-        cv.line(x + w - 16, cy, x + w - 24, cy + 10, 2.4, '#ffffff');
+        cv.line(x + w - 27, cy - 12, x + w - 18, cy, 2.8, '#ffffff');
+        cv.line(x + w - 18, cy, x + w - 27, cy + 12, 2.8, '#ffffff');
     } else {
-        cv.line(x + 24, cy - 10, x + 16, cy, 2.4, '#ffffff');
-        cv.line(x + 16, cy, x + 24, cy + 10, 2.4, '#ffffff');
+        cv.line(x + 27, cy - 12, x + 18, cy, 2.8, '#ffffff');
+        cv.line(x + 18, cy, x + 27, cy + 12, 2.8, '#ffffff');
     }
-    cv.text(label, x + w / 2 + (fwd ? -8 : 8), y + 28, 15, '#ffffff',
+    cv.text(label, x + w / 2 + (fwd ? -9 : 9), y + 32, 17, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.4, literal: true });
-    if (cv.own && run) cv.target(x - 6, y - 4, w + 12, 50, run, key, 10);
+    if (cv.own && run) cv.target(x - 6, y - 4, w + 12, 58, run, key, 10);
 }
 
 function fitText(cv, s, size, w) {
@@ -96,7 +96,7 @@ function drawSheet(cv, G, t, s, car, actions) {
     Sheet.drawHexMesh(cv, G, y0, y1, false);
 
     // 2. Slanted black stage slab — the section badge is the hero on it
-    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
     Sheet.para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
@@ -185,9 +185,9 @@ function drawSheet(cv, G, t, s, car, actions) {
 
     // 3. Enlarged section title tag
     const title = more ? 'MORE TYRES INFO' : def.title;
-    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, title, 30, 196, 1.6), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, title, 34, 196, 1.6), tagH = 52, tagSlant = 15;
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text(title, tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+    cv.text(title, tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     // TYRES INFO gets a second page: the chip under its title steps between them.
     if (def.key === 'tyres') {

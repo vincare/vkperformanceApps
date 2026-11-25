@@ -2,7 +2,7 @@
   "id": "moreambients",
   "title": "MoreAmbients",
   "description": "BMW-style OEM ambience page with instant named colours, automatic module discovery, zone brightness and the original palette",
-  "version": "0.2.8",
+  "version": "0.2.13",
   "vendor": "VKPERFORMANCE",
   "loggingId": "OAA7",
   "iconGlyph": "ambient",

@@ -46,3 +46,10 @@ kit/tools/.font-cache/
 /kit/renderd/core
 /apps/zf8hp/data/
 egs-snapshot*.json
+
+# local scratch: backups, preview renders, ad-hoc check scripts
+*.rar
+preview_*/
+perf.png
+render_check.js
+nul

@@ -246,24 +246,168 @@ function liveLoop(hu) {
 }
 
 /**
- * ctx.signals: watch() keeps the handlers; hu.feed(iface, field, value) calls them as a SOME/IP
- * notification would (the provider then counts as available). Methods (UDS, setters) fail.
+ * ctx.signals: most apps get a read-only signal feed. MoreAmbients also has a small,
+ * deterministic BMW lighting model so its OEM controls and BDC LIN commands can be
+ * exercised in the emulator without a real SOME/IP provider or car.
  */
 function liveSignals(hu) {
+    const LIGHT = 'de.bmw.infotainment.misc.ComfortFunctionIuK';
+    const FES = 'de.bmw.infotainment.drivingexcitement.FES';
+    const TASU = 'com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu';
+    const READ_DIDS = [[0xda, 0x5f], [0xe3, 0xd1]], WRITE_DIDS = [[0xda, 0x5e], [0xe3, 0xd1]];
+    const locations = [[0x13, 0x05, 0x01, 0x02], [0x14, 0x06, 0x03, 0x04]];
+    const slotColours = [[255, 36, 50], [255, 112, 30], [255, 186, 48], [188, 74, 230],
+        [57, 90, 255], [51, 164, 255], [34, 210, 224], [46, 195, 116],
+        [224, 220, 52], [235, 240, 255], [255, 91, 150], [131, 71, 245]];
+    const ambient = { on: true, slot: 4, brightness: 76, signalBrightness: 194 };
+    const modules = locations.map((busLocations) => busLocations.map((location, i) => ({
+        nad: i + 1, location, rgb: slotColours[ambient.slot - 1].slice(), brightness: ambient.brightness, holdUntil: 0,
+    })));
     const subs = hu.subs = {};
-    const no = () => Promise.reject(new Error('emulator: no SOME/IP'));
-    hu.feed = (iface, field, value, avail) => (subs[iface] || []).forEach((s) => {
+    const eventHandlers = Object.create(null);
+    const liveProxies = new Set([LIGHT, FES, TASU]);
+    const no = () => Promise.reject(new Error('emulator: unsupported SOME/IP interface'));
+    const removeSub = (list, entry) => { const i = list.indexOf(entry); if (i >= 0) list.splice(i, 1); };
+    const byteList = (value) => value && (Buffer.isBuffer(value) || value instanceof Uint8Array || Array.isArray(value))
+        ? Array.from(value) : value && value.data ? byteList(value.data) : [];
+    const slotRgb = (slot) => slotColours[Math.max(0, Math.min(slotColours.length - 1, Number(slot) - 1))].slice();
+    function expireHolds() {
+        const now = Date.now();
+        modules.forEach((bus) => bus.forEach((m) => {
+            if (m.holdUntil && m.holdUntil <= now) {
+                m.holdUntil = 0; m.rgb = slotRgb(ambient.slot); m.brightness = ambient.on ? ambient.brightness : 0;
+            }
+        }));
+    }
+    function publishAmbient() {
+        const flat = modules.reduce((all, bus) => all.concat(bus), []);
+        const lowerLocations = new Set([0x01, 0x02, 0x03, 0x04]);
+        const zone = (items) => {
+            const brightness = items.length ? Math.round(items.reduce((sum, m) => sum + m.brightness, 0) / items.length) : 0;
+            const rgb = items.length ? [0, 1, 2].map((i) => Math.round(items.reduce((sum, m) => sum + m.rgb[i], 0) / items.length)) : slotRgb(ambient.slot);
+            return { rgb, brightness: ambient.on ? brightness : 0 };
+        };
+        const preview = {
+            on: ambient.on, slot: ambient.slot,
+            zones: {
+                upper: zone(flat.filter((m) => !lowerLocations.has(m.location))),
+                lower: zone(flat.filter((m) => lowerLocations.has(m.location))),
+            },
+        };
+        hu.feed(LIGHT, 'statusAmbientLightInteriorColour', {
+            statusMenuAmbientePanoramicRoofInteriorLighting: 'FARBAUSWAHL_' + ambient.slot,
+            statusBrightnessValueBrightnessOffsetAmbientePanoramicRoofInteriorLighting: ambient.on ? ambient.signalBrightness : 0,
+        });
+        if (process.connected) process.send({ t: 'ambientpreview', preview });
+    }
+    function setSimAmbient(on, slot, force) {
+        const nextOn = typeof on === 'boolean' ? on : ambient.on;
+        const nextSlot = Number.isInteger(Number(slot)) && Number(slot) >= 1 && Number(slot) <= 12 ? Number(slot) : ambient.slot;
+        const changed = ambient.on !== nextOn || ambient.slot !== nextSlot;
+        if (!changed && !force) return;
+        ambient.on = nextOn; ambient.slot = nextSlot;
+        modules.forEach((bus) => bus.forEach((m) => {
+            if (!m.holdUntil) { m.rgb = slotRgb(ambient.slot); m.brightness = ambient.on ? ambient.brightness : 0; }
+        }));
+        publishAmbient();
+    }
+    hu.simAmbient = setSimAmbient;
+    hu.feed = (iface, field, value, avail) => (subs[iface] || []).slice().forEach((s) => {
         if (!s.h[field]) return;
         if (avail !== false) s.res.available = true;
         try { s.h[field](value); } catch (e) { hu.log.warn(iface + '.' + field + ': ' + e); }
     });
+    function busForDid(did, table) {
+        return table.findIndex((x) => x[0] === did[0] && x[1] === did[1]);
+    }
+    function onTasuRequest(args) {
+        const sid = Number(args && args.serviceID), data = byteList(args && args.udsData);
+        let uds;
+        if (sid === 0x22) {
+            const bus = busForDid(data, READ_DIDS);
+            expireHolds();
+            if (bus < 0) uds = [0x7f, sid, 0x31];
+            else {
+                const records = [];
+                for (let i = 0; i < 26; i++) {
+                    const m = modules[bus][i];
+                    // BDC record order is location, B, G, R, brightness, then five status bytes.
+                    records.push.apply(records, m
+                        ? [m.location, m.rgb[2], m.rgb[1], m.rgb[0], m.brightness, 0, 0, 0, 0, 0]
+                        : [0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+                }
+                uds = [0x62, data[0], data[1]].concat(records);
+            }
+        } else if (sid === 0x2e) {
+            const bus = busForDid(data, WRITE_DIDS);
+            if (bus < 0 || data.length < 3) uds = [0x7f, sid, 0x31];
+            else {
+                const nad = data[2], command = data[3];
+                expireHolds();
+                if (command === 1 && data.length >= 9) {
+                    const brightness = Math.max(0, Math.min(100, Number(data[4]) || 0));
+                    const rgb = data.slice(5, 8).map((n) => Math.max(0, Math.min(254, Number(n) || 0)));
+                    const seconds = Math.max(1, Number(data[8]) || 1);
+                    modules[bus].forEach((m) => {
+                        if (!nad || m.nad === nad) { m.rgb = rgb.slice(); m.brightness = brightness; m.holdUntil = Date.now() + seconds * 1000; }
+                    });
+                    publishAmbient();
+                    uds = [0x6e, data[0], data[1]];
+                } else if (command === 0) {
+                    modules[bus].forEach((m) => {
+                        if (!nad || m.nad === nad) { m.rgb = slotRgb(ambient.slot); m.brightness = ambient.on ? ambient.brightness : 0; m.holdUntil = 0; }
+                    });
+                    publishAmbient();
+                    uds = [0x6e, data[0], data[1]];
+                } else uds = [0x7f, sid, 0x13];
+            }
+        } else uds = [0x7f, sid, 0x11];
+        const ecu = Number(args && args.targetAddress) || 0x40;
+        const response = { errorCode: 'NO_ERROR', udsResponse: [0, 0, 0, 0, 0, 0, ecu, 0, 0].concat(uds) };
+        setTimeout(() => (eventHandlers[TASU] && eventHandlers[TASU].sendTasuResponse || []).slice().forEach((fn) => {
+            try { fn(response); } catch (e) { hu.log.warn('simulated TASU response: ' + e); }
+        }), 2);
+        return 'NO_ERROR';
+    }
     return {
         watch: async (iface, inst, handlers) => {
-            const res = { iface, available: false, proxy: null, error: null, shutdown: () => Promise.resolve() };
-            (subs[iface] = subs[iface] || []).push({ h: handlers || {}, res });
+            if (!liveProxies.has(iface)) return { iface, error: 'emulator: no SOME/IP provider for ' + iface };
+            const res = { iface, available: true, proxy: { iface, instance: inst }, error: null };
+            const entry = { h: handlers || {}, res };
+            (subs[iface] = subs[iface] || []).push(entry);
+            res.shutdown = () => { removeSub(subs[iface] || [], entry); return Promise.resolve(); };
+            if (iface === LIGHT) setImmediate(publishAmbient);
+            if (iface === FES && hu.simDriveMode) setImmediate(() => hu.feed(FES, 'statusFESVehicleDynamicSwitchHMI', {
+                actualValueModeDrivingExperience: hu.simDriveMode,
+            }));
             return res;
         },
-        proxy: no, call: no, set: no, on: no, onAvailable: () => Promise.resolve(), hasNative: () => false,
+        proxy: async (iface, instance) => liveProxies.has(iface) ? { iface, instance } : no(),
+        call: async (proxy, method, args) => {
+            if (!proxy || proxy.iface !== TASU || method !== 'sendTasuRequest') throw new Error('emulator: unsupported SOME/IP method');
+            return onTasuRequest(args || {});
+        },
+        set: async (proxy, field, value) => {
+            if (!proxy || proxy.iface !== LIGHT || field !== 'ambientLightInteriorColour') throw new Error('emulator: unsupported SOME/IP setter');
+            const slot = /^FARBAUSWAHL_(\d+)$/.exec(String(value && value.controlMenuAmbientePanoramicRoofInteriorLighting || ''));
+            if (slot && Number(slot[1]) >= 1 && Number(slot[1]) <= 12) ambient.slot = Number(slot[1]);
+            const level = Number(value && value.controlBrightnessValueBrightnessOffsetAmbientePanoramicRoofInteriorLighting);
+            if (Number.isFinite(level) && level !== 255) {
+                ambient.on = level !== 0;
+                ambient.signalBrightness = Math.max(0, Math.min(254, level));
+                if (level > 0) ambient.brightness = Math.max(1, Math.min(100, Math.round(level / 2.54)));
+            }
+            setSimAmbient(ambient.on, ambient.slot, true);
+            return 'NO_ERROR';
+        },
+        on: async (proxy, name, fn) => {
+            if (!proxy || proxy.iface !== TASU) throw new Error('emulator: unsupported SOME/IP event');
+            const list = eventHandlers[TASU] = eventHandlers[TASU] || Object.create(null);
+            (list[name] = list[name] || []).push(fn);
+            return Promise.resolve();
+        },
+        onAvailable: async (proxy, fn) => { fn(!!proxy && liveProxies.has(proxy.iface)); },
+        hasNative: () => false,
         loadConfig: () => { throw new Error('emulator: no SOME/IP configs'); },
     };
 }
@@ -309,7 +453,7 @@ function runLive(stage, dataDir) {
     settings.onChange(() => send({ t: 'settings', values: values() }));
     hu.on('screens', (stack) => { send({ t: 'screens', stack }); focus(null); });
     hu.on('hmiscreen', (n) => send({ t: 'note', s: n === 'SETTINGS' ? 'The HMI\'s own settings screen opens here on the car: the panel has the settings.' : 'The HMI screen ' + n + ' is not drawn here.' }));
-    send({ t: 'spec', spec: { id: spec.id, title: spec.title, version: spec.version, settings: spec.settings || [], screens: spec.screens || [] }, values: values() });
+    send({ t: 'spec', spec: { id: spec.id, title: spec.title, version: spec.version, settings: spec.settings || [], screens: spec.screens || [], backBtnX: spec.backBtnX }, values: values() });
 
     // the HMI's focus over the shown screen's buttons, for the controller while the app does not hold it
     let focused = null;
@@ -335,7 +479,13 @@ function runLive(stage, dataDir) {
         if (pressed && focused && f.indexOf(focused) >= 0) ui.comp(focused).emit('action', {});
         if (tilt === 10) back();
     };
-    const back = () => { const top = hu.stack[hu.stack.length - 1]; if (top) ui.close(top); };
+    const back = () => {
+        if (hu.display && hu.display.onBack) {
+            try { if (hu.display.onBack()) return; } catch (e) { log.error('onBack', e); }
+        }
+        const top = hu.stack[hu.stack.length - 1];
+        if (top) ui.close(top);
+    };
     // a tap the renderer did not route to the app (no touch routing, or outside its claims): the HMI's own bar buttons
     // are under the kit's slim bar (display.js HMI.btn, barOff, barTop), so one under the tap is pressed, as the HMI does
     const { HMI } = require(path.join(hu.kitDir, 'display'));
@@ -378,6 +528,14 @@ function runLive(stage, dataDir) {
         if (m.t === 'set') settings.set(m.k, m.v);
         else if (m.t === 'sig') {
             manual = m.mode === 'manual' ? m.v : null;
+            if (m.v && typeof m.v.drive === 'string' && m.v.drive !== hu.simDriveMode) {
+                hu.simDriveMode = m.v.drive;
+                hu.feed('de.bmw.infotainment.drivingexcitement.FES', 'statusFESVehicleDynamicSwitchHMI', {
+                    actualValueModeDrivingExperience: m.v.drive || 'SIGNAL_UNBEFUELLT',
+                });
+            }
+            if (m.v && typeof m.v.ambientOn === 'boolean' && typeof hu.simAmbient === 'function')
+                hu.simAmbient(m.v.ambientOn, m.v.ambientSlot);
             const want = m.mode === 'manual' ? 'auto' : 'on';
             if (settings.get('demo') !== want) settings.set('demo', want);
         } else if (m.t === 'ccu') {

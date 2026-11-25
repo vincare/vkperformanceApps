@@ -25,13 +25,18 @@
           <span id="hmi-clock"></span>
         </div>
       </div>
-      <svg class="hmi-back-app" viewBox="0 0 12 24"><path d="M10 3 2.5 12l7.5 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="hmi-back-app" viewBox="0 0 12 24"><path d="M10 3 2.5 12l7.5 9" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <div id="hmi-col">
         <svg class="hmi-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.5 12h17M12 3.5c-3 3-3 14 0 17M12 3.5c3 3 3 14 0 17" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
         <svg class="hmi-back" viewBox="0 0 12 24"><path d="M10 3 2.5 12l7.5 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
     </div>
     <img id="bgimg" alt="" hidden>
+    <div id="ambient-preview" aria-hidden="true">
+      <div class="ambient-dim ambient-dash"></div>
+      <div class="ambient-dim ambient-door"></div>
+      <div class="ambient-dim ambient-footwell"></div>
+    </div>
     <img id="soft" alt="" hidden>
     <canvas id="screen" width="1920" height="720"></canvas>
     <!-- the HMI's app picker ("Installed Apps"): shown after BACK / HOME left the app -->
@@ -99,6 +104,7 @@
       <label><input type="radio" name="sigmode" value="manual"> Manual</label>
     </div>
     <div id="sliders"></div>
+    <div id="drivemode"></div>
   </section>
   <section>
     <h2>Settings</h2>

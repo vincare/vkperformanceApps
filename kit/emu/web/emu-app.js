@@ -85,6 +85,23 @@ function onBinary(u8) {
   if (show || (r === 1 && !$('#overlay').hidden)) overlay();
 }
 
+function updateAmbientPreview(preview) {
+  const overlay = $('#ambient-preview');
+  const zones = preview && preview.zones || {};
+  const level = (zone) => {
+    const n = Number(zone && zone.brightness);
+    return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+  };
+  // Darken the cabin photo's ambient-light areas independently. This keeps the dash and
+  // door strips tied to Accent, and the footwell glow tied to Background.
+  const upper = preview && preview.on ? level(zones.upper) : 0;
+  const lower = preview && preview.on ? level(zones.lower) : 0;
+  overlay.style.setProperty('--ambient-upper-dim', (1 - upper / 100).toFixed(2));
+  overlay.style.setProperty('--ambient-lower-dim', (1 - lower / 100).toFixed(2));
+  overlay.dataset.upperBrightness = String(Math.round(upper));
+  overlay.dataset.lowerBrightness = String(Math.round(lower));
+}
+
 function onText(m) {
   switch (m.t) {
   case 'hello':
@@ -95,7 +112,10 @@ function onText(m) {
     if (m.bg) { const b = $('#bgimg'); b.src = '/bg?' + Date.now(); b.hidden = false; }
     $('#log').replaceChildren();
     break;
-  case 'spec': S.spec = m.spec; S.values = m.values || {}; S.app = m.spec.id; $('#app').value = m.spec.id; P.busy = null; picker(); buildSettings(); renderHmi(); $('#version').textContent = m.spec.title + ' ' + m.spec.version; break;
+  case 'spec': S.spec = m.spec; S.values = m.values || {}; S.app = m.spec.id; $('#app').value = m.spec.id; P.busy = null; picker(); buildSettings(); renderHmi(); $('#version').textContent = m.spec.title + ' ' + m.spec.version;
+    // the app's custom back button sits where its display chrome draws it (spec.backBtnX, display.js bx)
+    { const bb = $('.hmi-back-app'); if (bb) bb.style.left = 'calc(var(--u) * ' + (m.spec.backBtnX != null ? m.spec.backBtnX : 40) + ')'; }
+    break;
   case 'settings': S.values = m.values; syncSettings(); break;
   case 'status': setStatus(m.s, m.text); break;
   case 'reset':
@@ -110,6 +130,7 @@ function onText(m) {
   case 'focus': S.focus = m.id; renderHmi(); break;
   case 'soft': { const s = $('#soft'); if (m.png) { s.src = 'data:image/png;base64,' + m.png; s.hidden = false; } else { s.hidden = true; s.removeAttribute('src'); } break; }
   case 'sigmode': S.sig = m; syncSignals(); break;
+  case 'ambientpreview': updateAmbientPreview(m.preview); break;
   case 'touchmode': $('#touchroute').checked = !!m.on; break;
   case 'note': toast(m.s, true); break;
   default: break;
@@ -320,6 +341,10 @@ function buildSettings() {
   f.replaceChildren();
   for (const s of S.spec.settings || []) {
     const id = 'set-' + s.key;
+    if (s.type === 'section') {   // a group heading, like the settings screen's own
+      f.append(el('div', { className: 'set-row set-head', textContent: s.label }));
+      continue;
+    }
     let c;
     if (s.type === 'bool') c = el('input', { type: 'checkbox', id });
     else if (s.type === 'choice' || (s.type === 'number' && s.steps)) {
@@ -332,7 +357,10 @@ function buildSettings() {
       const v = c.type === 'checkbox' ? c.checked : c._vals ? c._vals[Number(c.value)] : s.type === 'number' ? Number(c.value) : c.value;
       send({ t: 'set', k: s.key, v });
     };
-    f.append(el('div', { className: 'set-row' }, el('label', { htmlFor: id, textContent: s.label || s.key, title: s.key }), c));
+    f.append(el('div', { className: 'set-row' },
+      el('div', { className: 'set-txt' },
+        el('label', { htmlFor: id, textContent: (s.hidden ? '(hidden) ' : '') + (s.label || s.key), title: s.key }),
+        s.desc ? el('div', { className: 'set-desc', textContent: s.desc }) : null), c));
   }
   syncSettings();
 }
@@ -352,7 +380,8 @@ const SIG = [
   ['torque', 'Torque', 0, 900, 5, 'Nm'], ['gLong', 'g long', -1.5, 1.5, 0.01, 'g'], ['gLat', 'g lat', -1.5, 1.5, 0.01, 'g'],
 ];
 const GEARS = ['P', 'R', 'N', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8'];
-const sig = { mode: 'demo', v: { rpm: 900, speed: 0, coolant: 90, oil: 95, gear: 'P', gLong: 0, gLat: 0, torque: 40 } };
+const DRIVES = [['', '—'], ['COMFORT', 'Comfort'], ['SPORT_DYNAMIC', 'Sport'], ['SPORT_EXPERT', 'Sport+'], ['ECO_PRO_EFFICIENT', 'Eco Pro'], ['ADAPTIVE', 'Adaptive']];
+const sig = { mode: 'demo', v: { rpm: 900, speed: 0, coolant: 90, oil: 95, gear: 'P', gLong: 0, gLat: 0, torque: 40, drive: '', ambientOn: true, ambientSlot: 4 } };
 function buildSignals() {
   const box = $('#sliders');
   SIG.forEach(([k, label, min, max, step, unit]) => {
@@ -367,6 +396,21 @@ function buildSignals() {
   g.value = sig.v.gear;
   g.onchange = () => { sig.v.gear = g.value; manual(); };
   box.append(el('div', { className: 'slider' }, el('label', { htmlFor: 'sig-gear', textContent: 'Gear' }), g, el('span')));
+  const d = el('select', { id: 'sig-drive' }, ...DRIVES.map(([v, l]) => el('option', { value: v, textContent: l })));
+  d.value = sig.v.drive;
+  d.onchange = () => { sig.v.drive = d.value; send({ t: 'sig', mode: sig.mode, v: sig.v }); };
+  $('#drivemode').append(el('div', { className: 'slider' }, el('label', { htmlFor: 'sig-drive', textContent: 'Drive mode' }), d, el('span')));
+  const ambient = el('input', { type: 'checkbox', id: 'sig-ambient' });
+  ambient.checked = sig.v.ambientOn;
+  ambient.onchange = () => { sig.v.ambientOn = ambient.checked; send({ t: 'sig', mode: sig.mode, v: sig.v }); };
+  const slot = el('select', { id: 'sig-ambient-slot' }, ...Array.from({ length: 12 }, (_, i) =>
+    el('option', { value: String(i + 1), textContent: 'BMW slot ' + (i + 1) })));
+  slot.value = String(sig.v.ambientSlot);
+  slot.onchange = () => { sig.v.ambientSlot = Number(slot.value); send({ t: 'sig', mode: sig.mode, v: sig.v }); };
+  $('#drivemode').append(
+    el('div', { className: 'set-row' }, el('label', { htmlFor: 'sig-ambient', textContent: 'Simulated ambient lighting' }), ambient),
+    el('div', { className: 'slider' }, el('label', { htmlFor: 'sig-ambient-slot', textContent: 'BMW colour' }), slot, el('span')),
+    el('div', { className: 'dim note', textContent: 'MoreAmbients demo: 8 simulated BDC modules. Background dims the footwell; Accent dims the dash and door strips. Changes stay in the emulator.' }));
   document.querySelectorAll('input[name=sigmode]').forEach((r) => { r.onchange = () => { sig.mode = r.value; send({ t: 'sig', mode: sig.mode, v: sig.v }); syncSignals(); }; });
 }
 let sigT = 0, sigTimer = null;
@@ -377,7 +421,7 @@ function manual() {
   if (!sigTimer) sigTimer = setTimeout(go, Math.max(0, sigT + 33 - performance.now()));
 }
 function syncSignals() {
-  if (S.sig) { Object.assign(sig.v, S.sig.v); sig.mode = S.sig.mode; S.sig = null; SIG.forEach(([k]) => { const r = $('#sig-' + k); r.value = sig.v[k]; r._show(); }); $('#sig-gear').value = sig.v.gear; }
+  if (S.sig) { Object.assign(sig.v, S.sig.v); sig.mode = S.sig.mode; S.sig = null; SIG.forEach(([k]) => { const r = $('#sig-' + k); r.value = sig.v[k]; r._show(); }); $('#sig-gear').value = sig.v.gear; $('#sig-drive').value = sig.v.drive || ''; $('#sig-ambient').checked = !!sig.v.ambientOn; $('#sig-ambient-slot').value = String(sig.v.ambientSlot || 4); }
   document.querySelectorAll('input[name=sigmode]').forEach((r) => { r.checked = r.value === sig.mode; });
   $('#sliders').classList.toggle('off', sig.mode !== 'manual');
 }

@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 const W = 1600, H = 520;
 const RED = '#f32635';
 let bladeProgress = null;
@@ -124,18 +127,47 @@ const sectionArtCache = {};
 // renderer keeps whichever pixels went up first - or drops the op on a ver mismatch.
 const sectionArtIds = {};
 let sectionArtSeq = 0;
+// PNG badges are ~1 MP; decoding them in JS takes seconds on the head unit, so
+// the cropped RGBA is kept in the app's data dir: later launches upload pixels
+// straight to the renderer and the badges are there on the first frame.
+let artCacheDir = null, artCacheVer = '0';
+function setArtCacheDir(dir, ver) { artCacheDir = dir || null; artCacheVer = String(ver || '0'); }
+function artCacheFile(kind, bg) {
+    if (!artCacheDir) return null;
+    return path.join(artCacheDir, 'badge_' + kind + '_' + String(bg).replace(/[^0-9a-f]/gi, '') + '_' + artCacheVer + '.bin');
+}
+function artIdFor(key) { return sectionArtIds[key] || (sectionArtIds[key] = 0x5700 + (sectionArtSeq++)); }
+function ensureArtSetImage() {
+    if (!sectionArtSetImage) {
+        try { sectionArtSetImage = require('./kit/record').setImage; }
+        catch (e) { sectionArtSetImage = require('../../kit/runtime/record').setImage; }
+    }
+    return sectionArtSetImage;
+}
 function sectionArt(kind, bg) {
     const file = SECTION_ART[kind];
     if (!file) return null;
     const key = kind + '|' + bg;
     if (key in sectionArtCache) return sectionArtCache[key];
     let art = null;
+    const cacheFile = artCacheFile(kind, bg);
+    if (cacheFile) {
+        try {
+            const buf = fs.readFileSync(cacheFile);
+            if (buf.length > 11 && buf.toString('latin1', 0, 3) === 'MB1') {
+                const cw = buf.readUInt32LE(3), ch = buf.readUInt32LE(7);
+                if (cw > 0 && ch > 0 && buf.length === 11 + cw * ch * 4) {
+                    const id = artIdFor(key);
+                    ensureArtSetImage()(id, cw, ch, new Uint8Array(buf.buffer, buf.byteOffset + 11, cw * ch * 4));
+                    art = { id, w: cw, h: ch };
+                }
+            }
+        } catch (e) { /* decode below */ }
+        if (art) { sectionArtCache[key] = art; return art; }
+    }
     try {
         const CarImages = require('./car_images');
-        if (!sectionArtSetImage) {
-            try { sectionArtSetImage = require('./kit/record').setImage; }
-            catch (e) { sectionArtSetImage = require('../../kit/runtime/record').setImage; }
-        }
+        ensureArtSetImage();
         const png = CarImages.readAsset(file);
         const w = png.readUInt32BE(16), h = png.readUInt32BE(20);
         const d = CarImages.decodePng(png, bg, null, w, h, { omitAlpha: false });
@@ -154,9 +186,17 @@ function sectionArt(kind, bg) {
         const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
         const cropped = new Uint8Array(cw * ch * 4);
         for (let y = 0; y < ch; y++) cropped.set(d.rgba.subarray(((y0 + y) * w + x0) * 4, ((y0 + y) * w + x0 + cw) * 4), y * cw * 4);
-        const id = sectionArtIds[key] || (sectionArtIds[key] = 0x5700 + (sectionArtSeq++));
+        const id = artIdFor(key);
         sectionArtSetImage(id, cw, ch, cropped);
         art = { id, w: cw, h: ch };
+        if (cacheFile) {
+            try {
+                const head = Buffer.alloc(11);
+                head.write('MB1', 0, 'latin1');
+                head.writeUInt32LE(cw, 3); head.writeUInt32LE(ch, 7);
+                fs.writeFileSync(cacheFile, Buffer.concat([head, Buffer.from(cropped)]));
+            } catch (e) { /* a missing cache just decodes again next launch */ }
+        }
     } catch (e) { art = null; }
     sectionArtCache[key] = art;
     return art;
@@ -230,34 +270,34 @@ function drawChip(cv, G, x, y, w, label, opts) {
     opts = opts || {};
     const lines = Array.isArray(opts.lines) && opts.lines.length ? opts.lines : [label];
     const spacing = 1.4;
-    const iconSpace = opts.icon === 'fwd' || opts.icon === 'reset' ? 48 : 28;
+    const iconSpace = opts.icon === 'fwd' || opts.icon === 'reset' ? 54 : 32;
     const labelW = lines.reduce((max, line) => Math.max(max,
-        cv.textWidth(line, 15, { font: 'bold', spacing, literal: true })), 0);
+        cv.textWidth(line, 17, { font: 'bold', spacing, literal: true })), 0);
     w = Math.max(w, Math.ceil(labelW + iconSpace));
-    const bkH = lines.length > 1 ? 52 : 42;
-    para(cv, x, y, w, y + bkH, 12, G.withAlpha('#ffffff', 0.08));
+    const bkH = lines.length > 1 ? 60 : 50;
+    para(cv, x, y, w, y + bkH, 14, G.withAlpha('#ffffff', 0.08));
     if (opts.icon === 'fwd') {
-        cv.line(x + w - 24, y + 10, x + w - 16, y + bkH / 2, 2.4, '#ffffff');
-        cv.line(x + w - 16, y + bkH / 2, x + w - 24, y + bkH - 10, 2.4, '#ffffff');
+        cv.line(x + w - 27, y + 12, x + w - 18, y + bkH / 2, 2.8, '#ffffff');
+        cv.line(x + w - 18, y + bkH / 2, x + w - 27, y + bkH - 12, 2.8, '#ffffff');
     } else if (opts && opts.icon === 'reset') {
-        const cx0 = x + 20, cy0 = y + bkH / 2;
-        cv.arc(cx0, cy0, 6.5, 8, 70, 390, '#ffffff', { round: true });
-        const a = 30 * Math.PI / 180, tx = cx0 + Math.sin(a) * 7, ty = cy0 - Math.cos(a) * 7;
-        cv.line(tx, ty, tx - 2.2, ty - 4.3, 2.4, '#ffffff');
-        cv.line(tx, ty, tx - 4.8, ty + 0.3, 2.4, '#ffffff');
+        const cx0 = x + 23, cy0 = y + bkH / 2;
+        cv.arc(cx0, cy0, 7.5, 9, 70, 390, '#ffffff', { round: true });
+        const a = 30 * Math.PI / 180, tx = cx0 + Math.sin(a) * 8, ty = cy0 - Math.cos(a) * 8;
+        cv.line(tx, ty, tx - 2.5, ty - 5, 2.8, '#ffffff');
+        cv.line(tx, ty, tx - 5.5, ty + 0.3, 2.8, '#ffffff');
     }
-    const lineHeight = 19;
-    const firstY = y + bkH / 2 + 6 - (lines.length - 1) * lineHeight / 2;
+    const lineHeight = 22;
+    const firstY = y + bkH / 2 + 7 - (lines.length - 1) * lineHeight / 2;
     lines.forEach((line, i) => {
         const textY = firstY + i * lineHeight;
         if (opts.icon === 'fwd') {
-            cv.text(line, x + (w - 16) / 2, textY, 15, '#ffffff',
+            cv.text(line, x + (w - 18) / 2, textY, 17, '#ffffff',
                 { align: 'center', font: 'bold', spacing, literal: true });
         } else if (opts.icon === 'reset') {
-            cv.text(line, x + w / 2 + 7, textY, 15, '#ffffff',
+            cv.text(line, x + w / 2 + 8, textY, 17, '#ffffff',
                 { align: 'center', font: 'bold', spacing, literal: true });
         } else {
-            cv.text(line, x + w / 2, textY, 15, '#ffffff',
+            cv.text(line, x + w / 2, textY, 17, '#ffffff',
                 { align: 'center', font: 'bold', spacing, literal: true });
         }
     });
@@ -286,7 +326,7 @@ function drawBurbles(cv, G, t, valve, car, actions, now) {
     drawHexMesh(cv, G, y0, y1, false);
 
     // 2. Slanted black stage slab behind the car (same as EXHAUST SYSTEM)
-    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
     para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
@@ -294,9 +334,9 @@ function drawBurbles(cv, G, t, valve, car, actions, now) {
     drawCar(cv, G, t, valve, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, 'flames');
 
     // 3. Title tag
-    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST BURBLES', 30, 300), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST BURBLES', 34, 300), tagH = 52, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('EXHAUST BURBLES', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+    cv.text('EXHAUST BURBLES', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.6, literal: true });
 
     // 4. Smooth diagonal panel on the right (same ribbon as EXHAUST SYSTEM)
@@ -537,7 +577,7 @@ function drawExhaustSheet(cv, G, t, valve, car, actions, now) {
     drawHexMesh(cv, G, y0, y1, false);
 
     // 2. Slanted black stage slab behind the car — same diagonal language as the right panel
-    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
     para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
@@ -546,9 +586,9 @@ function drawExhaustSheet(cv, G, t, valve, car, actions, now) {
     // 3. Car centered on the slab
     drawCar(cv, G, t, valve, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, true);
 
-    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST SYSTEM', 30, 264), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'EXHAUST SYSTEM', 34, 264), tagH = 52, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('EXHAUST SYSTEM', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+    cv.text('EXHAUST SYSTEM', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.6, literal: true });
 
     // 3. Smooth diagonal panel on the right (no banding segments or decorative outlines)
@@ -618,16 +658,16 @@ function drawDynamic(cv, G, t, v, car, actions, now) {
     cv.fillRect(0, y0, W, h, t.bg);
     drawHexMesh(cv, G, y0, y1, false);
 
-    const slabX = 294, slabW = 740, slabS = Math.round(SLANT * (h - 12) / h);
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
     para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
     drawCar(cv, G, t, null, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, false);
 
-    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'DYNAMIC CONFIG', 30, 300), tagH = 46, tagSlant = 15;
+    const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'DYNAMIC CONFIG', 34, 300), tagH = 52, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
-    cv.text('DYNAMIC CONFIG', tagX + (tagW - tagSlant) / 2, tagY + 36, 30, '#ffffff',
+    cv.text('DYNAMIC CONFIG', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.6, literal: true });
 
     const ribX = 1128;
@@ -665,18 +705,11 @@ function drawDynamic(cv, G, t, v, car, actions, now) {
         if (cv.own && run && !busy) cv.target(rx - 18, ry - 22, 348, 64, run, targetKey, 10);
     });
 
-    // Lower status block: live DSC state (cluster signal) + last write result
+    // Lower status block: live DSC state (cluster signal) — single line
     const setupY = y1 - 108, setupX = xAt(ribX + 12, setupY);
     const stateLabel = state === 'traction' ? 'MDM' : state ? 'DSC ' + state.toUpperCase() : 'UNKNOWN';
-    cv.text('DSC · ' + stateLabel, setupX, setupY + 14, 20, '#ffffff',
+    cv.text('CURRENT MODE: ' + stateLabel, setupX, setupY + 14, 20, '#ffffff',
         { font: 'bold', spacing: 1.1, literal: true });
-    const status = dsc.status || 'READY FOR COMMAND';
-    cv.text(status, setupX, setupY + 42, 13,
-        dsc.warn ? '#ff5c70' : '#ff8595', { font: 'bold', spacing: 0.8, literal: true });
-    cv.text(state === 'off' ? 'STABILITY CONTROL FULLY OFF'
-        : state === 'traction' ? 'REDUCED INTERVENTION'
-        : state === 'on' ? 'FULL STABILITY CONTROL' : 'WAITING FOR DSC SIGNAL',
-        setupX, setupY + 66, 10, G.withAlpha('#e8c8ce', 0.55), { font: 'bold', spacing: 0.6, literal: true });
 }
 
 function drawValveFlaps(cv, G, t, car, imageRect, valveMode, now) {
@@ -738,4 +771,4 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     return cv;
 }
 
-module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawDynamic, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, titleTagWidth };
+module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawDynamic, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, setArtCacheDir, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, titleTagWidth };

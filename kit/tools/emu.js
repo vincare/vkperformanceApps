@@ -70,6 +70,9 @@ let appId = args[0];
 if (!appId || listApps().indexOf(appId) < 0) { console.error('usage: node kit/tools/emu.js <app> [--port 8077] [--bg file.png] [--no-touch]\napps: ' + listApps().join(' ')); process.exit(2); }
 // (a short path: Unix socket paths are limited to ~104 bytes)
 const SOCK = path.join(os.tmpdir(), 'mgu-emu-' + process.pid + '.sock');
+// Windows has no AF_UNIX on many builds: the app<->renderer link is a localhost TCP port there
+const WIN_TCP = process.platform === 'win32';
+let sockAddr = SOCK;                    // MGU_RENDERD_SOCKET for the child ('tcp://host:port' on Windows)
 const MAX_MSG = 24 << 20;                       // a bigger message ends the connection (PROTOCOL.md "Framing")
 const PAGE_BEHIND = 8 << 20, PAGE_GONE = 64 << 20;   // bytes queued to a page: frames wait for it / it is closed
 
@@ -189,6 +192,7 @@ server.on('upgrade', (req, sock, head) => {
     ws.send(App.status);
     ws.send({ t: 'log', lines: App.log.slice(-300) });
     ws.send({ t: 'sigmode', mode: Sig.mode, v: Sig.v });
+    ws.send({ t: 'ambientpreview', preview: AmbientPreview });
     if (App.soft) ws.send({ t: 'soft', png: App.soft });
     replay(ws);
 });
@@ -455,8 +459,10 @@ function touch(m) {
                 toApp(msg(E.CLOSED, [])); c.visible = false; c.cache.show = msg(M.SHOW, [0]); state(c); connChanged();
             }
         }
-        // the HMI's own column (the app's surface leaves it see-through): home at the top, back below
-        const col = x < BACK_COL.w && y < BACK_COL.h;
+        // the HMI's own column (the app's surface leaves it see-through): home at the top, back below;
+        // not where the app claimed the spot itself (customBackBtn) — then the gesture is the app's alone,
+        // firing both would take two back steps (the HMI's own and the button's)
+        const col = !mine && x < BACK_COL.w && y < BACK_COL.h;
         if (col) {
             const a = y < BACK_COL.head ? 'home' : 'back';
             toChild({ t: 'hmi', a }); appLog('info', 'HMI: ' + a);
@@ -514,7 +520,10 @@ setInterval(() => {
 }, 1000).unref();
 
 /* ---------------- the page's messages ---------------- */
-const Sig = { mode: 'demo', v: { rpm: 900, speed: 0, coolant: 90, oil: 95, gear: 'P', gLong: 0, gLat: 0, torque: 40 } };
+const Sig = { mode: 'demo', v: { rpm: 900, speed: 0, coolant: 90, oil: 95, gear: 'P', gLong: 0, gLat: 0, torque: 40, drive: '', ambientOn: true, ambientSlot: 4 } };
+let AmbientPreview = { on: true, slot: 4, zones: {
+    upper: { rgb: [188, 74, 230], brightness: 76 }, lower: { rgb: [188, 74, 230], brightness: 76 },
+} };
 const SIG_KEYS = ['rpm', 'speed', 'coolant', 'oil', 'gLong', 'gLat', 'torque'];
 function onPage(ws, m) {
     switch (m.t) {
@@ -546,6 +555,10 @@ function onPage(ws, m) {
         if (m.v && typeof m.v === 'object') {
             SIG_KEYS.forEach((k) => { if (isFinite(Number(m.v[k]))) Sig.v[k] = Number(m.v[k]); });
             if (/^(P|R|N|D[1-9])$/.test(m.v.gear)) Sig.v.gear = m.v.gear;
+            if (typeof m.v.drive === 'string') Sig.v.drive = m.v.drive;
+            if (typeof m.v.ambientOn === 'boolean') Sig.v.ambientOn = m.v.ambientOn;
+            if (Number.isInteger(Number(m.v.ambientSlot)) && Number(m.v.ambientSlot) >= 1 && Number(m.v.ambientSlot) <= 12)
+                Sig.v.ambientSlot = Number(m.v.ambientSlot);
         }
         toChild({ t: 'sig', mode: Sig.mode, v: Sig.v });
         pages.forEach((w) => { if (w !== ws) w.send({ t: 'sigmode', mode: Sig.mode, v: Sig.v }); });
@@ -618,7 +631,10 @@ function build() {
     App.waiting = null;
     setStatus('building');
     let outText = '';
-    const p = App.building = spawn('python3', [path.join(ROOT, 'kit', 'tools', 'build.py'), id], { cwd: ROOT });
+    // the emulator only runs dist/<id>: without the local BMW oap-sdk, --preview-only still stages it
+    const bargs = [path.join(ROOT, 'kit', 'tools', 'build.py'), id];
+    if (!fs.existsSync(path.join(ROOT, 'oap-sdk', 'index.js'))) bargs.push('--preview-only');
+    const p = App.building = spawn(process.platform === 'win32' ? 'python' : 'python3', bargs, { cwd: ROOT });
     p.stdout.on('data', (d) => { outText += d; });
     p.stderr.on('data', (d) => { outText += d; });
     p.on('error', (e) => { outText += String(e); });
@@ -671,7 +687,7 @@ function start(id) {
         // the user left the app (the page shows the HMI's app picker): a rebuilt app starts without opening, as one
         // the car restarts in the background; a newly chosen app opens
         App.opened = false;
-        const env = Object.assign({}, process.env, { MGU_RENDERD_SOCKET: SOCK, MGU_EMU_CLOSED: App.closed && !App.openNext ? '1' : '' });
+        const env = Object.assign({}, process.env, { MGU_RENDERD_SOCKET: sockAddr, MGU_EMU_CLOSED: App.closed && !App.openNext ? '1' : '' });
         App.openNext = false;
         delete env.MGU_RENDERD_FILE;
         const ch = App.child = fork(path.join(__dirname, 'hu-stub.js'), [path.join(ROOT, 'dist', id), data], { cwd: data, env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
@@ -685,6 +701,14 @@ function start(id) {
             if (App.child !== ch) return;
             if (m.t === 'log') appLog(m.l, m.s);
             else if (m.t === 'loaded') loaded();
+            else if (m.t === 'ambientpreview' && m.preview && m.preview.zones) {
+                AmbientPreview = m.preview;
+                Sig.v.ambientOn = !!m.preview.on;
+                if (Number.isInteger(Number(m.preview.slot)) && Number(m.preview.slot) >= 1 && Number(m.preview.slot) <= 12)
+                    Sig.v.ambientSlot = Number(m.preview.slot);
+                toPages({ t: 'sigmode', mode: Sig.mode, v: Sig.v });
+                toPages({ t: 'ambientpreview', preview: AmbientPreview });
+            }
             else if (m.t === 'spec') {
                 App.spec = m.spec; App.values = m.values;
                 toPages({ t: 'spec', spec: m.spec, values: m.values });
@@ -728,14 +752,16 @@ function watch() {
 }
 
 /* ---------------- go ---------------- */
-try { fs.unlinkSync(SOCK); } catch (e) {}
-daemon.listen(SOCK, () => {
+const startEmu = () => {
+    if (WIN_TCP) sockAddr = 'tcp://127.0.0.1:' + daemon.address().port;
     server.listen(PORT, '127.0.0.1', () => {
-        console.log('emu: http://localhost:' + PORT + '  (renderer socket ' + SOCK + ')');
+        console.log('emu: http://localhost:' + PORT + '  (renderer socket ' + sockAddr + ')');
         watch();
         build();
     });
-});
+};
+if (WIN_TCP) daemon.listen(0, '127.0.0.1', startEmu);
+else { try { fs.unlinkSync(SOCK); } catch (e) {} daemon.listen(SOCK, startEmu); }
 server.on('error', (e) => { console.error('emu: ' + e.message); cleanup(1); });
 function cleanup(code) {
     watchers.forEach((w) => w.close());
@@ -743,7 +769,7 @@ function cleanup(code) {
     unlockBuild();
     const ch = App.child;
     if (ch) { try { ch.kill('SIGKILL'); } catch (e) {} }
-    try { fs.unlinkSync(SOCK); } catch (e) {}
+    if (!WIN_TCP) { try { fs.unlinkSync(SOCK); } catch (e) {} }
     process.exit(code || 0);
 }
 process.on('SIGINT', () => cleanup(0));
