@@ -471,9 +471,7 @@ function drawRunReport(cv, G, t, s, run, actions) {
 }
 
 function draw(cv, G, t, s, car, actions) {
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 2, [
-        s.demo && { text: 'DEMO · NO ROAD DATA', color: 'crit' },
-    ]);
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 2, []);
     G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || RED);
     if (s.view === 'runs') drawRuns(cv, G, t, s, actions);
     else if (s.view === 'run') drawRunReport(cv, G, t, s, selectedRun(s), actions);

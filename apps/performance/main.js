@@ -2631,9 +2631,7 @@ mgu.run({
                 const vehicleDataReady = s.rpm !== null && s.speed !== null;
                 drawEngine(cv, t, s, modeColor);
                 const notice = valveActionNotice && Date.now() < valveActionNoticeUntil ? valveActionNotice : '';
-                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 0, (demo
-                    ? [{ text: 'DEMO · NOT VEHICLE DATA', color: 'crit' }]
-                    : activeMode ? [{ text: modeBadge, color: modeColor }]
+                G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 0, (activeMode ? [{ text: modeBadge, color: modeColor }]
                     : [{ text: driveModeLoading ? 'READING DRIVE MODE' : vehicleDataReady ? 'LIVE DATA' : 'WAITING FOR SIGNALS',
                         color: driveModeLoading || vehicleDataReady ? 'dim' : 'crit' }])
                     .concat(notice ? [{ text: notice, color: 'crit' }] : []));

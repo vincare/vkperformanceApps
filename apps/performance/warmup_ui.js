@@ -157,9 +157,7 @@ function draw(cv, G, t, s, actions) {
     const xAt = (xTop, y) => xTop - (y - y0) / h * SLANT;
     const now = Date.now();
 
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 4, [
-        s.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
-    ]);
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 4, []);
     G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || RED);
 
     cv.fillRect(0, y0, W, h, t.bg);

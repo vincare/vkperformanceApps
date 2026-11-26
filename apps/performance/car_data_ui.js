@@ -202,9 +202,7 @@ function drawSheet(cv, G, t, s, car, actions) {
 }
 
 function draw(cv, G, t, s, actions) {
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 3, [
-        s.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
-    ]);
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 3, []);
     G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || RED);
     if (s.view === 'menu') drawMenu(cv, G, t, actions);
     else drawSheet(cv, G, t, s, s.car, actions);
