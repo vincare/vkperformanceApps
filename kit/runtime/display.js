@@ -972,7 +972,8 @@ class Display {
                 // the app's name runs down it sideways (a rasterised, turned image: the canvas can't rotate)
                 c.clip(0, 0, hx, FULL.headH).clear(0).noclip();
                 c.fillRect(0, FULL.headH, hx, HMI.colEnd - pl.y - FULL.headH, '#000000');
-                const img = this._vname(String(this.spec && this.spec.title || '').toUpperCase());
+                const img = this.tabInfo && this.tabInfo.sel === 0
+                    ? this._vname(String(this.spec && this.spec.title || '').toUpperCase()) : null;
                 if (img) {
                     const colTop = FULL.headH, colBot = HMI.colEnd - pl.y;
                     const ih = Math.min(colBot - colTop - 8, img.h * (hx - 14) / img.w);
