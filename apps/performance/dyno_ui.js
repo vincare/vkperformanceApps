@@ -113,7 +113,7 @@ function chart(cv, G, t, s, current, rect) {
     });
     cv.text(powerName(unit).toUpperCase(), x - 12, y - 12, 12, POWER, { align: 'right', font: 'bold' });
     cv.text(torqueName(torqueUnit).toUpperCase(), x + w - 8, y + 18, 12, TORQUE, { align: 'right', font: 'bold' });
-    cv.text('x1000 RPM', sx(x + w / 2, y + h), y + h + 42, 13, t.dim, { align: 'center', font: 'bold', spacing: 0.8 });
+    cv.text('x1000 RPM', sx(x + w / 2, y), y - 14, 13, t.dim, { align: 'center', font: 'bold', spacing: 0.8 });
     cv.line(sx(x, y + h), y + h, sx(x + w, y + h), y + h, 2, G.withAlpha('#ffffff', 0.68));
     if (!curves.length) {
         const cx = sx(x + w / 2, y + 100);
