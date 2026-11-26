@@ -2188,12 +2188,9 @@ mgu.run({
                         { label: 'REAR RIGHT', value: '2.56 bar (28 °C)' },
                     ],
                     tyresMore: [
-                        { label: 'FRONT LEFT / RIGHT · BAR / °C', value: '2.42 / 26 · 2.41 / 26' },
-                        { label: 'REAR LEFT / RIGHT · BAR / °C', value: '2.55 / 27 · 2.56 / 28' },
                         { label: 'TARGET PRESSURE · FL / FR / RL / RR (bar)', value: '2.4 · 2.4 · 2.6 · 2.6' },
                         { label: 'FITTED TIRES', value: '245/40R18 / 275/35R19' },
                         { label: 'TIRE DETECTION / TPMS RESET', value: 'Wheels found · Passed' },
-                        { label: 'DSC · CLUSTER STATUS', value: 'ON' },
                     ],
                 };
                 return demoRow[view] || [];
