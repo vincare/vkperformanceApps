@@ -2148,9 +2148,12 @@ mgu.run({
         if (ctx.loop) {
             loopOwnsRenders = true;
             if (renderTimer !== null) { clearTimeout(renderTimer); renderTimer = null; renderQueued = false; }
-            // 50 FPS on the GPU renderer (what the head unit actually shows); the software
-            // path stays at 20 FPS so PNG buffers don't churn memory on older renderers.
-            ctx.loop('MAIN', 20, render, { gpuFps: 50 });
+            // 50 FPS on the GPU renderer (what the head unit actually shows). The emulator's
+            // child process gets 60 FPS on its software path — its Node is modern. The car's
+            // software fallback stays at 20: Node 8 frees PNG buffers lazily there.
+            const inEmulator = typeof process !== 'undefined' && !!process.connected
+                && !(ctx.signals && ctx.signals.hasNative && ctx.signals.hasNative());
+            ctx.loop('MAIN', inEmulator ? 60 : 20, render, { gpuFps: 50 });
         }
 
         if (ui.isVisible('MAIN')) render().catch((e) => log.warn('first render: ' + shortError(e)));
