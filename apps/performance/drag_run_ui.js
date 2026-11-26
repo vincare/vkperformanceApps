@@ -266,7 +266,7 @@ function dragyGauge(cv, G, t, s, gx, gy, R, actions) {
             { align: 'center', font: 'bold', spacing: 1, literal: true });
 
     Sheet.drawChip(cv, G, gx - 59, gy + F + 16, 118, 'RESET',
-        { icon: 'reset', run: actions && actions.reset, key: 'performance_drag_gauge_reset' });
+        { run: actions && actions.reset, key: 'performance_drag_gauge_reset' });
 }
 
 // Live sheet: same shell as DYNO RUN — tag, chips, slanted stage with the trace,
