@@ -35,6 +35,11 @@ const DIRS = [path.join(APP_ROOT, 'someipInterfaces'), path.join(__dirname, '..'
 // late or never.
 const lanes = [[], []];         // [urgent, set-up]
 const URGENT_RUN = 4;
+// The binding can futex-deadlock a call forever (a subscribe on a field the
+// provider never ACKs, a getValue racing SDK traffic). One such job would
+// otherwise stall the whole lane - and every interface queued behind it.
+// Reject it after a while and carry on; a late resolve is ignored.
+const JOB_TIMEOUT = 12000;
 let running = false, urgentRun = 0;
 function pump() {
     if (running) return;
@@ -44,9 +49,12 @@ function pump() {
     urgentRun = setup ? 0 : urgentRun + 1;
     running = true;
     setImmediate(() => {
+        let finished = false;
+        const finish = () => { if (finished) return; finished = true; running = false; pump(); };
+        const timer = setTimeout(() => { job.reject(new Error('someip call timeout')); finish(); }, JOB_TIMEOUT);
         let p;
         try { p = Promise.resolve(job.fn()); } catch (e) { p = Promise.reject(e); }
-        p.then(job.resolve, job.reject).then(() => { running = false; pump(); });
+        p.then(job.resolve, job.reject).then(() => { clearTimeout(timer); finish(); });
     });
 }
 function nativeTick(fn, urgent) {
@@ -132,8 +140,15 @@ async function watch(iface, instance, handlers, log, opts) {
                 });
             }
         });
+        // One native call that never resolves (provider stays silent on fields it
+        // only exposes via getter - e.g. static TPMS values) must not hold up the
+        // rest of the fields or the availability check below. The lane timeout in
+        // pump() is the outer safety net; this shorter one keeps startup snappy.
+        const CALL_TIMEOUT = 6000;
+        const callWithTimeout = (fn, what) => Promise.race([nativeTick(fn),
+            new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timeout')), CALL_TIMEOUT))]);
         diagnostic('availability_subscribe_started');
-        await nativeTick(() => {
+        await callWithTimeout(() => {
             try {
                 return Promise.resolve(p.subscribeToAvailability((a) => { notifyAvailability(a); if (a) setImmediate(fetchAll); }))
                     .then((result) => {
@@ -149,18 +164,18 @@ async function watch(iface, instance, handlers, log, opts) {
                 if (log) log.warn('availability subscribe ' + iface + ': ' + (e && e.message || e));
                 return null; /* older binding */
             }
-        });
+        }, 'availability subscribe');
         for (const f of fields) {
             diagnostic('field_subscribe_started', { field: f });
             try {
-                await nativeTick(() => p.subscribe({ name: f, onReceive: (v) => {
+                await callWithTimeout(() => p.subscribe({ name: f, onReceive: (v) => {
                     if (stopped || !handlers[f]) return;
                     diagnostic('payload_received', { field: f, source: 'event' });
                     try { handlers[f](v, 'event'); } catch (e) {
                         diagnostic('payload_handler_error', { field: f, error: String(e && e.message || e) });
                         if (log) log.warn(iface + '.' + f + ': ' + e);
                     }
-                } }));
+                } }), 'subscribe ' + f);
                 diagnostic('field_subscribe_call_resolved', { field: f });
             } catch (e) {
                 diagnostic('field_subscribe_error', { field: f, error: String(e && e.message || e) });

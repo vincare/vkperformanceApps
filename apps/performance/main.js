@@ -2361,8 +2361,8 @@ mgu.run({
                     { label: 'RECOMMENDED - REAR LEFT', value: tyreHold('tyrePtRL') },
                     { label: 'RECOMMENDED - REAR RIGHT', value: tyreHold('tyrePtRR') },
                     { label: 'FITTED TIRES', value: (() => {
-                        const f = tyreExtra.frontTire, r = tyreExtra.rearTire;
-                        if (!f && !r) return tpmsWait();
+                        const f = tyreExtra.frontTire, r = tyreExtra.rearTire, st = tyreExtra.sensorTire;
+                        if (!f && !r) return st && st.tire ? st.tire.size : tpmsWait();
                         if (f && r && f.size === r.size) return f.size;
                         return (f ? f.size : '--') + ' + ' + (r ? r.size : '--');
                     })(), detail: (() => {
