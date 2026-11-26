@@ -539,22 +539,35 @@ mgu.run({
                 retryOemToggleWhenIdle();
                 retryOemBrightnessWhenIdle();
             } catch (e) { log.warn('BMW ambient palette signal: ' + shortError(e)); }
+            let driveModeTimer = null;
             try {
                 const watch = await ctx.signals.watch(FES, '1', {
                     statusFESVehicleDynamicSwitchHMI: (v) => {
                         const raw = v && v.actualValueModeDrivingExperience;
                         if (raw === undefined || raw === null || raw === '') return;
                         const nextMode = driveModeOf(raw);
-                        if (nextMode === state.driveMode) { state.driveModePending = null; return; }
-                        // A drive mode must show up on two consecutive polls before it may
-                        // recolour the cabin: one-off readings (bus glitches, mid-transition
-                        // values) used to flip the ambient colour back and forth.
-                        if (state.driveModePending !== nextMode) { state.driveModePending = nextMode; return; }
-                        state.driveModePending = null;
-                        state.driveMode = nextMode;
-                        state.modeSyncPending = true;
-                        queueRender();
-                        syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e)));
+                        if (nextMode === state.driveMode) {
+                            state.driveModePending = null;
+                            clearTimeout(driveModeTimer); driveModeTimer = null;
+                            return;
+                        }
+                        // The mode must hold steady ~800ms before it may recolour the cabin:
+                        // mid-transition values used to flip the ambient back and forth. A
+                        // timer, not a poll count — a single event feed (emulator, on-car
+                        // edge cases) delivers the value once and a counting debounce
+                        // stalls on "ARMED · WAITING" forever.
+                        if (state.driveModePending === nextMode) return;
+                        state.driveModePending = nextMode;
+                        clearTimeout(driveModeTimer);
+                        driveModeTimer = setTimeout(() => {
+                            driveModeTimer = null;
+                            if (stopped || state.driveModePending == null) return;
+                            state.driveMode = state.driveModePending;
+                            state.driveModePending = null;
+                            state.modeSyncPending = true;
+                            queueRender();
+                            syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e)));
+                        }, 800);
                     },
                 }, log, { pollMs: 2000 });
                 if (watch && watch.shutdown) ctx._moreAmbientWatches.push(watch);
