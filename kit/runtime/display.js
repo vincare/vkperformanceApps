@@ -82,7 +82,7 @@ let HMI = HMI7;
 /* full-screen layout, in the surface's pixels (it covers the whole screen) */
 const FULL = {
     headH: 80,                                  // header in the HMI's title strip
-    barH: 48,                                   // slim button bar
+    barH: 58,                                   // slim button bar (raised ~2%: taller footer, bigger buttons)
     // part of the app's 1600 x 520 drawing shown: the tab bar (y < 38) moves to the header and
     // the side margins are trimmed a little, so the content can be scaled up further
     src: { x: 12, y: 38, w: 1576, h: 482 },
