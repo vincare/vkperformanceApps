@@ -419,28 +419,32 @@ function inCarBody(x, y, y0) {
 }
 
 function drawHexMesh(cv, G, y0, y1, skipCarBox) {
-    const r = 104, dx = r * 1.5, dy = r * Math.sqrt(3);
-    const c = G.withAlpha('#f32635', 0.13);
-    if (cv.clip) cv.clip(0, y0, W, y1 - y0);
-    for (let col = -1; col < 13; col++) {
-        const cx = col * dx;
-        for (let row = -1; row < 5; row++) {
-            const cy = y0 + row * dy + (col & 1 ? dy / 2 : 0);
-            const pts = [];
-            for (let k = 0; k <= 6; k++) {
-                const a = (k % 6) * Math.PI / 3;
-                pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
-            }
-            for (let k = 0; k < 6; k++) {
-                const p0 = pts[k], p1 = pts[k + 1];
-                if (skipCarBox && (inCarBody(p0[0], p0[1], y0) || inCarBody(p1[0], p1[1], y0) ||
-                    inCarBody((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, y0))) continue;
-                if ((p0[1] >= y0 - 20 && p0[1] <= y1 + 20) || (p1[1] >= y0 - 20 && p1[1] <= y1 + 20))
-                    cv.line(p0[0], p0[1], p1[0], p1[1], 1.25, c);
+    // The mesh is static — bake it once into a renderer-side layer instead of
+    // re-recording ~500 line ops every frame on each sheet view.
+    const L = G.layer('hexmesh|' + y0 + '|' + y1 + '|' + (skipCarBox ? 1 : 0), W, y1 - y0, (c) => {
+        const r = 104, dx = r * 1.5, dy = r * Math.sqrt(3);
+        const col = G.withAlpha('#f32635', 0.13);
+        for (let ci = -1; ci < 13; ci++) {
+            const cx = ci * dx;
+            for (let row = -1; row < 5; row++) {
+                const cy = row * dy + (ci & 1 ? dy / 2 : 0);
+                const pts = [];
+                for (let k = 0; k <= 6; k++) {
+                    const a = (k % 6) * Math.PI / 3;
+                    pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+                }
+                for (let k = 0; k < 6; k++) {
+                    const p0 = pts[k], p1 = pts[k + 1];
+                    const gy0 = p0[1] + y0, gy1 = p1[1] + y0;
+                    if (skipCarBox && (inCarBody(p0[0], gy0, y0) || inCarBody(p1[0], gy1, y0) ||
+                        inCarBody((p0[0] + p1[0]) / 2, (gy0 + gy1) / 2, y0))) continue;
+                    if ((gy0 >= y0 - 20 && gy0 <= y1 + 20) || (gy1 >= y0 - 20 && gy1 <= y1 + 20))
+                        c.line(p0[0], p0[1], p1[0], p1[1], 1.25, col);
+                }
             }
         }
-    }
-    if (cv.noclip) cv.noclip();
+    }, cv.textScale);
+    cv.blit(L, 0, y0);
 }
 
 function exhaustBell(cv, cx, cy, c) {

@@ -2891,33 +2891,37 @@ mgu.run({
             queueRender();
         });
         dragPulse = setInterval(() => {
-            if (settings.get('demo') === 'on' || !dragTimer) return;
-            const previous = dragTimer.state;
-            dragTimer.idle(Date.now());
-            if (previous !== dragTimer.state || lastDragState !== dragTimer.state) {
-                lastDragState = dragTimer.state;
-                if (page === 4) queueRender();
-            } else if (page === 4 && dragView === 'live' && dragTimer.state === 'run') {
-                queueRender();
-            }
+            try {
+                if (settings.get('demo') === 'on' || !dragTimer) return;
+                const previous = dragTimer.state;
+                dragTimer.idle(Date.now());
+                if (previous !== dragTimer.state || lastDragState !== dragTimer.state) {
+                    lastDragState = dragTimer.state;
+                    if (page === 4) queueRender();
+                } else if (page === 4 && dragView === 'live' && dragTimer.state === 'run') {
+                    queueRender();
+                }
+            } catch (e) { log.warn('drag pulse: ' + shortError(e)); }
         }, 100);
         let lastFreshnessSignature = freshnessSignature(Date.now());
         freshnessTimer = setInterval(() => {
-            if (settings.get('demo') === 'on') dynoRecorder.reset();
-            else {
-                const now = Date.now();
-                const previousDynoStatus = dynoRecorder.status;
-                logDynoGate(now);
-                handleDynoEvent(dynoRecorder.tick(now, dynoSetup()));
-                if (page === 3 && dynoRecorder.status !== previousDynoStatus) queueRender();
-            }
-            if (page !== 1 && page !== 2) {
-                const signature = freshnessSignature(Date.now());
-                if (signature !== lastFreshnessSignature) {
-                    lastFreshnessSignature = signature;
-                    queueRender();
+            try {
+                if (settings.get('demo') === 'on') dynoRecorder.reset();
+                else {
+                    const now = Date.now();
+                    const previousDynoStatus = dynoRecorder.status;
+                    logDynoGate(now);
+                    handleDynoEvent(dynoRecorder.tick(now, dynoSetup()));
+                    if (page === 3 && dynoRecorder.status !== previousDynoStatus) queueRender();
                 }
-            }
+                if (page !== 1 && page !== 2) {
+                    const signature = freshnessSignature(Date.now());
+                    if (signature !== lastFreshnessSignature) {
+                        lastFreshnessSignature = signature;
+                        queueRender();
+                    }
+                }
+            } catch (e) { log.warn('freshness: ' + shortError(e)); }
         }, 1000);
         dmeTimer = setInterval(() => { pollDme().catch((e) => log.warn('DME poll: ' + shortError(e))); }, DME_POLL_MS);
 
@@ -3022,6 +3026,10 @@ mgu.run({
             // Like Engine Config, retry read-only DME detection while the engine is
             // running. The retry never sends a valve command.
             valveRescanTimer = setInterval(() => {
+                try { valveRescanTick(); } catch (e) { log.warn('valve rescan: ' + shortError(e)); }
+            }, 15000);
+
+            function valveRescanTick() {
                 const ident = valveController.ident || {};
                 const matched = !!(ident.elAgk && ident.elAgk.supported);
                 const bm3 = ident.bm3 || {};
@@ -3050,7 +3058,7 @@ mgu.run({
                     return null;
                 }).then(queueRender).catch((e) => log.warn('exhaust detection retry: ' + shortError(e)))
                     .then(() => { valveScanBusy = false; });
-            }, 15000);
+            }
             queueRender();
         }).catch((e) => {
             valveScanBusy = false;
