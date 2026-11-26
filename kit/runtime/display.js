@@ -977,7 +977,7 @@ class Display {
                     const colTop = FULL.headH, colBot = HMI.colEnd - pl.y;
                     const ih = Math.min(colBot - colTop - 8, img.h * (hx - 14) / img.w);
                     const iw = img.w * ih / img.h;
-                    c.image(img.id, hx / 2 - iw / 2, colBot - 4 - ih + Math.round(pl.h * 0.05), iw, ih);
+                    c.image(img.id, hx / 2 - iw / 2, colBot - 4 - ih + Math.round(pl.h * 0.08), iw, ih);
                 }
             } else {
                 c.clip(0, 0, hx, HMI.colEnd - pl.y).clear(0).noclip();
