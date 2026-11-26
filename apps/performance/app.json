@@ -3,7 +3,7 @@
   "title": "PERFORMANCE",
   "backBtnX": 21,
   "description": "Live engine monitor, ENGINE CONFIG with exhaust and ROM-gated BM3 burble controls, DYNO RUN estimates, and DRAG RUN timers",
-  "version": "0.6.61",
+  "version": "0.6.7",
   "vendor": "VKPERFORMANCE & VKDIGITALS",
   "assets": [
     {
