@@ -420,7 +420,7 @@ mgu.run({
                 if (state.scanBusy || state.applyBusy || state.busy || state.blackoutApplying) return;
                 state.oemBrightnessPending = false;
                 Promise.resolve(applyOemBrightness()).catch((e) => log.warn('ambient brightness: ' + shortError(e)));
-            }, 140);
+            }, 80);
         }
         function scheduleCustomRenewal(delay) {
             const nextDelay = delay == null ? RENEW_MS : delay;
@@ -622,14 +622,16 @@ mgu.run({
             }
         }
         async function physicalWithBusyRetry(target, sid, data, timeoutMs, accept, options) {
+            const maxBusy = options && options.maxBusy != null ? options.maxBusy : BUSY_TRIES;
+            const busyStep = options && options.busyStepMs != null ? options.busyStepMs : BUSY_MS;
             let reply = null;
             for (let attempt = 0; ; attempt++) {
                 reply = await state.diag.physical(target, sid, data, timeoutMs, accept, options);
                 if (!(reply && reply[0] === 0x7f && reply[1] === sid && reply[2] === 0x21)
-                    || attempt >= BUSY_TRIES) return reply;
+                    || attempt >= maxBusy) return reply;
                 log.info('ambient UDS 0x' + sid.toString(16) + ' BUSY at 0x' + target.toString(16)
-                    + ' · retry ' + (attempt + 1) + '/' + BUSY_TRIES);
-                await pause(BUSY_MS * (attempt + 1));
+                    + ' · retry ' + (attempt + 1) + '/' + maxBusy);
+                await pause(busyStep * (attempt + 1));
             }
         }
         async function discoverBdcAddress() {
@@ -666,12 +668,27 @@ mgu.run({
             if (!list || !list.length) return null;
             return [0, 1, 2].map((i) => Math.round(list.reduce((sum, m) => sum + m.rgb[i], 0) / list.length));
         }
-        async function sendFrame(bus, nad, colour) {
+        // Interactive writes take the quick path: a module that stalls the BDC must not hold
+        // the whole sweep hostage (the 40 s renewal re-asserts anything it missed anyway).
+        async function sendFrame(bus, nad, colour, quick) {
             const did = BUSES[bus].write;
             const data = frameFor(bus, nad, colour.rgb, colour.brightness, HOLD_SECONDS);
-            const reply = await physicalWithBusyRetry(state.bdcAddress, 0x2e, data, 1800, acceptReply(0x2e, did),
-                { retryBaseMs: 20, maxRetries: 10 });
+            const reply = await physicalWithBusyRetry(state.bdcAddress, 0x2e, data,
+                quick ? 450 : 1800, acceptReply(0x2e, did),
+                quick ? { retryBaseMs: 20, maxRetries: 3, callTimeoutMs: 2200, maxBusy: 2, busyStepMs: 140 }
+                    : { retryBaseMs: 20, maxRetries: 10 });
             return { ok: !!(reply && reply[0] === 0x6e && reply[1] === did[0] && reply[2] === did[1]), why: acceptedText(reply) };
+        }
+        // Burst mode for multi-module sweeps: waiting on each module's 0x6E is what makes a
+        // cabin-wide change crawl. Firing the write and moving on roughly halves the sweep;
+        // anything a module misses is re-asserted by the next apply or the 40 s renewal.
+        async function sendFrameBurst(bus, nad, colour) {
+            const data = frameFor(bus, nad, colour.rgb, colour.brightness, HOLD_SECONDS);
+            try {
+                const verdict = await state.diag.send(state.bdcAddress, 0x2e, data,
+                    { retryBaseMs: 20, maxRetries: 3, callTimeoutMs: 2200 });
+                return /NO_ERROR|REQUEST_PENDING|^0$|^1$/.test(String(verdict));
+            } catch (e) { return false; }
         }
         async function sendRestore(bus, nad) {
             const did = BUSES[bus].write;
@@ -820,19 +837,20 @@ mgu.run({
                         const col = groups[0].colour;
                         if (!isRenewal) {
                             for (const f of [0.35, 0.7]) {
-                                await sendFrame(bus, 0, { rgb: col.rgb, brightness: Math.max(1, Math.round(col.brightness * f)) });
+                                await sendFrame(bus, 0, { rgb: col.rgb, brightness: Math.max(1, Math.round(col.brightness * f)) }, true);
                                 await pause(110);
                             }
                         }
-                        const result = await sendFrame(bus, 0, col);
+                        const result = await sendFrame(bus, 0, col, !isRenewal);
                         if (result.ok) { ok += covered; healthyByBus[bus].forEach((m) => markApplied(m, col)); }
                         else failed += needWrite.length;
                     } else {
                         for (const module of needWrite) {
                             const col = targetByModule.get(module);
-                            const result = await sendFrame(bus, module.nad, col);
-                            if (result.ok) { ok++; markApplied(module, col); }
-                            else failed++;
+                            const sent = isRenewal ? (await sendFrame(bus, module.nad, col)).ok
+                                : await sendFrameBurst(bus, module.nad, col);
+                            if (sent) { ok++; markApplied(module, col); }
+                            else { failed++; delete state.appliedByLocation[String(module.location)]; }
                         }
                     }
                 }
