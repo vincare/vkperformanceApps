@@ -955,9 +955,19 @@ class Display {
                 c.line(cx + 6, cy - 14, cx - 8, cy, 4.2, '#ffffff');
                 c.line(cx - 8, cy, cx + 6, cy + 14, 4.2, '#ffffff');
             } else if (this.hideBackBtn) {
-                // no back button at all: keep the home cell see-through, black out the column below it
+                // no back button at all: keep the home cell see-through, black out the column below it;
+                // the app's name runs down the blank column letter by letter (the canvas has no rotation)
                 c.clip(0, 0, hx, FULL.headH).clear(0).noclip();
                 c.fillRect(0, FULL.headH, hx, HMI.colEnd - pl.y - FULL.headH, '#000000');
+                const vname = String(this.spec && this.spec.title || '').toUpperCase();
+                const colTop = FULL.headH, colBot = HMI.colEnd - pl.y;
+                const step = Math.min(38, (colBot - colTop - 20) / Math.max(1, vname.length));
+                let vy = colTop + (colBot - colTop - step * (vname.length - 1)) / 2;
+                for (let li = 0; li < vname.length; li++) {
+                    c.text(vname[li], hx / 2, vy + 18, 26, '#f32635',
+                        { align: 'center', font: 'bold', literal: true });
+                    vy += step;
+                }
             } else {
                 c.clip(0, 0, hx, HMI.colEnd - pl.y).clear(0).noclip();
             }
