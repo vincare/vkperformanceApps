@@ -2776,7 +2776,10 @@ mgu.run({
             if (page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles')) renderDirty = true;
             // The renderer maintains its own frame keepalive. Do not rebuild a
             // screen unless app data, navigation, or layout actually changed.
-            const renderInterval = page === 0 ? ENGINE_DATA_RENDER_MS : RENDER_MS;
+            // Exhaust smoke and burble flames animate: that view alone renders at 30 fps
+            // (the puffs are a few dozen circles per frame — cheap), other pages keep 10.
+            const animating = page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles');
+            const renderInterval = page === 0 ? ENGINE_DATA_RENDER_MS : animating ? 33 : RENDER_MS;
             if (!renderDirty || now - lastRenderAt < renderInterval) return;
 
             renderDirty = false;
@@ -3065,9 +3068,11 @@ mgu.run({
         diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', engineMonitorReadOnly: true,
             exhaustControlDisarmed: !valveController.armedSetting,
             rawDiagnostics: diagnostics(), dmeCandidates: settings.get('readDmeCandidates') === true });
-        // Engine Data gets 20 Hz; other pages retain their 10 Hz renderer cap.
-        if (ctx.loop) mainLoop = ctx.loop('MAIN', 10, render, {
-            gpuFps: () => page === 0 ? ENGINE_DATA_FPS : 10,
+        // Engine Data gets 20 Hz; the exhaust/burbles views animate at 30 fps on the GPU
+        // renderer and up to 20 on software, everything else keeps its 10 Hz renderer cap.
+        if (ctx.loop) mainLoop = ctx.loop('MAIN', 20, render, {
+            gpuFps: () => page === 0 ? ENGINE_DATA_FPS
+                : (page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles') ? 30 : 10),
         });
         render().catch((e) => log.warn('first render: ' + shortError(e)));
     },
