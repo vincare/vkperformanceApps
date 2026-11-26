@@ -492,8 +492,10 @@ function drawRuns(cv, G, t, s, actions) {
         const sel = selRun && run.at === selRun.at;
         const isBest = best && best.at === run.at;
         if (sel) {
-            Sheet.para(cv, 370, ry - 30, 592, ry + 34, 20, G.withAlpha('#ffffff', 0.1));
-            Sheet.para(cv, 370, ry - 30, 6, ry + 34, 20, '#ff243b');
+            const mile = sec.key === 'qm' || sec.key === 'em';
+            const sx = mile ? 290 : 370, sw = mile ? 752 : 592;
+            Sheet.para(cv, sx, ry - 30, sw, ry + 34, 20, G.withAlpha('#ffffff', 0.1));
+            Sheet.para(cv, sx, ry - 30, 6, ry + 34, 20, '#ff243b');
         }
         const rowNo = pg * RUNS_PER_PAGE + i + 1;
         cv.text('#' + rowNo, 400, ry + 8, 18,
