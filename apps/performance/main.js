@@ -2106,12 +2106,10 @@ mgu.run({
         const cdt = (v) => v === null || v === undefined ? null : String(v);
 
         /* ---- WARMUP page: ready-in estimates, status stamp, ribbon rows ---- */
-        function warmupEtaText(e) {
+        function warmupEtaText(e, target) {
             if (e.state === 'ready') return { v: 'READY', c: '#2fd27a' };
-            if (e.state === 'off') return { v: 'ENGINE OFF', c: '#8c94a0' };
-            if (e.state === 'stalled') return { v: 'NOT WARMING', c: '#ffb31a' };
-            if (e.state === 'warming') return { v: e.min > 60 ? '>60 min' : '~' + Math.max(1, Math.round(e.min)) + ' min' };
-            return { v: null };
+            if (e.state === 'none') return { v: null };
+            return { v: Math.round(target) + '°', c: e.state === 'off' ? '#8c94a0' : '#ffb31a' };
         }
 
         function warmupView(demo, s) {
@@ -2151,7 +2149,7 @@ mgu.run({
             else status = { text: 'WARMING UP', kind: 'warn' };
 
             const lim = warmup.limit(d.oil);
-            const eo = warmupEtaText(etas.oil), ec = warmupEtaText(etas.coolant), eg = warmupEtaText(etas.gearbox);
+            const eo = warmupEtaText(etas.oil, warm.oil), ec = warmupEtaText(etas.coolant, warm.coolant), eg = warmupEtaText(etas.gearbox, warm.gearbox);
             const rows = [
                 { label: 'OIL READY IN', value: eo.v, color: eo.c, lit: etas.oil.state === 'ready' },
                 { label: 'COOLANT READY IN', value: ec.v, color: ec.c, lit: etas.coolant.state === 'ready' },
