@@ -2188,7 +2188,10 @@ mgu.run({
                         { label: 'REAR RIGHT', value: '2.56 bar (28 °C)' },
                     ],
                     tyresMore: [
-                        { label: 'TARGET PRESSURE · FL / FR / RL / RR (bar)', value: '2.4 · 2.4 · 2.6 · 2.6' },
+                        { label: 'RECOMMENDED PRESSURE · FRONT LEFT', value: '2.4 bar' },
+                        { label: 'RECOMMENDED PRESSURE · FRONT RIGHT', value: '2.4 bar' },
+                        { label: 'RECOMMENDED PRESSURE · REAR LEFT', value: '2.6 bar' },
+                        { label: 'RECOMMENDED PRESSURE · REAR RIGHT', value: '2.6 bar' },
                         { label: 'FITTED TIRES', value: '245/40R18 / 275/35R19' },
                         { label: 'TIRE DETECTION / TPMS RESET', value: 'Wheels found · Passed' },
                     ],
@@ -2199,17 +2202,12 @@ mgu.run({
             const boost = boostValue(now);
             const baro = finite(state.baroKpa) ? state.baroKpa : 101.3;
             const targetKpa = cdNum('boostTargetKpa');
-            const tyreQuad = (names, digits) => {
-                const parts = names.map((name) => cdNum(name));
-                return parts.some(finite) ? parts.map((v) => finite(v) ? formatNumber(v, digits) : '--').join(' · ') : null;
-            };
             const tyreWheel = (pKey, tKey) => {
                 const p = cdNum(pKey), tt = cdNum(tKey);
                 if (!finite(p)) return null;
                 return finite(tt) ? formatNumber(p, 2) + ' bar (' + formatNumber(tt, 0) + ' °C)'
                     : formatNumber(p, 2) + ' bar';
             };
-            const tyreTarget = tyreQuad(['tyrePtFL', 'tyrePtFR', 'tyrePtRL', 'tyrePtRR'], 1);
             const rows = {
                 engineInfo: [
                     { label: 'MISFIRES', value: (() => {
@@ -2296,8 +2294,15 @@ mgu.run({
                     { label: 'REAR RIGHT', value: tyreWheel('tyrePRR', 'tyreTRR') },
                 ],
                 tyresMore: [
-                    { label: 'TARGET PRESSURE · FL / FR / RL / RR (bar)', value: tyreTarget || 'WAITING FOR TPMS',
+                    { label: 'RECOMMENDED PRESSURE · FRONT LEFT', value: finite(cdNum('tyrePtFL'))
+                        ? formatNumber(cdNum('tyrePtFL'), 1) + ' bar' : 'WAITING FOR TPMS',
                         detail: (() => { const ts = tyreExtra.tyreState; return ts ? [ts.loading, ts.season, ts.mode].filter(Boolean).join(' · ') : ''; })() },
+                    { label: 'RECOMMENDED PRESSURE · FRONT RIGHT', value: finite(cdNum('tyrePtFR'))
+                        ? formatNumber(cdNum('tyrePtFR'), 1) + ' bar' : 'WAITING FOR TPMS' },
+                    { label: 'RECOMMENDED PRESSURE · REAR LEFT', value: finite(cdNum('tyrePtRL'))
+                        ? formatNumber(cdNum('tyrePtRL'), 1) + ' bar' : 'WAITING FOR TPMS' },
+                    { label: 'RECOMMENDED PRESSURE · REAR RIGHT', value: finite(cdNum('tyrePtRR'))
+                        ? formatNumber(cdNum('tyrePtRR'), 1) + ' bar' : 'WAITING FOR TPMS' },
                     { label: 'FITTED TIRES', value: (() => {
                         const f = tyreExtra.frontTire, r = tyreExtra.rearTire;
                         if (!f && !r) return 'WAITING FOR TPMS';
