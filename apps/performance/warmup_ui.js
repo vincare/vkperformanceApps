@@ -198,7 +198,7 @@ function draw(cv, G, t, s, actions) {
     // status fits the room left of "n/3 READY" — it can no longer run over it
     cv.text(fitText(cv, st.text, 19, iw - 150, { font: 'bold', spacing: 1.4, literal: true }),
         ix + 30, y0 + 58, 19, scol, { font: 'bold', spacing: 1.4, literal: true });
-    cv.rampRect(ix, y0 + 76, iw, 2.5, 1, [G.withAlpha(scol, 0.65), G.withAlpha(scol, 0.04)]);
+    cv.rampRect(ix, y0 + 66, iw, 2.5, 1, [G.withAlpha(scol, 0.65), G.withAlpha(scol, 0.04)]);
 
     // turbo cool-down countdown strip while the turbo needs a gentle minute
     const cd = s.cooldown || {};
