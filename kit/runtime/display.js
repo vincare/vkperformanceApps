@@ -113,6 +113,7 @@ class Display {
         this.sheet = null;                           // sheet.js page drawn over the app's (openSheet)
         this.ccuLast = null;                         // last controller state (knob counter, press, push)
         this.ownHidden = new Set();                  // more bar buttons left out where the kit runs the screen (hideButton)
+        this.hideBar = false;                      // the app sets this: no slim bar strip at all (empty space)
         G.onConfirm(() => { this.lastWords = null; this.tickHandlers.forEach((fn) => fn()); });   // a reset asks / runs out
         const canvasScreens = (spec.screens || []).filter((s) => s.kind === 'canvas');
         this.screen = canvasScreens[0] || null;
@@ -931,13 +932,13 @@ class Display {
         }
         // the strip's bottom edge continues under the see-through part
         c.fillRect(sx, 0, W - sx, FULL.headH, HMI.headBg);
-        // slim bar: each label over its HMI button
+        // slim bar: each label over its HMI button (hideBar: the app shows no strip at all)
         const by = H - this.barH();
         const btns = this.buttons().map((b) => ({ id: b.id, label: b.label, x: b.x - this.barOff - pl.x, w: b.w }));
         const flash = this.pressed && Date.now() - this.pressedT < 300 ? btns.findIndex((b) => b.id === this.pressed) : -1;
         const focus = btns.findIndex((b) => b.id === ((this.sheet && this.sheet.settings) ? 'BTN_SETTINGS' : this.focused));
-        if (btns.length && this.barH()) G.menuBar(c, t, 0, by, W, FULL.barH, btns, focus, 'slim', flash);
-        if (this.barH()) {
+        if (!this.hideBar && btns.length && this.barH()) {
+            G.menuBar(c, t, 0, by, W, FULL.barH, btns, focus, 'slim', flash);
             const img = this._credit('Created By VKDigitals.org');
             if (img) c.image(img.id, W - 16 - img.w, by + Math.round((FULL.barH - img.h) / 2), img.w, img.h);
         }
@@ -1027,8 +1028,8 @@ class Display {
      */
     buttons() {
         const own = this.ownable(), real = this.own();
-        if (this._btns && this._btnsOwn === own && this._btnsReal === real) return this._btns;
-        this._btnsOwn = own; this._btnsReal = real;
+        if (this._btns && this._btnsOwn === own && this._btnsReal === real && this._btnsHideBar === this.hideBar) return this._btns;
+        this._btnsOwn = own; this._btnsReal = real; this._btnsHideBar = this.hideBar;
         const m = new Recorder(1, 1);
         let x = HMI.btn.x;
         this._btns = (this.screen.buttons || []).filter((b) => !own || (PAGER.indexOf(b[0]) < 0 && b[0] !== 'BTN_SETTINGS' && !this.ownHidden.has(b[0]))).map((b) => {
@@ -1039,7 +1040,7 @@ class Display {
             return r;
         });
         // the Settings gear the header used to show sits centred in the bar while the kit owns the screen
-        if (real && this.hasSettings() && !this.ownHidden.has('BTN_SETTINGS')) {
+        if (real && !this.hideBar && this.hasSettings() && !this.ownHidden.has('BTN_SETTINGS')) {
             const gw = 96;
             this._btns.push({ id: 'BTN_SETTINGS', label: '', x: this.barOff + this.place.x + Math.round(this.place.w / 2 - gw / 2), w: gw });
         }

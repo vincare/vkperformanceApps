@@ -2945,6 +2945,7 @@ mgu.run({
             if (ctx.display) {
                 ctx.display.customBackBtn = false;
                 ctx.display.hideBackBtn = true;
+                ctx.display.hideBar = page === 0;
                 const hidden = ctx.display.ownHidden;
                 const hadBack = hidden.has('BTN_BACK');
                 if (page === 0) hidden.add('BTN_BACK'); else hidden.delete('BTN_BACK');
