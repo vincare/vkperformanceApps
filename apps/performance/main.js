@@ -158,6 +158,7 @@ mgu.run({
         let vehicleGear = null, vehicleGearAt = 0;
         const cachedDriveMode = settings.get('lastDriveMode');
         let page = 0, engineConfigView = 'sections', carDataView = 'menu', tyrePage = 'main', valveReady = false;
+        let pedalRest = null;           // learned resting accelerator-pedal % (idle-zero gate)
         let drivingMode = flapFor(cachedDriveMode) ? cachedDriveMode : null;
         let driveModeConfirmed = false;
         let burbleTarget = 1.5, burbleCommandActive = false;
@@ -2150,10 +2151,13 @@ mgu.run({
             const pedal = heldNum('pedalPct');
             // Stopped with the foot off the pedal: the engine still reports ~15 Nm of idle
             // torque (converter/AC load), but BMW's own sport display reads 0 - mirror that.
-            // Pressing the pedal while standing still raises it again. Without a pedal
-            // signal the same reads as "revs below idle-with-load" (~1150 rpm).
-            const idleStill = !engineOff && finite(speed) && speed < 1.5 &&
-                (finite(pedal) ? pedal < 5 : (finite(rpm) && rpm < 1150));
+            // "Off the pedal" is learned, not assumed at 0%: the pedal sensor's resting
+            // angle varies (often ~10%), so the rest position is the lowest pedal seen
+            // while the car stands at idle revs; gassing means pedal above rest+6 or
+            // revs past ~1150 (pressing it while standing still shows the values again).
+            const stillish = !engineOff && finite(speed) && speed < 1.5 && finite(rpm) && rpm < 1150;
+            if (stillish && finite(pedal) && (pedalRest === null || pedal < pedalRest)) pedalRest = pedal;
+            const idleStill = stillish && (!finite(pedal) || pedal <= (pedalRest === null ? 6 : pedalRest + 6));
             const powerPct = (engineOff || idleStill) ? 0 : heldNum('powerPct');
             const torque = idleStill ? 0 : (tq ? tq.value : null);
             const result = {
