@@ -196,10 +196,10 @@ mgu.run({
             detail: null, detailScroll: 0, detailScrollMax: 0, selColour: -1, selCombo: -1, previewChoice: null,
             detailFocus: -1, look: null, oemLockBusy: false,
             zoneColors: { upper: null, lower: null, dashboard: null, doors: null, footwell: null },
-            zoneLightingEnabled: false, zoneColorReturn: null, zoneRestorePending: false,
+            zoneLightingEnabled: false, zoneColorReturn: null, zoneRestorePending: false, previousLook: null,
             favorites: [], favorite: 0, upperRead: null, lowerRead: null, customUpper: null, customLower: null, customOther: null,
             features: { mColor: false, comfort: false, sport: false, eco: false },
-            driveMode: null, activeFeatureLighting: null, mColorReturnSlot: null, modeSyncPending: false, modeSyncBusy: false,
+            driveMode: null, driveModePending: null, activeFeatureLighting: null, mColorReturnSlot: null, modeSyncPending: false, modeSyncBusy: false,
             customByLocation: Object.create(null),
         };
         let stopped = false, renderTimer = null, autoScanTimer = null, renderQueued = false, loopOwnsRenders = false;
@@ -234,21 +234,17 @@ mgu.run({
             return null;
         }
         function featurePreviewLighting() {
-            const active = desiredFeatureLighting();
-            if (active || !state.oemEnabled) return active;
-            const mode = ['comfort', 'sport', 'eco'].find((key) => state.features[key]);
-            if (!mode) return null;
-            const colour = hex(MODE_RGB[mode]);
-            return { key: mode, dashboard: colour, door: colour, footwell: colour, armed: true };
+            // Only a mode that is actually driving the lights may recolour the preview:
+            // an armed-but-waiting mode keeps the user's own colour on the swatches.
+            return desiredFeatureLighting();
         }
         function zonePreviewColors() {
             let dashboard, doors, footwell;
             const feature = desiredFeatureLighting();
             if (feature) {
                 dashboard = feature.dashboard; doors = feature.door; footwell = feature.footwell;
-                return { upper: dashboard, door: doors, lower: footwell, dashboard, doors, footwell };
             }
-            if (state.previewChoice === 'combo' && COMBOS[state.selCombo]) {
+            else if (state.previewChoice === 'combo' && COMBOS[state.selCombo]) {
                 dashboard = doors = COMBOS[state.selCombo].c1; footwell = COMBOS[state.selCombo].c2;
             } else if (state.previewChoice === 'colour' && PALETTE[state.selColour]) {
                 dashboard = doors = footwell = PALETTE[state.selColour].c1;
@@ -275,11 +271,18 @@ mgu.run({
             })));
         }
         function syncZoneColorsForTargets(upper, lower) {
+            // Only fills slots the user has not picked yet: remembered zone colours survive
+            // every other look change (colour pick, combo, studio, feature modes).
             const targets = zoneTargets();
             if (targets.indexOf('upper') >= 0 && validHex(upper)) {
-                state.zoneColors.upper = state.zoneColors.dashboard = state.zoneColors.doors = upper;
+                if (!validHex(state.zoneColors.upper)) state.zoneColors.upper = upper;
+                if (!validHex(state.zoneColors.dashboard)) state.zoneColors.dashboard = upper;
+                if (!validHex(state.zoneColors.doors)) state.zoneColors.doors = upper;
             }
-            if (targets.indexOf('lower') >= 0 && validHex(lower)) state.zoneColors.lower = state.zoneColors.footwell = lower;
+            if (targets.indexOf('lower') >= 0 && validHex(lower)) {
+                if (!validHex(state.zoneColors.lower)) state.zoneColors.lower = lower;
+                if (!validHex(state.zoneColors.footwell)) state.zoneColors.footwell = lower;
+            }
         }
         function setDetailFocus(row) {
             state.detailFocus = row;
@@ -319,7 +322,7 @@ mgu.run({
         try {
             const saved = JSON.parse(fs.readFileSync(favFile, 'utf8'));
             if (Array.isArray(saved)) state.favorites = saved.slice(0, FAVOURITES).map((x) => x && Array.isArray(x.rgb) && x.rgb.length === 3
-                ? { rgb: x.rgb.map((n) => clamp(Number(n) || 0, 0, 255)), brightness: clamp(isFinite(Number(x.brightness)) ? Number(x.brightness) : 76, 10, 100), hue: clamp(isFinite(Number(x.hue)) ? Number(x.hue) : 205, 0, 359), saturation: clamp(isFinite(Number(x.saturation)) ? Number(x.saturation) : 86, 0, 100) }
+                ? { rgb: x.rgb.map((n) => clamp(Number(n) || 0, 0, 255)), brightness: clamp(isFinite(Number(x.brightness)) ? Number(x.brightness) : 76, 2, 100), hue: clamp(isFinite(Number(x.hue)) ? Number(x.hue) : 205, 0, 359), saturation: clamp(isFinite(Number(x.saturation)) ? Number(x.saturation) : 86, 0, 100) }
                 : null);
         } catch (e) { state.favorites = []; }
 
@@ -355,8 +358,8 @@ mgu.run({
                     ? saved.zoneLightingEnabled : !!(state.look && state.look.type === 'zone-colours');
                 if (saved.zone === 'all' || saved.zone === 'upper' || saved.zone === 'lower') state.zone = saved.zone;
                 if (saved.oemEnabled === false) state.oemEnabled = false;
-                if (isFiniteNumber(saved.oemBackground)) state.oemBackground = clamp(saved.oemBackground, 10, 100);
-                if (isFiniteNumber(saved.oemAccent)) state.oemAccent = clamp(saved.oemAccent, 10, 100);
+                if (isFiniteNumber(saved.oemBackground)) state.oemBackground = clamp(saved.oemBackground, 2, 100);
+                if (isFiniteNumber(saved.oemAccent)) state.oemAccent = clamp(saved.oemAccent, 2, 100);
                 state.oemNight = !!saved.oemNight;
                 state.oemDynamic = saved.oemDynamic !== false;
                 state.oemBrightnessTouched = !!saved.oemBrightnessTouched;
@@ -528,7 +531,12 @@ mgu.run({
                         const raw = v && v.actualValueModeDrivingExperience;
                         if (raw === undefined || raw === null || raw === '') return;
                         const nextMode = driveModeOf(raw);
-                        if (nextMode === state.driveMode) return;
+                        if (nextMode === state.driveMode) { state.driveModePending = null; return; }
+                        // A drive mode must show up on two consecutive polls before it may
+                        // recolour the cabin: one-off readings (bus glitches, mid-transition
+                        // values) used to flip the ambient colour back and forth.
+                        if (state.driveModePending !== nextMode) { state.driveModePending = nextMode; return; }
+                        state.driveModePending = null;
                         state.driveMode = nextMode;
                         state.modeSyncPending = true;
                         queueRender();
@@ -896,6 +904,8 @@ mgu.run({
                 if (!validHex(state.zoneColors.footwell)) state.zoneColors.footwell = preview.footwell;
                 state.zoneLightingEnabled = true;
                 disableAutomaticModesForManual(['upper', 'lower', 'other']);
+                // Remember the look zones are replacing so turning them back off restores it.
+                state.previousLook = state.look && state.look.type !== 'zone-colours' ? state.look : state.previousLook;
                 state.look = { type: 'zone-colours', dashboard: state.zoneColors.dashboard, doors: state.zoneColors.doors,
                     footwell: state.zoneColors.footwell, upper: state.zoneColors.dashboard, lower: state.zoneColors.footwell };
                 saveLook(); queueRender();
@@ -903,7 +913,11 @@ mgu.run({
             }
             state.zoneLightingEnabled = false;
             state.pendingCustomApply = null;
-            state.look = state.oemSelected ? { type: 'oem', name: state.oemSelected.name } : null;
+            // Bring back whatever was live before zones took over — dropping it meant a
+            // later mode-release had no look to restore.
+            state.look = state.previousLook && state.previousLook.type !== 'zone-colours' ? state.previousLook
+                : state.oemSelected ? { type: 'oem', name: state.oemSelected.name } : null;
+            state.previousLook = null;
             saveLook(); queueRender();
             if (state.applyBusy) {
                 state.zoneRestorePending = true;
@@ -1009,10 +1023,20 @@ mgu.run({
                     } else if (state.activeFeatureLighting) {
                         const wasMColor = state.activeFeatureLighting.key === 'mColor';
                         state.activeFeatureLighting = null;
-                        result = wasMColor ? await restoreMColorFactoryProfile() : await restoreBmw();
+                        // The mode let go of the lights: bring the user's own look back instead
+                        // of leaving the car on whatever BMW factory state it falls to.
+                        const reapplied = state.look ? await reapplyLook('YOUR AMBIENT LOOK RESTORED', true) : false;
+                        result = reapplied ? reapplied
+                            : wasMColor ? await restoreMColorFactoryProfile() : await restoreBmw();
                     } else if (state.features.comfort || state.features.sport || state.features.eco) {
                         const waitingFor = ['comfort', 'sport', 'eco'].find((mode) => state.features[mode]);
                         if (waitingFor) setNotice(waitingFor.toUpperCase() + ' MODE COLOUR ARMED · WAITING FOR ' + waitingFor.toUpperCase(), C.cyan);
+                    } else if (state.look && state.look.type === 'zone-colours' && !state.zoneLightingEnabled) {
+                        // Zones were only parked while a mode was armed; with every mode off
+                        // they come back exactly as the user left them.
+                        state.zoneLightingEnabled = true;
+                        saveLook(); queueRender();
+                        result = await applyZoneLighting(true, 'ZONE LIGHTING RESTORED');
                     }
                 } while (state.modeSyncPending && !stopped && state.oemEnabled);
             } finally {
@@ -1256,7 +1280,7 @@ mgu.run({
             }
         }
         function effectiveOemBrightness(value) {
-            return clamp(Math.round(value * (state.oemNight ? 0.45 : 1)), 10, 100);
+            return clamp(Math.round(value * (state.oemNight ? 0.45 : 1)), 2, 100);
         }
         // Background is the global brightness ceiling. Accent may dim the upper
         // strips further, while footwell/background modules follow Background.
@@ -1323,6 +1347,7 @@ mgu.run({
             disableAutomaticModesForManual(targets);
             state.oemSelected = null;
             state.previewChoice = null;
+            state.previousLook = null;
             state.look = {
                 type: 'studio', hue: hueValue(), saturation: saturationValue(), brightness: brightnessValue(),
                 targets: targets.slice(),
@@ -1339,7 +1364,9 @@ mgu.run({
             if (!lk) return;
             if (lk.type === 'combo' && COMBOS[lk.index]) return applyComboLook(COMBOS[lk.index], note || ('COMBO ' + COMBOS[lk.index].name.toUpperCase() + ' · REAPPLYING…'), allowWhileMoving);
             if (lk.type === 'colour' && PALETTE[lk.index]) return applyColourLook(PALETTE[lk.index], note || (PALETTE[lk.index].name.toUpperCase() + ' · REAPPLYING…'), allowWhileMoving);
-            if (lk.type === 'zone-colours' && state.zoneLightingEnabled) {
+            if (lk.type === 'zone-colours') {
+                // A feature mode may have switched the zones off; restoring this look turns them back on.
+                if (!state.zoneLightingEnabled) { state.zoneLightingEnabled = true; saveLook(); queueRender(); }
                 if (!validHex(state.zoneColors.dashboard)) state.zoneColors.dashboard = validHex(lk.dashboard) ? lk.dashboard : lk.upper;
                 if (!validHex(state.zoneColors.doors)) state.zoneColors.doors = validHex(lk.doors) ? lk.doors : lk.upper;
                 if (!validHex(state.zoneColors.footwell)) state.zoneColors.footwell = validHex(lk.footwell) ? lk.footwell : lk.lower;
@@ -1349,7 +1376,7 @@ mgu.run({
             if (lk.type === 'studio') {
                 settings.set('hue', clamp(Number(lk.hue) || 0, 0, 345));
                 settings.set('saturation', clamp(Number(lk.saturation) || 0, 0, 100));
-                settings.set('brightness', clamp(Number(lk.brightness) || 76, 10, 100));
+                settings.set('brightness', clamp(Number(lk.brightness) || 76, 2, 100));
                 const targets = Array.isArray(lk.targets)
                     ? lk.targets.filter((zone) => ['upper', 'lower', 'other'].indexOf(zone) >= 0)
                     : zoneTargets();
@@ -1388,7 +1415,7 @@ mgu.run({
                 state.zone = 'all';
                 state.zoneLightingEnabled = false; state.zoneRestorePending = false;
                 disableAutomaticModesForManual(['upper', 'lower', 'other']);
-                state.selCombo = i; state.previewChoice = 'combo'; state.look = { type: 'combo', index: i };
+                state.selCombo = i; state.previewChoice = 'combo'; state.previousLook = null; state.look = { type: 'combo', index: i };
                 syncZoneColorsForTargets(c.c1, c.c2);
                 saveLook(); queueRender();
                 await applyComboLook(c, 'COMBO ' + c.name.toUpperCase() + ' · APPLYING TO ' + zoneName() + '…');
@@ -1408,7 +1435,7 @@ mgu.run({
             state.zone = 'all';
             state.zoneLightingEnabled = false; state.zoneRestorePending = false;
             disableAutomaticModesForManual(['upper', 'lower', 'other']);
-            state.selColour = i - 1; state.previewChoice = 'colour'; state.look = { type: 'colour', index: i - 1 };
+            state.selColour = i - 1; state.previewChoice = 'colour'; state.previousLook = null; state.look = { type: 'colour', index: i - 1 };
             syncZoneColorsForTargets(c.c1, c.c1);
             saveLook(); queueRender();
             await applyColourLook(c, 'COLOUR ' + c.name.toUpperCase() + ' · APPLYING TO ' + zoneName() + '…');
@@ -1447,8 +1474,8 @@ mgu.run({
             } catch (e) { setNotice('BRIGHTNESS REQUEST FAILED · ' + shortError(e).slice(0, 64), C.red); }
         }
         async function adjustOemBrightness(zone, value) {
-            if (zone === 'background') state.oemBackground = clamp(value, 10, 100);
-            else state.oemAccent = clamp(value, 10, 100);
+            if (zone === 'background') state.oemBackground = clamp(value, 2, 100);
+            else state.oemAccent = clamp(value, 2, 100);
             state.oemBrightnessTouched = true;
             saveLook(); queueRender();
             scheduleOemBrightnessApply();
@@ -1460,6 +1487,7 @@ mgu.run({
             disableAutomaticModesForManual(['upper', 'lower', 'other']);
             state.oemSelected = color;
             state.oemPaletteOpen = true;
+            state.previousLook = null;
             state.look = { type: 'oem', name: color.name };
             syncZoneColorsForTargets(color.color, color.color);
             saveLook(); queueRender();
@@ -1539,7 +1567,7 @@ mgu.run({
             accentUp: () => adjustOemBrightness('accent', state.oemAccent + 10),
             hueMinus: () => changeSetting('hue', -15, 0, 345), huePlus: () => changeSetting('hue', 15, 0, 345),
             satMinus: () => changeSetting('saturation', -10, 0, 100), satPlus: () => changeSetting('saturation', 10, 0, 100),
-            brightnessMinus: () => changeSetting('brightness', -10, 10, 100), brightnessPlus: () => changeSetting('brightness', 10, 10, 100),
+            brightnessMinus: () => changeSetting('brightness', -10, 2, 100), brightnessPlus: () => changeSetting('brightness', 10, 2, 100),
             scan: scanModules,
             apply: () => applyStudioLook('CUSTOM COLOUR · APPLYING TO ' + zoneName() + '…'),
             restore: () => { disableAutomaticModesForManual(); return restoreBmw(); },
@@ -1903,6 +1931,10 @@ mgu.run({
                 hitboxes.push({ x: hud.accentBar.x, y: hud.accentBar.y, w: hud.accentBar.w, h: hud.accentBar.h, key: 'oemBrightness', zone: 'accent', i: 4 });
             }
             if (scr && scr.max > 0) cv.scroll = { y: scr.y };
+            // Per-frame flag: display.js resets hideTargetMark from every frame, so setting it
+            // once on ctx.display gets cleared again. The focused row's own red highlight
+            // already shows where the controller is — the underline+"SELECTED" tag is noise.
+            cv.hideTargetMark = true;
             return ui.image('MAIN_GFX', cv);
         }
         function hitTest(x, y) {
@@ -1911,7 +1943,7 @@ mgu.run({
                 if (b.key === 'quick') { settings.set('hue', b.hue); settings.set('saturation', b.sat); queueRender(); return; }
                 if (b.key === 'oemBrightness') {
                     if (b.i != null && state.oemFocus !== b.i) { state.oemFocus = b.i; queueRender(); }
-                    const value = Math.round(10 + clamp((x - b.x) / Math.max(1, b.w), 0, 1) * 90);
+                    const value = Math.round(2 + clamp((x - b.x) / Math.max(1, b.w), 0, 1) * 98);
                     return adjustOemBrightness(b.zone, value);
                 }
                 if (b.key === 'slot') { state.slot = b.slot; return setFactorySlot(b.slot); }
@@ -2014,8 +2046,9 @@ mgu.run({
         if (ctx.loop) {
             loopOwnsRenders = true;
             if (renderTimer !== null) { clearTimeout(renderTimer); renderTimer = null; renderQueued = false; }
-            // 20 FPS on the software path and an explicit 20 FPS cap on the GPU renderer.
-            ctx.loop('MAIN', 20, render, { gpuFps: 20 });
+            // 50 FPS on the GPU renderer (what the head unit actually shows); the software
+            // path stays at 20 FPS so PNG buffers don't churn memory on older renderers.
+            ctx.loop('MAIN', 20, render, { gpuFps: 50 });
         }
 
         if (ui.isVisible('MAIN')) render().catch((e) => log.warn('first render: ' + shortError(e)));
