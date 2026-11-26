@@ -399,7 +399,7 @@ function drawRunReport(cv, G, t, s, run, actions) {
         cv.text('NO RUN SELECTED', 610, y0 + 240, 20, t.dim,
             { align: 'center', font: 'bold', spacing: 1.1, literal: true });
     } else {
-        drawLegend(cv, G, t, run, s.ecuTorque, 316, y0 + 58);
+        drawLegend(cv, G, t, run, s.ecuTorque, 316, y0 + 42);
         chart(cv, G, t, s, run, { x: 356, y: y0 + 92, w: 620, h: 226 });
 
         const pu = powerName(s.powerUnit), tu = torqueName(s.torqueUnit);
