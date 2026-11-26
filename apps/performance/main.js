@@ -2771,14 +2771,15 @@ mgu.run({
             if (renderInFlight) return renderInFlight;
 
             const now = Date.now();
-            // Exhaust smoke, burble flames and the valve-blade tween are time-driven:
-            // while one of those views is up, every loop tick is a fresh frame.
-            if (page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles')) renderDirty = true;
+            // Exhaust smoke, burble flames, tyre smoke and the valve-blade tween are
+            // time-driven: while one of those views is up, every loop tick is a fresh frame.
+            const ANIMATING_VIEWS = ['exhaust', 'burbles', 'dynamic'];
+            if (page === 1 && ANIMATING_VIEWS.indexOf(engineConfigView) >= 0) renderDirty = true;
             // The renderer maintains its own frame keepalive. Do not rebuild a
             // screen unless app data, navigation, or layout actually changed.
-            // Exhaust smoke and burble flames animate: that view alone renders at 30 fps
-            // (the puffs are a few dozen circles per frame — cheap), other pages keep 10.
-            const animating = page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles');
+            // Exhaust smoke, burble flames and tyre smoke animate: those views alone
+            // render at 30 fps (a few dozen circles per frame — cheap), other pages keep 10.
+            const animating = page === 1 && ANIMATING_VIEWS.indexOf(engineConfigView) >= 0;
             const renderInterval = page === 0 ? ENGINE_DATA_RENDER_MS : animating ? 33 : RENDER_MS;
             if (!renderDirty || now - lastRenderAt < renderInterval) return;
 
@@ -3100,7 +3101,7 @@ mgu.run({
         // renderer and up to 20 on software, everything else keeps its 10 Hz renderer cap.
         if (ctx.loop) mainLoop = ctx.loop('MAIN', 20, render, {
             gpuFps: () => page === 0 ? ENGINE_DATA_FPS
-                : (page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles') ? 30 : 10),
+                : (page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles' || engineConfigView === 'dynamic') ? 30 : 10),
         });
         render().catch((e) => log.warn('first render: ' + shortError(e)));
     },

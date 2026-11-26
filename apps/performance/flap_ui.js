@@ -39,6 +39,29 @@ function drawSmoke(cv, G, t, car, imageRect, now, valveMode) {
     });
 }
 
+// Burnout smoke: dense billows boiling out of the rear wheel arches — thick,
+// low, pushed outward off the tyre edges, climbing a little as it thins.
+function drawTireSmoke(cv, G, t, car, imageRect, now) {
+    if (!car) return;
+    const seconds = (now || Date.now()) / 1000;
+    [[0.14, -1], [0.86, 1]].forEach((w, wi) => {
+        const ox = imageRect.x + w[0] * imageRect.w;
+        const oy = imageRect.y + imageRect.h * 0.90;
+        const outward = w[1];
+        for (let puff = 0; puff < 14; puff++) {
+            const phase = (seconds * 0.5 + puff / 14 + wi * 0.29) % 1;
+            const sway = Math.sin(seconds * 2.2 + puff * 1.6 + wi * 2.1) * (3 + phase * 8);
+            const x = ox + outward * (4 + phase * Math.min(95, imageRect.w * 0.17)) + sway;
+            const y = oy - phase * Math.min(38, imageRect.h * 0.09) + phase * phase * Math.min(30, imageRect.h * 0.07);
+            const radius = 5 + phase * Math.min(56, imageRect.h * 0.15);
+            const fade = (1 - phase) * (0.5 + 0.5 * Math.min(1, phase * 4));
+            cv.circle(x, y, radius, G.withAlpha('#c8cdd4', 0.20 * fade));
+            cv.circle(x, y, radius * 0.66, G.withAlpha('#d6dbe2', 0.33 * fade));
+            cv.circle(x, y, radius * 0.34, G.withAlpha('#eceff3', 0.30 * fade));
+        }
+    });
+}
+
 function hash(n) { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); }
 
 // Burble pops: irregular flame bursts per tip — hot white/yellow core flash,
@@ -98,6 +121,8 @@ function drawCar(cv, G, t, valve, car, bounds, now, effects) {
     if (effects === 'flames') {
         drawValveFlaps(cv, G, t, car, imageRect, valveMode, now);
         drawFlames(cv, G, t, car, imageRect, now);
+    } else if (effects === 'tires') {
+        drawTireSmoke(cv, G, t, car, imageRect, now);
     } else {
         drawSmoke(cv, G, t, car, imageRect, now, valveMode);
         drawValveFlaps(cv, G, t, car, imageRect, valveMode, now);
@@ -667,7 +692,7 @@ function drawDynamic(cv, G, t, v, car, actions, now) {
     cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
     cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
     cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
-    drawCar(cv, G, t, null, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, false);
+    drawCar(cv, G, t, null, car, { x: 267, y: y0 + 42, w: 650, h: h - 56 }, now, 'tires');
 
     const tagX = 40, tagY = y0 + 24, tagW = titleTagWidth(cv, 'DYNAMIC CONFIG', 34, 300), tagH = 52, tagSlant = 15;
     para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
@@ -775,4 +800,4 @@ function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     return cv;
 }
 
-module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawDynamic, drawSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, setArtCacheDir, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, titleTagWidth };
+module.exports = { W, H, CAR_TILE_BG, SLANT, draw, drawCar, drawSectionMenu, drawBurbles, drawExhaustSheet, drawDynamic, drawSmoke, drawTireSmoke, drawFlames, drawValveFlaps, contain, sectionArt, cachedSectionArt, setArtCacheDir, para, drawHexMesh, drawBarSegs, modeIcon, drawChip, titleTagWidth };
