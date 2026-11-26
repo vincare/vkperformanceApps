@@ -47,7 +47,7 @@ try {
     legacySettings._reset_valveControl = 1;
     fs.writeFileSync(settingsFile, JSON.stringify(legacySettings));
     const safetyReset = new exported.Settings(app.settings);
-    assert.strictEqual(safetyReset.get('valveControl'), 'off', 'upgrade resets a previously armed exhaust control to Off');
+    assert.strictEqual(safetyReset.get('valveControl'), 'on', 'upgrade resets a stored exhaust control to the new default');
     safetyReset.set('valveControl', 'on');
     assert.strictEqual(new exported.Settings(app.settings).get('valveControl'), 'on', 'user can explicitly arm and keep the exhaust control');
 } finally {
@@ -93,5 +93,5 @@ for (const model of Cars.MODELS) {
     assert(recorder.words().length > 0, model.key + ' smoke overlay draws from configured tips');
 }
 assert.strictEqual(new Set(outputHashes).size, 12, 'each model choice loads a distinct supplied image');
-assert.strictEqual(app.version, '0.6.57', 'app version matches the update');
+assert.strictEqual(app.version, '0.6.74', 'app version matches the update');
 console.log('PERFORMANCE car images: 12 variants passed');

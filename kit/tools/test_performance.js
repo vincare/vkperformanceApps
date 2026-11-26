@@ -28,11 +28,11 @@ const scaling = {
 };
 
 equal(app.id, 'performance', 'app id');
-equal(app.version, '0.6.57', 'app version');
+equal(app.version, '0.6.74', 'app version');
 equal(app.screens[0].title, '', 'screen title is hidden to avoid repeating Engine Data beside the section tabs');
 equal(app.settings.find((setting) => setting.key === 'drivetrainType').default, 'auto', 'drivetrain type defaults to automatic');
 const valveControl = app.settings.find((setting) => setting.key === 'valveControl');
-equal(valveControl.default, 'off', 'real exhaust control defaults disarmed');
+equal(valveControl.default, 'on', 'real exhaust control is armed by default');
 equal(valveControl.hidden, undefined, 'exhaust arming is visible in Settings');
 equal(valveControl.reset, 2, 'saved exhaust arming resets to the safer default once');
 equal(app.settings.find((setting) => setting.key === 'maxPower').hidden, undefined, 'power calibration is visible in Settings');

@@ -2780,10 +2780,10 @@ mgu.run({
                 cv.text('FUEL RESERVE (8L LEFT)', W / 2, toastY + 27, 22, '#ffffff',
                     { align: 'center', font: 'bold', spacing: 1.1, literal: true });
             }
-            // The kit's "SELECTED" mark under the focused target only belongs on the pages that
-            // pick a section: ENGINE CONFIG's section menu, RACE MODES and the CAR DATA menu.
-            cv.hideTargetMark = !(page === 1 && engineConfigView === 'sections'
-                || page === 2 || (page === 5 && carDataView === 'menu'));
+            // The kit's "SELECTED" mark under the focused target stays on for every page:
+            // it is the only on-screen feedback for where the iDrive controller sits —
+            // without it the knob moves focus invisibly and the joystick feels dead.
+            cv.hideTargetMark = false;
             return ui.image('MAIN_GFX', cv);
         }
 
@@ -2967,6 +2967,12 @@ mgu.run({
                 if (hidden.has('BTN_BACK') !== hadBack) {
                     ctx.display._btns = null;
                     if (ctx.display.place) ctx.display._place();
+                }
+                // Land the controller on this page's own tab: a target key from the page
+                // just left is not in the new ring, so the next knob press would fire nowhere.
+                const tabIndex = { 0: 0, 1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4 }[page];
+                if (tabIndex !== undefined && typeof ctx.display._focus === 'function') {
+                    ctx.display._focus({ k: 'tab:' + tabIndex, tab: tabIndex });
                 }
             }
             updateDynoActionLabel();
