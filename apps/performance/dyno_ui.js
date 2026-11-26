@@ -315,10 +315,10 @@ function drawRuns(cv, G, t, s, actions) {
         const ry = y0 + 78 + i * 60;
         const sel = selRun && run.at === selRun.at;
         if (sel) {
-            Sheet.para(cv, 306, ry - 26, 620, ry + 30, 20, G.withAlpha('#ffffff', 0.1));
-            Sheet.para(cv, 306, ry - 26, 6, ry + 30, 20, '#ff243b');
+            Sheet.para(cv, 370, ry - 26, 620, ry + 30, 20, G.withAlpha('#ffffff', 0.1));
+            Sheet.para(cv, 370, ry - 26, 6, ry + 30, 20, '#ff243b');
         }
-        cv.text(runStamp(run.at), 330, ry - 4, 15, sel ? '#ffffff' : G.withAlpha('#e8c8ce', 0.8),
+        cv.text(runStamp(run.at), 394, ry - 4, 15, sel ? '#ffffff' : G.withAlpha('#e8c8ce', 0.8),
             { font: 'bold', spacing: 0.8, literal: true });
         if (s.baselineAt === run.at) cv.text('BASELINE', 890, ry - 4, 12, '#ff243b',
             { align: 'right', font: 'bold', spacing: 1.0, literal: true });
@@ -326,10 +326,10 @@ function drawRuns(cv, G, t, s, actions) {
             + ' @ ' + Math.round(run.peakPrpm) + ' RPM    ' + Math.round(run.peakT * torqueFactor(s.torqueUnit))
             + ' ' + torqueName(s.torqueUnit).toUpperCase() + ' @ ' + Math.round(run.peakTrpm) + ' RPM    '
             + Math.round(run.v0) + '-' + Math.round(run.v1) + ' KM/H    ' + Math.round(run.loss) + '% LOSS';
-        cv.text(line, 330, ry + 18, 11.5, G.withAlpha('#e8c8ce', 0.5),
+        cv.text(line, 394, ry + 18, 11.5, G.withAlpha('#e8c8ce', 0.5),
             { font: 'bold', spacing: 0.4, literal: true });
         if (cv.own && actions && actions.select) {
-            cv.target(300, ry - 26, 632, 56, () => actions.select(run.at), 'performance_dynorun_' + i, 10, true);
+            cv.target(364, ry - 26, 632, 56, () => actions.select(run.at), 'performance_dynorun_' + i, 10, true);
         }
     });
 
