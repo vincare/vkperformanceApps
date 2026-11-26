@@ -2189,10 +2189,10 @@ mgu.run({
                         { label: 'DSC MODE', value: 'ON' },
                     ],
                     tyresMore: [
-                        { label: 'RECOMMENDED PRESSURE · FRONT LEFT', value: '2.4 bar' },
-                        { label: 'RECOMMENDED PRESSURE · FRONT RIGHT', value: '2.4 bar' },
-                        { label: 'RECOMMENDED PRESSURE · REAR LEFT', value: '2.6 bar' },
-                        { label: 'RECOMMENDED PRESSURE · REAR RIGHT', value: '2.6 bar' },
+                        { label: 'RECOMMENDED FOR FRONT LEFT', value: '2.4 bar' },
+                        { label: 'RECOMMENDED FOR FRONT RIGHT', value: '2.4 bar' },
+                        { label: 'RECOMMENDED FOR REAR LEFT', value: '2.6 bar' },
+                        { label: 'RECOMMENDED FOR REAR RIGHT', value: '2.6 bar' },
                         { label: 'FITTED TIRES', value: '245/40R18 / 275/35R19' },
                         { label: 'TIRE DETECTION / TPMS RESET', value: 'Wheels found · Passed' },
                     ],
@@ -2297,14 +2297,14 @@ mgu.run({
                         detail: 'traction control · as the cluster shows it' },
                 ],
                 tyresMore: [
-                    { label: 'RECOMMENDED PRESSURE · FRONT LEFT', value: finite(cdNum('tyrePtFL'))
+                    { label: 'RECOMMENDED FOR FRONT LEFT', value: finite(cdNum('tyrePtFL'))
                         ? formatNumber(cdNum('tyrePtFL'), 1) + ' bar' : 'WAITING FOR TPMS',
                         detail: (() => { const ts = tyreExtra.tyreState; return ts ? [ts.loading, ts.season, ts.mode].filter(Boolean).join(' · ') : ''; })() },
-                    { label: 'RECOMMENDED PRESSURE · FRONT RIGHT', value: finite(cdNum('tyrePtFR'))
+                    { label: 'RECOMMENDED FOR FRONT RIGHT', value: finite(cdNum('tyrePtFR'))
                         ? formatNumber(cdNum('tyrePtFR'), 1) + ' bar' : 'WAITING FOR TPMS' },
-                    { label: 'RECOMMENDED PRESSURE · REAR LEFT', value: finite(cdNum('tyrePtRL'))
+                    { label: 'RECOMMENDED FOR REAR LEFT', value: finite(cdNum('tyrePtRL'))
                         ? formatNumber(cdNum('tyrePtRL'), 1) + ' bar' : 'WAITING FOR TPMS' },
-                    { label: 'RECOMMENDED PRESSURE · REAR RIGHT', value: finite(cdNum('tyrePtRR'))
+                    { label: 'RECOMMENDED FOR REAR RIGHT', value: finite(cdNum('tyrePtRR'))
                         ? formatNumber(cdNum('tyrePtRR'), 1) + ' bar' : 'WAITING FOR TPMS' },
                     { label: 'FITTED TIRES', value: (() => {
                         const f = tyreExtra.frontTire, r = tyreExtra.rearTire;
