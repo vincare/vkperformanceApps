@@ -1258,17 +1258,11 @@ mgu.run({
                 dscSend('on');
                 return null;
             }
-            const now = Date.now();
             if (!currentDsc) return dscStatus(DSC_LABEL[mode] + ' · WAIT FOR STATUS', true);
             if (currentDsc === 'off') return dscStatus(mode === 'off' ? 'DSC OFF ALREADY ACTIVE' : 'ENABLE DSC FIRST', mode !== 'off');
             if (mode === 'mdm') {
                 if (currentDsc === 'traction') return dscStatus('MDM ALREADY ACTIVE', false);
                 if (currentDsc !== 'on') return dscStatus('ENABLE DSC FIRST', true);
-            }
-            if (dscWrite.armed !== mode || now > dscWrite.armedUntil) {
-                dscWrite.armed = mode; dscWrite.armedUntil = now + 4000;
-                dscStatus('PRESS AGAIN TO SEND ' + DSC_LABEL[mode], mode === 'off');
-                return null;
             }
             dscWrite.armed = null;
             if (!tpmsProxy) { dscStatus('TPMS LINK UNAVAILABLE', true); return null; }
