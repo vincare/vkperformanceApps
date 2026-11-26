@@ -937,6 +937,8 @@ class Display {
         const flash = this.pressed && Date.now() - this.pressedT < 300 ? btns.findIndex((b) => b.id === this.pressed) : -1;
         const focus = btns.findIndex((b) => b.id === this.focused);
         if (btns.length && this.barH()) G.menuBar(c, t, 0, by, W, FULL.barH, btns, focus, 'slim', flash);
+        if (this.barH()) c.text('Created By VKDigitals.org', W - 16, by + FULL.barH / 2 + 6, 16,
+            G.withAlpha('#ffffff', 0.45), { align: 'right', font: 'light' });
         // the HMI's status icons and its back arrow column (home button, back arrow) show through;
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
         // mark the HMI draws above it when its bar is wider than the screen (eDrive's "Reset drive totals")
