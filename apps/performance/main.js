@@ -2212,15 +2212,6 @@ mgu.run({
                 return finite(tt) ? formatNumber(p, 2) + ' bar (' + formatNumber(tt, 0) + ' °C)'
                     : formatNumber(p, 2) + ' bar';
             };
-            const tyreWheelCompact = (pKey, tKey) => {
-                const p = cdNum(pKey), tt = cdNum(tKey);
-                if (!finite(p) && !finite(tt)) return '-- / --';
-                return (finite(p) ? formatNumber(p, 2) : '--') + ' / ' + (finite(tt) ? formatNumber(tt, 0) : '--');
-            };
-            const tyreAxleCompact = (p1, t1, p2, t2) => {
-                if (![p1, t1, p2, t2].some((key) => finite(cdNum(key)))) return 'WAITING FOR TPMS';
-                return tyreWheelCompact(p1, t1) + ' · ' + tyreWheelCompact(p2, t2);
-            };
             const tyreTarget = tyreQuad(['tyrePtFL', 'tyrePtFR', 'tyrePtRL', 'tyrePtRR'], 1);
             const rows = {
                 engineInfo: [
@@ -2308,10 +2299,6 @@ mgu.run({
                     { label: 'REAR RIGHT', value: tyreWheel('tyrePRR', 'tyreTRR') },
                 ],
                 tyresMore: [
-                    { label: 'FRONT LEFT / RIGHT · BAR / °C', value: tyreAxleCompact('tyrePFL', 'tyreTFL', 'tyrePFR', 'tyreTFR'),
-                        detail: [tyreWheel('tyrePFL', 'tyreTFL'), tyreWheel('tyrePFR', 'tyreTFR')].filter(Boolean).join(' · ') },
-                    { label: 'REAR LEFT / RIGHT · BAR / °C', value: tyreAxleCompact('tyrePRL', 'tyreTRL', 'tyrePRR', 'tyreTRR'),
-                        detail: [tyreWheel('tyrePRL', 'tyreTRL'), tyreWheel('tyrePRR', 'tyreTRR')].filter(Boolean).join(' · ') },
                     { label: 'TARGET PRESSURE · FL / FR / RL / RR (bar)', value: tyreTarget || 'WAITING FOR TPMS',
                         detail: (() => { const ts = tyreExtra.tyreState; return ts ? [ts.loading, ts.season, ts.mode].filter(Boolean).join(' · ') : ''; })() },
                     { label: 'FITTED TIRES', value: (() => {
@@ -2337,8 +2324,6 @@ mgu.run({
                         const c = tyreExtra.calibration;
                         return c ? c.type + (c.mileage ? ' · ' + Math.round(c.mileage).toLocaleString('en-US') + ' km' : '') : '';
                     })() },
-                    { label: 'DSC', value: tyreExtra.dsc ? tyreExtra.dsc.state.toUpperCase() : null,
-                        detail: 'traction control · as the cluster shows it' },
                 ],
             };
             return rows[view] || [];
