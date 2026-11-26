@@ -173,7 +173,7 @@ function drawSwatch(cv, G, x, y, w, h, c, disabled) {
  */
 function drawInteriorLighting(cv, G, opts) {
     const px = 88, pw = 560;
-    const baseRows = [62, 72, 72, 118, 118, 72, 72, 72, 72, 72, 72];
+    const baseRows = [62, 72, 72, 118, 118, 72, 72, 72, 72, 72, 72, 72];
     const basePh = baseRows.reduce((a, b) => a + b, 0);
     const py = 40;
     const bottom = H + (opts.extra || 0) - 4;
@@ -271,7 +271,8 @@ function drawInteriorLighting(cv, G, opts) {
         ['M Color Mode', 'mColorMode', !!(opts.features && opts.features.mColor)],
         ['Comfort Mode', 'comfortMode', !!(opts.features && opts.features.comfort)],
         ['Sport Mode', 'sportMode', !!(opts.features && opts.features.sport)],
-        ['Eco Mode', 'ecoMode', !!(opts.features && opts.features.eco)]];
+        ['Eco Mode', 'ecoMode', !!(opts.features && opts.features.eco)],
+        ['OEM Ambient Lighting', 'oemAmbient', !!opts.oemAmbient]];
     plain.forEach(([label], k) => {
         const i = 5 + k, cy = rowTop[i] + rows[i] / 2;
         cv.text(label, lx, cy + 8, 25, txtC(i), { font: 'bold', literal: true });
@@ -301,7 +302,7 @@ function drawInteriorLighting(cv, G, opts) {
         const y = Math.max(top, r.y);
         return { x: r.x, y, w: r.w, h: Math.min(py + ph, r.y + r.h) - y, i: r.i, key: r.key };
     };
-    const rowKeys = ['oemLight', 'panelColour', 'panelZones', null, null, 'oemNight', 'oemDynamic', 'mColorMode', 'comfortMode', 'sportMode', 'ecoMode'];
+    const rowKeys = ['oemLight', 'panelColour', 'panelZones', null, null, 'oemNight', 'oemDynamic', 'mColorMode', 'comfortMode', 'sportMode', 'ecoMode', 'oemAmbient'];
     return {
         rows: rows.map((h, i) => vis({ x: px, y: rowTop[i], w: pw, h, i, key: rowKeys[i] })).filter((r) => r.h > 0),
         // unclipped geometry of EVERY row: the controller must be able to land on rows that are

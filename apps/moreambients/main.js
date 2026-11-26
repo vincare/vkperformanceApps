@@ -187,6 +187,7 @@ mgu.run({
             oemBrightnessTimer: null, oemBrightnessPending: false,
             oemPaletteOpen: false, oemSelected: null, oemBackground: 62, oemAccent: 76,
             oemNight: false, oemEnabled: true, oemDynamic: true, oemBrightnessTouched: false, oemFocus: 0, oemWantApply: false,
+            oemAmbient: false,
             oemPendingTarget: null, oemPendingAt: 0, oemToggleBusy: false,
             oemDesiredTarget: null, oemToggleWaiters: [], oemRetryPending: false,
             oemRestoreRequested: false,
@@ -372,6 +373,7 @@ mgu.run({
                     ? saved.zoneLightingEnabled : !!(state.look && state.look.type === 'zone-colours');
                 if (saved.zone === 'all' || saved.zone === 'upper' || saved.zone === 'lower') state.zone = saved.zone;
                 if (saved.oemEnabled === false) state.oemEnabled = false;
+                if (saved.oemAmbient) state.oemAmbient = true;
                 if (isFiniteNumber(saved.oemBackground)) state.oemBackground = clamp(saved.oemBackground, 2, 100);
                 if (isFiniteNumber(saved.oemAccent)) state.oemAccent = clamp(saved.oemAccent, 2, 100);
                 state.oemNight = !!saved.oemNight;
@@ -390,6 +392,7 @@ mgu.run({
                     zoneLightingEnabled: state.zoneLightingEnabled,
                     oemBackground: state.oemBackground, oemAccent: state.oemAccent,
                     oemNight: state.oemNight, oemDynamic: state.oemDynamic, oemBrightnessTouched: state.oemBrightnessTouched,
+                    oemAmbient: state.oemAmbient,
                 }));
             } catch (e) { log.warn('look persist: ' + shortError(e)); }
         }
@@ -787,6 +790,8 @@ mgu.run({
                 if (!isRenewal) setNotice('NO DISCOVERED RGB MODULES · BMW FACTORY LIGHTING IS UNCHANGED', C.amber);
                 return false;
             }
+            // An applied look means the app owns the cabin again — the OEM-ambient handoff flag clears.
+            if (!isRenewal) state.oemAmbient = false;
             const chosen = isRenewal ? [] : (requestedZones || (state.zone === 'all' ? ['upper', 'lower', 'other'] : [state.zone]));
             const healthy = state.modules.filter((m) => !m.fault);
             const applicable = isRenewal ? [] : chosen.filter((zone) => healthy.some((m) => zone === 'other' ? m.part === 'unknown' : m.part === zone));
@@ -1361,6 +1366,40 @@ mgu.run({
                 state.oemToggleWaiters.splice(0).forEach((resolve) => resolve(result));
             }
         }
+        // OEM AMBIENT LIGHTING row: hands the cabin back to BMW's own ambient colour
+        // (LIN modules released + the BDC's stored slot re-requested). OFF blacks it
+        // out entirely. Any later app apply flips the flag back via applyCustom().
+        async function setOemAmbient(on) {
+            const target = !!on;
+            if (state.oemAmbient === target && (target ? !state.activeCustom && !state.blackoutOverride : state.blackoutOverride)) return;
+            state.oemAmbient = target;
+            saveLook(); queueRender();
+            setNotice(target ? 'OEM AMBIENT LIGHTING ON · RETURNING CONTROL TO BMW…' : 'OEM AMBIENT LIGHTING OFF · TURNING LIGHTS OUT…', C.cyan);
+            if (target) {
+                // The BDC drives the modules again at its stored slot colour.
+                state.oemEnabled = true; state.oemPendingTarget = true; state.oemPendingAt = Date.now();
+                const restored = await restoreBmw();
+                state.oemRestoreRequested = !restored;
+                if (state.proxy) {
+                    try {
+                        await ctx.signals.set(state.proxy, 'ambientLightInteriorColour', factoryRequest(state.liveSlot || state.slot));
+                        await ctx.signals.set(state.proxy, 'ambientLightInteriorColour',
+                            brightnessRequest(Math.round(effectiveOemBrightness(state.oemBackground) * 2.54)));
+                        setNotice('OEM AMBIENT LIGHTING ON · BMW COLOUR RESTORED', C.green);
+                    } catch (e) { setNotice('OEM AMBIENT REQUEST FAILED · ' + shortError(e).slice(0, 52), C.red); }
+                } else if (!restored) setNotice('OEM AMBIENT UNAVAILABLE · CHECK THE VEHICLE LINK', C.amber);
+            } else {
+                // applyBlackoutOverride refuses while oemEnabled reads on — drop the flag first.
+                state.oemEnabled = false; state.oemPendingTarget = false; state.oemPendingAt = Date.now();
+                await applyBlackoutOverride();
+                if (state.proxy) {
+                    try { await ctx.signals.set(state.proxy, 'ambientLightInteriorColour', brightnessRequest(0)); }
+                    catch (e) { log.warn('oem ambient off: ' + shortError(e)); }
+                }
+                setNotice('OEM AMBIENT LIGHTING OFF', C.amber);
+            }
+            saveLook(); queueRender();
+        }
         function effectiveOemBrightness(value) {
             return clamp(Math.round(value * (state.oemNight ? 0.45 : 1)), 2, 100);
         }
@@ -1642,6 +1681,7 @@ mgu.run({
             },
             oemNight: async () => { state.oemNight = !state.oemNight; saveLook(); queueRender(); await applyOemBrightness(); },
             oemDynamic: () => { state.oemDynamic = !state.oemDynamic; saveLook(); queueRender(); },
+            oemAmbient: () => setOemAmbient(!state.oemAmbient),
             mColorMode: () => toggleFeatureMode('mColor'),
             comfortMode: () => toggleFeatureMode('comfort'),
             sportMode: () => toggleFeatureMode('sport'),
@@ -1669,6 +1709,7 @@ mgu.run({
             BTN_ACCENT_MINUS: 'accentDown', BTN_ACCENT_PLUS: 'accentUp',
             BTN_NIGHT: 'oemNight', BTN_DYNAMIC: 'oemDynamic',
             BTN_MCOLOR: 'mColorMode', BTN_COMFORT: 'comfortMode', BTN_SPORT: 'sportMode', BTN_ECO: 'ecoMode',
+            BTN_OEM_AMBIENT: 'oemAmbient',
             BTN_SCAN: 'scan', BTN_RESTORE: 'restore', BTN_DETAIL_BACK: 'detailBack',
             BTN_FACTORY_PREV: 'factoryPrev', BTN_FACTORY_NEXT: 'factoryNext', BTN_FACTORY_APPLY: 'factoryApply',
         };
@@ -2005,6 +2046,7 @@ mgu.run({
                     features: state.features,
                     combo: state.previewChoice === 'combo' && state.selCombo >= 0 ? COMBOS[state.selCombo] : null,
                     brightness: state.oemAccent, bgBrightness: state.oemBackground, night: state.oemNight, dynamic: state.oemDynamic, focus: state.oemFocus,
+                    oemAmbient: state.oemAmbient,
                     zone: state.zone, zoneColor: state.oemSelected ? state.oemSelected.color : '#18d8ff',
                     zonesImg: BgArt.zones(), scroll: state.oemScroll, extra: cv.extra || 0,
                 });
