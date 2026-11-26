@@ -939,8 +939,8 @@ class Display {
         const focus = btns.findIndex((b) => b.id === ((this.sheet && this.sheet.settings) ? 'BTN_SETTINGS' : this.focused));
         if (!this.hideBar && btns.length && this.barH()) {
             G.menuBar(c, t, 0, by, W, FULL.barH, btns, focus, 'slim', flash);
-            const img = this._credit('Created By VKDigitals.org');
-            if (img) c.image(img.id, W - 16 - img.w, by + Math.round((FULL.barH - img.h) / 2), img.w, img.h);
+            c.text('Created By VKDigitals.org', W - 16, by + FULL.barH / 2 + 7, 19, '#ffffff',
+                { align: 'right', font: 'bold', spacing: 1, literal: true });
         }
         // the HMI's status icons and its back arrow column (home button, back arrow) show through;
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
