@@ -2449,35 +2449,35 @@ mgu.run({
 
             if (!run) {
                 const split = x + Math.round(w / 2);
-                cv.fillRect(split, y + 76, 1, 54, G.withAlpha(t.tick, 0.65));
-                cv.text('HORSE POWER', x + 24, y + 88, 15, t.dim, { font: 'bold', spacing: 1.5 });
-                cv.text('TORQUE', split + 20, y + 88, 15, t.dim, { font: 'bold', spacing: 1.5 });
-                cv.text('0', x + 24, y + 121, 36, readingColor, { font: 'num' });
+                cv.fillRect(split, y + 71, 1, 54, G.withAlpha(t.tick, 0.65));
+                cv.text('HORSE POWER', x + 24, y + 83, 15, t.dim, { font: 'bold', spacing: 1.5 });
+                cv.text('TORQUE', split + 20, y + 83, 15, t.dim, { font: 'bold', spacing: 1.5 });
+                cv.text('0', x + 24, y + 116, 36, readingColor, { font: 'num' });
                 const zeroWidth = cv.textWidth('0', 36, { font: 'num' });
-                cv.text(Calc.powerUnit(s.powerUnit), x + 27 + zeroWidth, y + 121, 18, t.dim);
-                cv.text('0', split + 20, y + 121, 36, readingColor, { font: 'num' });
+                cv.text(Calc.powerUnit(s.powerUnit), x + 27 + zeroWidth, y + 116, 18, t.dim);
+                cv.text('0', split + 20, y + 116, 36, readingColor, { font: 'num' });
                 const torqueZeroWidth = cv.textWidth('0', 36, { font: 'num' });
-                cv.text('Nm', split + 23 + torqueZeroWidth, y + 121, 18, t.dim);
+                cv.text('Nm', split + 23 + torqueZeroWidth, y + 116, 18, t.dim);
                 return;
             }
 
             const split = x + Math.round(w / 2);
-            cv.fillRect(split, y + 76, 1, 66, G.withAlpha(t.tick, 0.65));
-            cv.text('HORSE POWER', x + 24, y + 82, 15, t.dim, { font: 'bold', spacing: 1.5 });
-            cv.text('TORQUE', split + 20, y + 82, 15, t.dim, { font: 'bold', spacing: 1.5 });
+            cv.fillRect(split, y + 71, 1, 66, G.withAlpha(t.tick, 0.65));
+            cv.text('HORSE POWER', x + 24, y + 77, 15, t.dim, { font: 'bold', spacing: 1.5 });
+            cv.text('TORQUE', split + 20, y + 77, 15, t.dim, { font: 'bold', spacing: 1.5 });
             const powerUnit = s.powerUnit;
             const peakPower = Calc.powerValue(run.peakP / 1000, powerUnit);
             const powerText = formatNumber(peakPower, 0);
             const torqueText = formatNumber(run.peakT, 0);
             const powerWidth = cv.textWidth(powerText, 36, { font: 'num' });
             const torqueWidth = cv.textWidth(torqueText, 36, { font: 'num' });
-            cv.text(powerText, x + 24, y + 116, 36, readingColor, { font: 'num' });
-            cv.text(Calc.powerUnit(powerUnit), x + 27 + powerWidth, y + 116, 18, t.dim);
-            cv.text(torqueText, split + 20, y + 116, 36, readingColor, { font: 'num' });
-            cv.text('Nm', split + 23 + torqueWidth, y + 116, 18, t.dim);
-            cv.text('@ ' + formatNumber(run.peakPrpm, 0) + ' rpm', x + 24, y + 136, 13, t.dim);
-            cv.text('@ ' + formatNumber(run.peakTrpm, 0) + ' rpm', split + 20, y + 136, 13, t.dim);
-            drawDynoCurve(cv, t, run, x + 24, y + 143, w - 48, 11, modeColor);
+            cv.text(powerText, x + 24, y + 111, 36, readingColor, { font: 'num' });
+            cv.text(Calc.powerUnit(powerUnit), x + 27 + powerWidth, y + 111, 18, t.dim);
+            cv.text(torqueText, split + 20, y + 111, 36, readingColor, { font: 'num' });
+            cv.text('Nm', split + 23 + torqueWidth, y + 111, 18, t.dim);
+            cv.text('@ ' + formatNumber(run.peakPrpm, 0) + ' rpm', x + 24, y + 131, 13, t.dim);
+            cv.text('@ ' + formatNumber(run.peakTrpm, 0) + ' rpm', split + 20, y + 131, 13, t.dim);
+            drawDynoCurve(cv, t, run, x + 24, y + 138, w - 48, 11, modeColor);
         }
 
         function drawOilTemps(cv, t, s, modeColor, gaugeColor, y) {
