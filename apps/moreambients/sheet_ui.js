@@ -126,18 +126,22 @@ function chrome(cv, G, t, tabs, active, badges) {
 /** iDrive 8 toggle pill: green track when ON (like the OEM Ambience screen), dark when OFF. */
 function id7Toggle(cv, G, x, y, on, green) {
     const w = 52, h = 24, r = 12;
-    cv.roundRect(x, y, w, h, r, on ? (green ? '#5ec234' : '#4a5a78') : '#222a3a');
-    cv.strokeRoundRect(x, y, w, h, r, 1.8, on && green ? '#98e870' : '#a8b4c8');
+    cv.roundRect(x, y, w, h, r, on ? (green ? '#5ec234' : '#4a5a78') : '#232b3d');
+    cv.strokeRoundRect(x, y, w, h, r, 1.8, on && green ? '#98e870' : '#aebdd4');
+    // glass specular streak across the pill's top half
+    cv.line(x + r * 0.62, y + 2.5, x + w - r * 0.62, y + 2.5, 1.6, G.withAlpha('#ffffff', on ? 0.4 : 0.28));
     const kx = on ? x + w - r : x + r, ky = y + r;
     cv.circle(kx, ky, 8.5, '#e8eef8');
     cv.circle(kx, ky, 7, '#ffffff');
+    cv.line(kx - 3.4, ky - 3.8, kx + 3.4, ky - 3.8, 1.2, G.withAlpha('#ffffff', 0.9));
 }
 
 /** Selection bar: dark cherry red, brighter red after ~40%, fading into the card bg,
- * with a soft black drop-shadow bleeding out underneath. */
+ * with a crystal top glint and a soft black drop-shadow bleeding out underneath. */
 function id7Highlight(cv, G, x, y, w, h) {
     cv.rampRect(x, y, w, h, 0, ['#8e0f1e', '#8e0f1e', '#9a1424', '#a81c2c', '#c02838', '#84293a', '#4f2732', '#2e252c', '#1e2024'], x, w);
-    cv.line(x, y + 0.5, x + w, y + 0.5, 1.4, G.withAlpha('#ffffff', 0.55));
+    cv.line(x, y + 0.5, x + w, y + 0.5, 1.6, G.withAlpha('#ffe8ec', 0.72));
+    cv.line(x, y + 2, x + w, y + 2, 1, G.withAlpha('#ffffff', 0.16));
     cv.line(x, y + h - 0.5, x + w, y + h - 0.5, 1.2, G.withAlpha('#c8b8c0', 0.45));
     // strong black shadow under the bar
     for (let i = 1; i <= 18; i++) {
@@ -146,16 +150,34 @@ function id7Highlight(cv, G, x, y, w, h) {
 }
 const id7HighlightRed = id7Highlight;
 
-/** iDrive 8 glass card background: slate-blue base + diagonal sheen + left-edge warm glow. */
+/** Crystal glass card background: deep blue-charcoal, vertical depth, faceted
+ * diagonal ice streaks, a specular top edge and glinting side rails. */
 function id8CardBg(cv, G, x, y, w, h) {
-    // base: near-black smoked glass
-    cv.fillRect(x, y, w, h, G.withAlpha('#1e2024', 0.94));
-    // subtle diagonal facet in the upper-right
-    cv.quad([[x + w * 0.52, y], [x + w, y], [x + w, y + h * 0.42], [x + w * 0.72, y + h * 0.22]],
-        G.withAlpha('#2e323b', 0.42));
+    // base: smoked crystal — near-black with a cool blue cast
+    cv.fillRect(x, y, w, h, G.withAlpha('#161a24', 0.95));
+    // vertical depth: darker crystal toward the bottom (banded, cheap)
+    const bands = 10;
+    for (let i = 0; i < bands; i++) {
+        const by = y + Math.round(h * i / bands);
+        cv.fillRect(x, by, w, Math.ceil(h / bands), G.withAlpha('#07090f', 0.08 + 0.30 * (i / (bands - 1))));
+    }
+    // crystal facets: a long diagonal ice plane + a second streak in the upper right
+    cv.quad([[x + w * 0.34, y], [x + w * 0.66, y], [x + w * 0.30, y + h], [x + w * 0.02, y + h]],
+        G.withAlpha('#a8c4e8', 0.05));
+    cv.quad([[x + w * 0.56, y], [x + w, y], [x + w, y + h * 0.26], [x + w * 0.84, y + h * 0.08]],
+        G.withAlpha('#d4e4f8', 0.08));
     // soft neutral wash down the left edge
-    cv.rampRect(x, y, Math.round(w * 0.32), h, 0,
-        [G.withAlpha('#9aa0ac', 0.14), G.withAlpha('#9aa0ac', 0)], x, Math.round(w * 0.32));
+    cv.rampRect(x, y, Math.round(w * 0.30), h, 0,
+        [G.withAlpha('#b8c4d8', 0.12), G.withAlpha('#b8c4d8', 0)], x, Math.round(w * 0.30));
+    // specular top edge + the glow it throws into the glass just beneath it
+    cv.line(x, y + 0.5, x + w, y + 0.5, 1.6, G.withAlpha('#eef4ff', 0.8));
+    for (let i = 1; i <= 8; i++) {
+        cv.line(x, y + i + 0.5, x + w, y + i + 0.5, 1, G.withAlpha('#c0d4ee', 0.10 * (1 - i / 8)));
+    }
+    // glinting side rails + dark seat edge at the bottom
+    cv.line(x + 0.5, y, x + 0.5, y + h, 1.2, G.withAlpha('#e2ecfc', 0.5));
+    cv.line(x + w - 0.5, y, x + w - 0.5, y + h, 1, G.withAlpha('#c6d6ee', 0.34));
+    cv.line(x, y + h - 0.5, x + w, y + h - 0.5, 1.6, G.withAlpha('#000000', 0.6));
 }
 
 /** Small framed swatch: the colour fills the box cleanly, with a light border and outer glow. */
@@ -187,17 +209,16 @@ function drawInteriorLighting(cv, G, opts) {
     const ph = avail;
     const focus = opts.focus;
     const divX0 = px, divX1 = px + pw;   // full-width dividers
-    const lineC = G.withAlpha('#cfd8ec', 0.42);
     const lx = px + 32, rx = px + pw - 28;
     const txtC = (i) => i === focus ? '#ffffff' : '#eef2fa';
 
-    // Frosted iD8 glass card (full panel)
+    // Frosted crystal glass card (full panel)
     id8CardBg(cv, G, px, py, pw, ph);
-    // Header band at the top of the card, slightly darker than the card itself
-    cv.fillRect(px, py, pw, headH, G.withAlpha('#262930', 0.92));
-    cv.line(px, py, px + pw, py, 1.4, G.withAlpha('#cfd8ec', 0.55));
+    // Header band: frosted ice slab with a sheen on its top half and a crystal edge
+    cv.fillRect(px, py, pw, headH, G.withAlpha('#202634', 0.94));
+    cv.fillRect(px, py, pw, Math.round(headH * 0.48), G.withAlpha('#4e5f7c', 0.16));
+    cv.line(px, py + headH - 0.5, px + pw, py + headH - 0.5, 1.4, G.withAlpha('#a9bedd', 0.42));
     cv.text('INTERIOR LIGHTING', lx - 14, py + headH / 2 + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
-    cv.line(px, py + headH, px + pw, py + headH, 1, G.withAlpha('#9aa0ac', 0.14));
     const pin0 = py + headH;
     const rowTop = [];
     for (let i = 0; i <= rows.length; i++) {
@@ -209,7 +230,11 @@ function drawInteriorLighting(cv, G, opts) {
     cv.clip(px, pin0, pw, ph - headH);
     if (focus >= 0) id7Highlight(cv, G, px, rowTop[focus], pw, rows[focus]);
     rowTop.slice(1).forEach((y) => {
-        if (y > pin0 + 14 && y <= py + ph) cv.line(divX0, y, divX1, y, 1.2, lineC);
+        if (y > pin0 + 14 && y <= py + ph) {
+            // etched glass divider: dark groove with an ice glint catching beneath it
+            cv.line(divX0, y, divX1, y, 1, G.withAlpha('#04060b', 0.55));
+            cv.line(divX0, y + 1, divX1, y + 1, 1, G.withAlpha('#d6e4f8', 0.24));
+        }
     });
 
     // 0. Ambient lighting — first scrolling row
@@ -337,7 +362,6 @@ function drawDetailPanel(cv, G, opts) {
     const maxScroll = Math.max(0, contentH - avail + headH);
     const scrollY = Math.max(0, Math.min(maxScroll, opts.scroll || 0));
     const divX0 = px, divX1 = px + pw;   // full-width dividers
-    const lineC = G.withAlpha('#cfd8ec', 0.42);
     const lx = px + 32, rx = px + pw - 28;
     const top0 = py + headH;
 
@@ -346,7 +370,10 @@ function drawDetailPanel(cv, G, opts) {
     const contentTop = top0 - scrollY;
     for (let i = 1; i <= opts.items.length; i++) {
         const y = contentTop + imgH + i * rowH;
-        if (y >= top0 && y <= py + avail) cv.line(divX0, y, divX1, y, 1.2, lineC);
+        if (y >= top0 && y <= py + avail) {
+            cv.line(divX0, y, divX1, y, 1, G.withAlpha('#04060b', 0.55));
+            cv.line(divX0, y + 1, divX1, y + 1, 1, G.withAlpha('#d6e4f8', 0.24));
+        }
     }
     if (infoBand) {
         if (opts.image) {
@@ -372,7 +399,8 @@ function drawDetailPanel(cv, G, opts) {
             cv.text('Choose a zone below to preview its colour', infoX, contentTop + 112, 10.5,
                 G.withAlpha('#d6ddea', 0.55), { literal: true });
         }
-        cv.line(divX0, contentTop + imgH, divX1, contentTop + imgH, 1.2, lineC);
+        cv.line(divX0, contentTop + imgH, divX1, contentTop + imgH, 1, G.withAlpha('#04060b', 0.55));
+        cv.line(divX0, contentTop + imgH + 1, divX1, contentTop + imgH + 1, 1, G.withAlpha('#d6e4f8', 0.24));
     }
     const swatches = [];
     const addZoneSwatch = (x, y, w, h, row, zone) => {
@@ -430,9 +458,10 @@ function drawDetailPanel(cv, G, opts) {
     cv.line(px + pw, py, px + pw, py + avail, 1.2, G.withAlpha('#cfd8ec', 0.38));
     cv.line(px, py + avail, px + pw, py + avail, 1.4, G.withAlpha('#cfd8ec', 0.55));
 
-    // Header band: darker strip at the top with INTERIOR LIGHTING inside it (same alignment as main panel)
-    cv.fillRect(px, py, pw, headH, G.withAlpha('#262930', 0.92));
-    cv.line(px, py, px + pw, py, 1.4, G.withAlpha('#cfd8ec', 0.55));
+    // Header band: frosted ice slab with a sheen on its top half and a crystal edge
+    cv.fillRect(px, py, pw, headH, G.withAlpha('#202634', 0.94));
+    cv.fillRect(px, py, pw, Math.round(headH * 0.48), G.withAlpha('#4e5f7c', 0.16));
+    cv.line(px, py + headH - 0.5, px + pw, py + headH - 0.5, 1.4, G.withAlpha('#a9bedd', 0.42));
     const bcy = py + headH / 2;
     cv.text(opts.title || 'INTERIOR LIGHTING', lx - 14, bcy + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
     cv.line(px, top0, px + pw, top0, 1, G.withAlpha('#9aa0ac', 0.14));
