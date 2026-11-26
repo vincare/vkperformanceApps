@@ -868,7 +868,8 @@ function menuBar(cv, t, x, y, w, h, buttons, focus, variant, flash) {
             cv.fillRect(b.x, y + h - 4 * u, b.w, 4 * u, sel);
         }
         const label = std ? String(b.label) : upperText(b.label);
-        cv.text(label, b.x + b.w / 2, y + h / 2 + size * 0.36, size, on || hit ? t.selText || '#ffffff' : std ? t.text : t.dim,
+        const bsize = b.id === 'BTN_BACK' ? size * 1.45 : size;
+        cv.text(label, b.x + b.w / 2, y + h / 2 + bsize * 0.36, bsize, b.id === 'BTN_BACK' ? '#ffffff' : on || hit ? t.selText || '#ffffff' : std ? t.text : t.dim,
             { align: 'center', font: std ? 'label' : 'bold', spacing: std ? 0 : 2 * u });
         if (i < buttons.length - 1) cv.fillRect(b.x + b.w, y + h * 0.25, Math.max(1, u), h * 0.5, withAlpha('#ffffff', 0.13));
     });
