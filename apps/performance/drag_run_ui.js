@@ -685,7 +685,7 @@ function drawReport(cv, G, t, s, actions) {
         ['SLOPE', 'SLOPE', slopeTxt],
     ];
     tiles.forEach(([icon, cap, val], i) => {
-        const tx = 316 + i * 204, ty = y0 + 358, tw = 190, th = 94;
+        const tx = 316 + i * 204, ty = y0 + 353, tw = 190, th = 94;
         Sheet.para(cv, tx, ty, tw, ty + th, 16, G.withAlpha('#10141c', 0.85));
         cv.line(tx, ty, tx + tw, ty, 2, G.withAlpha('#f32635', 0.5));
         Sheet.modeIcon(cv, G, t, icon, tx + 22, ty + 20, 26, G.withAlpha('#c8ced8', 0.85));
