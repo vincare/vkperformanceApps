@@ -3016,6 +3016,11 @@ mgu.run({
                     if (tyrePage === 'more') { tyrePage = 'main'; queueRender(); render(); return true; }
                     carDataView = 'menu'; queueRender(); render(); return true;
                 }
+                // Top level of a tab: BACK steps to the previous tab in sequence
+                // (ENGINE CONFIG -> ENGINE DATA -> RACE MODES -> CAR DATA -> WARMUP
+                // chain runs backwards); on ENGINE DATA it closes the screen.
+                const prevPage = { 1: 0, 2: 1, 5: 2, 6: 5 }[page];
+                if (prevPage !== undefined) { setPage(prevPage); return true; }
                 return false;
             };
         }
