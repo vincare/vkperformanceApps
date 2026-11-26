@@ -279,6 +279,14 @@ mgu.run({
             if (!dynoRuns.some((run) => run.at === at)) return null;
             dynoSelectedAt = at;
             dynoDisplayCleared = false;
+            dynoView = 'run';
+            updateDynoActionLabel();
+            queueRender();
+            return render();
+        }
+
+        function showDynoRuns() {
+            dynoView = 'runs';
             updateDynoActionLabel();
             queueRender();
             return render();
@@ -2600,6 +2608,7 @@ mgu.run({
                 }, selectedCarSideVisual({ bg: '#000000' }), {
                     toggleView: toggleDynoView, toggleBaseline: toggleDynoBaseline,
                     clear: clearDynoRuns, nextRun: nextDynoRun, select: selectDynoRun,
+                    viewRuns: showDynoRuns,
                     flash: dynoFlash,
                     back: () => setPage(2),
                 });

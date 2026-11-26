@@ -375,12 +375,110 @@ function drawRuns(cv, G, t, s, actions) {
     });
 }
 
+// Saved-run detail: full-size power/torque chart + stat tiles + a facts ribbon.
+// Opened by tapping a run in SAVED RUNS or a TOP 3 row.
+function drawRunReport(cv, G, t, s, run, actions) {
+    const y0 = (G.TOP || 44) + 8, y1 = H - 8, h = y1 - y0;
+    const xAt = (xTop, y) => xTop - (y - y0) / h * SLANT;
+
+    cv.fillRect(0, y0, W, h, t.bg);
+    Sheet.drawHexMesh(cv, G, y0, y1, false);
+
+    const slabX = 294, slabW = 800, slabS = Math.round(SLANT * (h - 12) / h);
+    Sheet.para(cv, slabX, y0 + 8, slabW, y1 - 4, slabS, '#000000');
+    cv.line(slabX, y0 + 8, slabX + slabW, y0 + 8, 2, G.withAlpha('#f32635', 0.4));
+    cv.line(slabX, y0 + 8, slabX - slabS, y1 - 4, 1.5, G.withAlpha('#f32635', 0.25));
+    cv.line(slabX + slabW - slabS, y1 - 4, slabX + slabW, y0 + 8, 1.5, G.withAlpha('#f32635', 0.25));
+
+    cv.text('DYNO RUN REPORT', slabX + slabW - 28, y0 + 36, 15, t.dim,
+        { align: 'right', font: 'bold', spacing: 1.4, literal: true });
+    cv.text(run ? runStamp(run.at) : '', slabX + slabW - 28, y0 + 58, 12,
+        G.withAlpha('#ff8595', 0.75), { align: 'right', font: 'bold', spacing: 0.6, literal: true });
+
+    if (!run) {
+        cv.text('NO RUN SELECTED', 610, y0 + 240, 20, t.dim,
+            { align: 'center', font: 'bold', spacing: 1.1, literal: true });
+    } else {
+        drawLegend(cv, G, t, run, s.ecuTorque, 316, y0 + 58);
+        chart(cv, G, t, s, run, { x: 356, y: y0 + 92, w: 620, h: 226 });
+
+        const pu = powerName(s.powerUnit), tu = torqueName(s.torqueUnit);
+        const wheelP = run.peakP * (1 - (run.loss || 0) / 100);
+        const tiles = [
+            ['DRIVE', 'ENGINE POWER', Math.round(powerValue(run.peakP, s.powerUnit)) + ' ' + pu,
+                '@ ' + Math.round(run.peakPrpm) + ' RPM'],
+            ['OEM', 'ENGINE TORQUE', Math.round(run.peakT * torqueFactor(s.torqueUnit)) + ' ' + tu,
+                '@ ' + Math.round(run.peakTrpm) + ' RPM'],
+            ['WHEELS', 'WHEELS POWER', Math.round(powerValue(wheelP, s.powerUnit)) + ' ' + pu,
+                Math.round(run.loss || 0) + '% LOSS'],
+        ];
+        tiles.forEach(([icon, cap, val, sub], i) => {
+            const tx = 316 + i * 220, ty = y0 + 360, tw = 200, th = 92;
+            Sheet.para(cv, tx, ty, tw, ty + th, 16, G.withAlpha('#10141c', 0.85));
+            cv.line(tx, ty, tx + tw, ty, 2, G.withAlpha('#f32635', 0.5));
+            Sheet.modeIcon(cv, G, t, icon, tx + 20, ty + 18, 24, G.withAlpha('#c8ced8', 0.85));
+            cv.text(cap, tx + 40, ty + 24, 11, G.withAlpha('#e8c8ce', 0.6),
+                { font: 'bold', spacing: 0.8, literal: true });
+            cv.text(val, tx + 18, ty + 62, 27, '#ffffff',
+                { font: 'num', spacing: 0.5, literal: true });
+            cv.text(sub, tx + 18, ty + 80, 10.5, G.withAlpha('#e8c8ce', 0.45),
+                { font: 'bold', spacing: 0.6, literal: true });
+        });
+    }
+
+    // Title tag + navigation chips
+    const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DYNO RUN', 34, 196), tagH = 52, tagSlant = 15;
+    Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
+    cv.text('DYNO RUN', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.6, literal: true });
+    Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'ALL DYNO RUNS',
+        { icon: 'fwd', run: actions && actions.viewRuns, key: 'performance_dyno_runs' });
+    if (run) Sheet.drawChip(cv, G, tagX, tagY + tagH + 78, 196,
+        s.baselineAt === run.at ? 'UNSET BASELINE' : 'SET BASELINE',
+        { run: actions && actions.toggleBaseline, key: 'performance_dyno_baseline' });
+
+    // Right ribbon — run facts
+    const ribX = 1128;
+    Sheet.para(cv, ribX,       y0, 210, y1, SLANT, '#2a0b12');
+    Sheet.para(cv, ribX + 210, y0, 112, y1, SLANT, '#1b070c');
+    Sheet.para(cv, ribX + 322, y0, 62,  y1, SLANT, '#8c1122');
+    Sheet.para(cv, ribX + 384, y0, 56,  y1, SLANT, '#d91c33');
+
+    const rpmLo = run && run.curve && run.curve.length ? Math.round(run.curve[0].rpm) : null;
+    const rpmHi = run && run.curve && run.curve.length
+        ? Math.round(run.curve[run.curve.length - 1].rpm) : null;
+    const topX = xAt(ribX + 26, y0 + 36);
+    cv.text('RUN DETAILS', topX + 4, y0 + 44, 17, '#ffffff',
+        { font: 'bold', spacing: 1.4, literal: true });
+    cv.text('SAVED PULL DATA', topX + 4, y0 + 64, 11.5, G.withAlpha('#ff8595', 0.75),
+        { font: 'bold', spacing: 0.8, literal: true });
+    const facts = run ? [
+        ['SPEED', 'SPEED RANGE', Math.round(run.v0) + ' - ' + Math.round(run.v1) + ' KM/H', 'PULL SPEED WINDOW'],
+        ['DRIVE', 'RPM RANGE', rpmLo != null ? rpmLo + ' - ' + rpmHi : '--', 'MEASURED CURVE SPAN'],
+        ['WHEELS', 'DRIVETRAIN LOSS', Math.round(run.loss || 0) + ' %', 'WHEELS = ENGINE − LOSS'],
+        ['OEM', 'VEHICLE SETUP', (run.weight || '?') + ' KG' + (run.body ? ' · ' + String(run.body).toUpperCase() : ''),
+            'WEIGHT · BODY'],
+    ] : [];
+    facts.forEach(([iconKey, label, value, detail], i) => {
+        const ry = y0 + 96 + i * 88;
+        const rx = xAt(ribX + 26, ry);
+        Sheet.modeIcon(cv, G, t, iconKey, rx + 12, ry + 13, 30, G.withAlpha('#c8ced8', 0.85));
+        cv.text(label, rx + 44, ry, 12, G.withAlpha('#e8c8ce', 0.55),
+            { font: 'bold', spacing: 1.0, literal: true });
+        cv.text(value, rx + 44, ry + 30, 22, '#ffffff',
+            { font: 'num', spacing: 0.5, literal: true });
+        cv.text(detail, rx + 44, ry + 48, 10.5, G.withAlpha('#e8c8ce', 0.42),
+            { font: 'bold', spacing: 0.4, literal: true });
+    });
+}
+
 function draw(cv, G, t, s, car, actions) {
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 2, [
         s.demo && { text: 'DEMO · NO ROAD DATA', color: 'crit' },
     ]);
     G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || RED);
     if (s.view === 'runs') drawRuns(cv, G, t, s, actions);
+    else if (s.view === 'run') drawRunReport(cv, G, t, s, selectedRun(s), actions);
     else drawSheet(cv, G, t, s, car, selectedRun(s), actions);
     return cv;
 }
