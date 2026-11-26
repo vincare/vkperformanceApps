@@ -68,8 +68,6 @@ function tempGauge(cv, G, cx, cy, r, val, key, label, maxC) {
     const A0 = -135, A1 = 135, MIN = 0, MAX = 150, thick = 10;
     const ang = (c) => A0 + Math.max(0, Math.min(1, (c - MIN) / (MAX - MIN))) * (A1 - A0);
     cv.arc(cx, cy, r - thick, r, A0, A1, G.withAlpha('#ffffff', 0.08), { round: true });
-    cv.arc(cx, cy, r + 2, r + 5, ang(BAND_READY[key]) - 2, ang(BAND_READY[key]) + 2,
-        G.withAlpha(GO, 0.8));
     cv.arc(cx, cy, r + 2, r + 5, ang(BAND_HIGH[key]), A1, G.withAlpha('#ff4a4a', 0.5));
     const live = typeof val === 'number' && isFinite(val);
     const band = bandOf(key, val);
