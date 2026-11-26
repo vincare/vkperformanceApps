@@ -2122,11 +2122,7 @@ mgu.run({
                 coolant: demo ? 86 + 6 * Math.sin(now / 50000 + 0.6) : cdNum('coolantTemp'),
                 gearbox: demo ? 74 + 6 * Math.sin(now / 50000 + 1.2) : cdNum('gearboxTemp'),
             };
-            const warm = {
-                oil: settings.get('warmOil') || 90,
-                coolant: settings.get('warmCoolant') || 80,
-                gearbox: settings.get('warmGearbox') || 70,
-            };
+            const warm = WarmupUi.BAND_READY;   // READY starts here per the band table
             const etas = {
                 oil: warmup.eta('oil', d.oil, warm.oil, d),
                 coolant: warmup.eta('coolant', d.coolant, warm.coolant, d),
@@ -2134,19 +2130,25 @@ mgu.run({
             };
             const cd = warmup.cooldown();
             const cooling = settings.get('warmupCooldown') !== false && cd.needS > 0;
-            const gbCold = finite(d.gearbox) && d.gearbox < warm.gearbox;
-            const gbHot = finite(d.gearbox) && d.gearbox > 125;
-            const ready = finite(d.oil) && d.oil >= warm.oil && !gbCold;
-            const hot = finite(d.oil) && d.oil > 125;
+            const bo = WarmupUi.bandOf('oil', d.oil);
+            const bc = WarmupUi.bandOf('coolant', d.coolant);
+            const bg = WarmupUi.bandOf('gearbox', d.gearbox);
+            let worst = null, worstKey = 'oil';
+            [['oil', bo], ['coolant', bc], ['gearbox', bg]].forEach((kb) => {
+                if (kb[1] && (!worst || kb[1].i > worst.i)) { worst = kb[1]; worstKey = kb[0]; }
+            });
+            const ready = bo && bo.i >= 2 && (!bc || bc.i >= 2) && (!bg || bg.i >= 2);
             let status;
             if (!finite(d.oil)) status = { text: 'NO OIL TEMP', kind: 'dim' };
-            else if (hot) status = { text: 'OIL HOT — EASE OFF', kind: 'crit' };
-            else if (gbHot) status = { text: 'GEARBOX HOT — EASE OFF', kind: 'crit' };
+            else if (worst && worst.i >= 6) status = { text: WarmupUi.BAND_DEF[worstKey].name + ' — COOL DOWN REQUIRED', kind: 'crit' };
+            else if (worst && worst.i === 5) status = { text: WarmupUi.BAND_DEF[worstKey].name + ' — HIGH TEMPERATURE', kind: 'crit' };
+            else if (worst && worst.i === 4) status = { text: WarmupUi.BAND_DEF[worstKey].name + ' ELEVATED', kind: 'warn' };
             else if (cooling) status = { text: cd.done ? 'READY — OK TO SWITCH OFF' : 'TURBO TIMER', kind: cd.done ? 'ready' : 'warn' };
             else if (ready) status = { text: 'READY', kind: 'ready' };
-            else if (d.oil >= warm.oil && gbCold) status = { text: 'GEARBOX WARMING UP', kind: 'warn' };
-            else if (d.oil >= warm.oil - 20) status = { text: 'WARMING UP', kind: 'warn' };
-            else status = { text: 'COLD', kind: 'cold' };
+            else if (bo.i >= 2 && bg && bg.i < 2) status = { text: 'GEARBOX WARMING UP', kind: 'warn' };
+            else if (bo.i >= 2 && bc && bc.i < 2) status = { text: 'COOLANT WARMING UP', kind: 'warn' };
+            else if (bo.i === 0) status = { text: 'COLD', kind: 'cold' };
+            else status = { text: 'WARMING UP', kind: 'warn' };
 
             const lim = warmup.limit(d.oil);
             const eo = warmupEtaText(etas.oil), ec = warmupEtaText(etas.coolant), eg = warmupEtaText(etas.gearbox);
@@ -2155,7 +2157,7 @@ mgu.run({
                 { label: 'COOLANT READY IN', value: ec.v, color: ec.c, lit: etas.coolant.state === 'ready' },
                 { label: 'GEARBOX READY IN', value: eg.v, color: eg.c, lit: etas.gearbox.state === 'ready' },
                 { label: 'SAFE REV LIMIT', value: lim ? formatNumber(lim, 0) + ' rpm' : null,
-                    color: ready ? '#2fd27a' : undefined, lit: ready },
+                    color: bo && bo.i >= 2 ? '#2fd27a' : undefined, lit: !!(bo && bo.i >= 2) },
                 { label: 'TURBO TIMER', value: cooling ? (cd.done ? 'DONE' : Math.ceil(cd.left) + ' s') : 'OFF',
                     color: cd.done ? '#2fd27a' : cooling ? '#ffb31a' : '#8c94a0', lit: cooling || cd.done },
             ];

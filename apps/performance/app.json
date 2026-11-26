@@ -789,7 +789,7 @@
       "desc": "Below this the engine counts as cold — the safe rev limit stays low and the page shows WARMING UP instead of READY.",
       "type": "number",
       "unit": "°C",
-      "default": 90,
+      "default": 85,
       "steps": [
         60,
         70,
@@ -828,7 +828,7 @@
       "desc": "READY waits for the gearbox oil to reach this too, on a car that reports it.",
       "type": "number",
       "unit": "°C",
-      "default": 70,
+      "default": 65,
       "steps": [
         40,
         50,

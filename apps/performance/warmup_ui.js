@@ -28,6 +28,31 @@ const BAR_KEYS = [
     { key: 'gearbox', label: 'GEARBOX OIL' },
 ];
 
+/* Temperature bands per fluid (owner spec):
+ *   oil:     <50 cold | 50-84 warming | 85-94 ready | 95-115 optimal | 116-125 elevated | 126-135 high | >135 cool down
+ *   coolant: <50 cold | 50-79 warming | 80-89 ready | 90-110 optimal | 111-115 elevated | 116-120 high | >120 cool down
+ *   gearbox: <40 cold | 40-64 warming | 65-74 ready | 75-100 optimal | 101-110 elevated | 111-120 high | >120 cool down
+ * edges = [coldEnd, readyAt, optimalAt, elevatedAt, highAt, cooldownAt]. */
+const BAND_DEF = {
+    oil: { edges: [50, 85, 95, 116, 126, 136], name: 'ENGINE OIL' },
+    coolant: { edges: [50, 80, 90, 111, 116, 121], name: 'COOLANT' },
+    gearbox: { edges: [40, 65, 75, 101, 111, 121], name: 'GEARBOX OIL' },
+};
+const BAND_NAMES = ['COLD', 'WARMING', 'READY', 'OPTIMAL', 'ELEVATED', 'HIGH', 'COOL DOWN'];
+const BAND_FULL = ['COLD', 'WARMING UP', 'READY', 'OPTIMAL', 'ELEVATED', 'HIGH TEMPERATURE', 'COOL DOWN REQUIRED'];
+const BAND_COLS = ['#3d8bff', '#ffb31a', '#2fd27a', '#2fd27a', '#ff7a1a', '#ff4a4a', '#ff4a4a'];
+const BAND_READY = { oil: 85, coolant: 80, gearbox: 65 };        // edges[1]
+const BAND_HIGH = { oil: 126, coolant: 116, gearbox: 111 };      // edges[4]
+
+/** Band for a fluid temperature: { i, name, full, color } or null without data. */
+function bandOf(key, t) {
+    if (typeof t !== 'number' || !isFinite(t)) return null;
+    const e = BAND_DEF[key].edges;
+    let i = 0;
+    while (i < e.length && t >= e[i]) i++;
+    return { i, name: BAND_NAMES[i], full: BAND_FULL[i], color: BAND_COLS[i] };
+}
+
 function fitText(cv, s, size, w, opts) {
     s = String(s || '');
     if (cv.textWidth(s, size, opts) <= w) return s;
@@ -35,18 +60,20 @@ function fitText(cv, s, size, w, opts) {
     return s + '...';
 }
 
-/** A 270° temperature gauge: one fill colour per state (blue cold / red warm / bright red hot),
- *  a thin green rim notch at the warm point, red zone past ~118 °C. maxC: session high, shown
- *  small under the live value. */
-function tempGauge(cv, G, cx, cy, r, val, warm, label, maxC) {
+/** A 270° temperature gauge: the fill takes the fluid's band colour (blue cold,
+ *  amber warming, green ready/optimal, orange elevated, red high/cool-down), a
+ *  green rim notch at the band's ready point and a red zone from its high point.
+ *  maxC: session high, shown small under the live value. */
+function tempGauge(cv, G, cx, cy, r, val, key, label, maxC) {
     const A0 = -135, A1 = 135, MIN = 0, MAX = 150, thick = 10;
     const ang = (c) => A0 + Math.max(0, Math.min(1, (c - MIN) / (MAX - MIN))) * (A1 - A0);
     cv.arc(cx, cy, r - thick, r, A0, A1, G.withAlpha('#ffffff', 0.08), { round: true });
-    cv.arc(cx, cy, r + 2, r + 5, ang(118), A1, G.withAlpha('#ff4a4a', 0.5));
+    cv.arc(cx, cy, r + 2, r + 5, ang(BAND_READY[key]) - 2, ang(BAND_READY[key]) + 2,
+        G.withAlpha(GO, 0.8));
+    cv.arc(cx, cy, r + 2, r + 5, ang(BAND_HIGH[key]), A1, G.withAlpha('#ff4a4a', 0.5));
     const live = typeof val === 'number' && isFinite(val);
-    const isWarm = live && val >= warm;
-    const hot = live && val >= 125;
-    const col = !live ? '#8c94a0' : hot ? '#ff4a4a' : isWarm ? RED : COLD;
+    const band = bandOf(key, val);
+    const col = !live ? '#8c94a0' : band.color;
     if (live && val > MIN) {
         const ae = ang(Math.min(val, MAX));
         cv.arc(cx, cy, r - thick, r, A0, ae, col, { round: true });
@@ -55,11 +82,15 @@ function tempGauge(cv, G, cx, cy, r, val, warm, label, maxC) {
         cv.circle(cx + Math.sin(a) * rm, cy - Math.cos(a) * rm, thick * 0.5 + 1, '#ffffff');
     }
     cv.text(live ? Math.round(val) + '°' : '—', cx, cy + 10, 30,
-        live ? (hot ? '#ff4a4a' : '#ffffff') : G.withAlpha('#8c94a0', 0.5),
+        live ? col : G.withAlpha('#8c94a0', 0.5),
         { align: 'center', font: 'num' });
     if (typeof maxC === 'number' && isFinite(maxC)) {
         cv.text('(' + Math.round(maxC) + '° MAX)', cx, cy + 27, 11, G.withAlpha('#e8c8ce', 0.55),
             { align: 'center', font: 'bold', spacing: 0.6, literal: true });
+    }
+    if (band) {
+        cv.text(band.name, cx, cy + 44, 11, band.color,
+            { align: 'center', font: 'bold', spacing: 0.8, literal: true });
     }
     cv.text(label, cx, cy + r + 6, 15, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.4, literal: true });
@@ -151,7 +182,7 @@ function draw(cv, G, t, s, actions) {
 
     // ---- slab content
     const ix = slabX + 34, iw = slabW - 96 - slabS;
-    const temps = s.temps || {}, warm = s.warm || {};
+    const temps = s.temps || {};
 
     // status: pulsing dot + spaced text + "n/3 READY", gradient underline
     const st = s.status || { text: '—', kind: 'dim' };
@@ -161,7 +192,7 @@ function draw(cv, G, t, s, actions) {
     cv.circle(ix + 8, y0 + 50, 10, G.withAlpha(scol, 0.10 + 0.18 * pulse));
     cv.circle(ix + 8, y0 + 50, 4.5, scol);
     const readyN = BAR_KEYS.reduce((n, b) =>
-        n + ((temps[b.key] || 0) >= (warm[b.key] || 90) ? 1 : 0), 0);
+        n + ((temps[b.key] || 0) >= BAND_READY[b.key] ? 1 : 0), 0);
     cv.text(readyN + ' / 3 READY', ix + iw, y0 + 56, 15, G.withAlpha('#e8c8ce', 0.5),
         { align: 'right', font: 'bold', spacing: 1.3, literal: true });
     // status fits the room left of "n/3 READY" — it can no longer run over it
@@ -200,7 +231,7 @@ function draw(cv, G, t, s, actions) {
     const maxTemp = { oil: maxOf(1), coolant: maxOf(2), gearbox: maxOf(5) };
     BAR_KEYS.forEach((b, i) => {
         const mx = maxTemp[b.key];
-        tempGauge(cv, G, gxs[i], gcy, gaugeR, temps[b.key], warm[b.key] || 90, b.label,
+        tempGauge(cv, G, gxs[i], gcy, gaugeR, temps[b.key], b.key, b.label,
             typeof mx === 'number' ? Math.max(mx, temps[b.key] || 0) : temps[b.key]);
     });
 
@@ -232,4 +263,4 @@ function draw(cv, G, t, s, actions) {
     }
 }
 
-module.exports = { W, H, draw };
+module.exports = { W, H, draw, bandOf, BAND_READY, BAND_DEF };

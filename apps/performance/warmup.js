@@ -92,12 +92,12 @@ class Warmup {
         this.hist = [];             // [t, oil, coolant, rpm, speed, gearbox] every 5 s, 20 min
         this.lastHist = 0; this.lastT = 0;
         this.hardS = 0; this.needS = 0; this.cool = 0; this.doneAt = 0;
-        this.cs = new ColdStarts(o.settings, (oil) => this.limit(oil), () => this.settings.get('warmOil') || 90);
+        this.cs = new ColdStarts(o.settings, (oil) => this.limit(oil), () => this.settings.get('warmOil') || 85);
     }
 
     /** The safe rev limit for the oil's temperature: cold limit -> redline from 30 deg C to warm. */
     limit(oil) {
-        const warm = this.settings.get('warmOil') || 90;
+        const warm = this.settings.get('warmOil') || 85;
         const red = this.redline(), cold = Math.min(this.coldRpm(), red);
         if (!isNum(oil)) return null;
         if (oil >= warm) return red;
