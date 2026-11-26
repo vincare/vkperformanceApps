@@ -1637,6 +1637,7 @@ mgu.run({
             backgroundUp: () => adjustOemBrightness('background', state.oemBackground + 10),
             accentDown: () => adjustOemBrightness('accent', state.oemAccent - 10),
             accentUp: () => adjustOemBrightness('accent', state.oemAccent + 10),
+            zonesToggle: () => toggleZoneLighting(),
             hueMinus: () => changeSetting('hue', -15, 0, 345), huePlus: () => changeSetting('hue', 15, 0, 345),
             satMinus: () => changeSetting('saturation', -10, 0, 100), satPlus: () => changeSetting('saturation', 10, 0, 100),
             brightnessMinus: () => changeSetting('brightness', -10, 2, 100), brightnessPlus: () => changeSetting('brightness', 10, 2, 100),
@@ -1649,12 +1650,14 @@ mgu.run({
             favSave: saveFavorite, favLoad: loadFavorite,
         };
         const clickBindings = {
-            BTN_VIEW: 'view', BTN_ZONE: 'zone', BTN_HUE_MINUS: 'hueMinus', BTN_HUE_PLUS: 'huePlus',
-            BTN_SAT_MINUS: 'satMinus', BTN_SAT_PLUS: 'satPlus', BTN_BRIGHTNESS_MINUS: 'brightnessMinus',
-            BTN_BRIGHTNESS_PLUS: 'brightnessPlus', BTN_SCAN: 'scan', BTN_APPLY: 'apply', BTN_RESTORE: 'restore',
+            BTN_AMBIENT: 'oemLight', BTN_COLOURS: 'panelColour', BTN_COMBOS: 'panelCombos',
+            BTN_ZONES: 'panelZones', BTN_ZONES_TOGGLE: 'zonesToggle',
+            BTN_BG_MINUS: 'backgroundDown', BTN_BG_PLUS: 'backgroundUp',
+            BTN_ACCENT_MINUS: 'accentDown', BTN_ACCENT_PLUS: 'accentUp',
+            BTN_NIGHT: 'oemNight', BTN_DYNAMIC: 'oemDynamic',
+            BTN_MCOLOR: 'mColorMode', BTN_COMFORT: 'comfortMode', BTN_SPORT: 'sportMode', BTN_ECO: 'ecoMode',
+            BTN_SCAN: 'scan', BTN_RESTORE: 'restore', BTN_DETAIL_BACK: 'detailBack',
             BTN_FACTORY_PREV: 'factoryPrev', BTN_FACTORY_NEXT: 'factoryNext', BTN_FACTORY_APPLY: 'factoryApply',
-            BTN_FAV_PREV: 'favPrev', BTN_FAV_NEXT: 'favNext', BTN_FAV_SAVE: 'favSave', BTN_FAV_LOAD: 'favLoad',
-            BTN_STUDIO: 'studioPage', BTN_BMW: 'bmwPage', BTN_OEM: 'oemPage',
         };
         Object.keys(clickBindings).forEach((button) => {
             const key = clickBindings[button];
@@ -2011,6 +2014,16 @@ mgu.run({
             // once on ctx.display gets cleared again. The focused row's own red highlight
             // already shows where the controller is — the underline+"SELECTED" tag is noise.
             cv.hideTargetMark = true;
+            // Action feedback lives in state.notice; it only used to render inside the dead
+            // studio/bmw/oem pages. Draw it as a toast over the cabin art so button presses
+            // (HMI keys, emulator panel, iDrive rows) always leave a visible trace.
+            if (state.notice) {
+                const nw = 600, nx = W - nw - 24, ny = H - 52;
+                cv.roundRect(nx, ny, nw, 36, 10, 'rgba(6,9,14,0.78)');
+                cv.text(String(state.notice).slice(0, 72), nx + nw / 2, ny + 24, 12.5,
+                    state.noticeColor || '#e8c8ce',
+                    { align: 'center', spacing: 0.6, literal: true });
+            }
             return ui.image('MAIN_GFX', cv);
         }
         function hitTest(x, y) {
