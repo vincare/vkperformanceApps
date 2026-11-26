@@ -743,7 +743,7 @@ class Display {
         if (!(r instanceof Recorder)) return softImage(name, r);
         if (r.chrome && r.chrome.tabs) this.tabInfo = r.chrome.tabs;
         else if (r.tabInfo) this.tabInfo = r.tabInfo;
-        if (!this.sheet) { this.pageTargets = r.targets || []; this.pageScroll = r.scroll && typeof r.scroll === 'object' ? r.scroll : !!r.scroll; }
+        if (!this.sheet) { this.pageTargets = r.targets || []; this.pageScroll = r.scroll && typeof r.scroll === 'object' ? r.scroll : !!r.scroll; this.hideTargetMark = !!r.hideTargetMark; }
         // a sheet is over the page: the app's frames wait (the last one comes back when it closes)
         if (this.sheet && this.active() && this.place.full) {
             if (r.chrome) this.saved = Object.assign({}, this.saved || {}, {

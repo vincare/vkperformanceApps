@@ -2752,6 +2752,10 @@ mgu.run({
                 cv.text('FUEL RESERVE (8L LEFT)', W / 2, toastY + 27, 22, '#ffffff',
                     { align: 'center', font: 'bold', spacing: 1.1, literal: true });
             }
+            // The kit's "SELECTED" mark under the focused target only belongs on the pages that
+            // pick a section: ENGINE CONFIG's section menu, RACE MODES and the CAR DATA menu.
+            cv.hideTargetMark = !(page === 1 && engineConfigView === 'sections'
+                || page === 2 || (page === 5 && carDataView === 'menu'));
             return ui.image('MAIN_GFX', cv);
         }
 
