@@ -1,7 +1,7 @@
 {
  "id": "vclusters",
  "title": "VClusters",
- "description": "VClusters: a BMW M8-style digital instrument cluster � twin bowed glass rev blades around the gear and speed, four readouts (boost, coolant, oil, intake), the M setup rows following the drive mode, fuel and oil dials, clock, range and outside temperature",
+ "description": "VClusters: a BMW M8-style digital instrument cluster — twin bowed glass rev blades around the gear and speed, four readouts (boost, coolant, oil, intake), the M setup rows following the drive mode, fuel and oil dials, clock, range and outside temperature",
  "version": "1.0.0",
  "vendor": "VKPERFORMANCE & VKDIGITALS",
  "loggingId": "VCL1",
@@ -211,11 +211,11 @@
    "options": [
     [
      "us",
-     "mph, °F, psi"
+     "mph, В°F, psi"
     ],
     [
      "metric",
-     "km/h, °C, bar"
+     "km/h, В°C, bar"
     ]
    ]
   },
@@ -231,11 +231,11 @@
     ],
     [
      "c",
-     "°C"
+     "В°C"
     ],
     [
      "f",
-     "°F"
+     "В°F"
     ]
    ]
   },
@@ -613,7 +613,7 @@
    "key": "warnOil",
    "label": "Oil temperature warning",
    "type": "number",
-   "unit": "°C",
+   "unit": "В°C",
    "default": 130,
    "steps": [
     0,
@@ -632,7 +632,7 @@
    "key": "warnCoolant",
    "label": "Coolant temperature warning",
    "type": "number",
-   "unit": "°C",
+   "unit": "В°C",
    "default": 115,
    "steps": [
     0,
