@@ -200,13 +200,13 @@ mgu.run({
             favorites: [], favorite: 0, upperRead: null, lowerRead: null, customUpper: null, customLower: null, customOther: null,
             features: { mColor: false, comfort: false, sport: false, eco: false },
             driveMode: null, driveModePending: null, activeFeatureLighting: null, mColorReturnSlot: null, modeSyncPending: false, modeSyncBusy: false,
-            customByLocation: Object.create(null),
+            customByLocation: Object.create(null), appliedByLocation: Object.create(null),
         };
         let stopped = false, renderTimer = null, autoScanTimer = null, renderQueued = false, loopOwnsRenders = false;
         let diagInitPromise = null, bgArtLoaded = false, bgArtLoading = false, bgArtLoadTimer = null;
         let pendingApplyTimer = null;
         let lastAction = Object.create(null), hitboxes = [], wheelGeom = null;
-        let lastHudGeom = null, lastDetGeom = null, lastFocusKey = null, focusPoll = null;
+        let lastHudGeom = null, lastDetGeom = null, lastFocusKey = null, focusPoll = null, modeSyncWatch = null;
         let ambientTouchDown = null, ambientControlTouchDown = null;
         let ccuPrevious = null, ccuWrapper = null;
         let lastOemLockAt = 0;
@@ -266,7 +266,7 @@ mgu.run({
             const colours = zonePreviewColors();
             return [{ name: 'AMBIENT ZONES LIGHTING', desc: state.zoneLightingEnabled ? 'ON · TAP A COLOUR TO EDIT' : 'OFF · TURN ON TO EDIT COLOURS',
                 zone: 'toggle', toggle: true, enabled: state.zoneLightingEnabled }].concat(ZONE_ROWS.map((row) => Object.assign({}, row, {
-                desc: state.zoneLightingEnabled ? 'Tap the colour to change it' : 'Turn on zone lighting to edit',
+                desc: state.zoneLightingEnabled ? 'Tap anywhere to open the colour picker' : 'Turn on zone lighting to edit',
                 c1: colours[row.zone], disabled: !state.zoneLightingEnabled,
             })));
         }
@@ -784,39 +784,55 @@ mgu.run({
             state.applyBusy = true;
             if (!isRenewal) setNotice('APPLYING ' + (requestedLabel || (state.oemSelected ? state.oemSelected.name : 'COLOUR')) + ' TO ' + looks.map((x) => x.modules.length).reduce((a, b) => a + b, 0) + ' MODULES…', C.cyan);
             let ok = 0, failed = 0;
+            const colourKey = (c) => c.rgb.join(',') + ':' + c.brightness;
+            const markApplied = (m, c) => { state.appliedByLocation[String(m.location)] = { k: colourKey(c), t: Date.now() }; };
+            const appliedFresh = (m, target) => {
+                const a = state.appliedByLocation[String(m.location)];
+                // The BDC hold lasts 60 s: an entry older than that may describe a module
+                // that already reverted to the BMW colour — it must be written again.
+                return !!a && a.k === colourKey(target) && Date.now() - a.t < 55000;
+            };
             try {
-                // Use one NAD-0 write for the dominant colour on a fully healthy bus, then
-                // override only modules with another zone colour. This keeps multi-zone
-                // updates quick without broadcasting across a faulty/unscanned node.
+                // Write only modules whose target colour actually changed since the last
+                // acknowledged frame (renewals always re-assert everything to refresh the
+                // hold). A zone pick therefore touches just that zone's modules — the rest
+                // of the cabin is never written, so it can no longer flash the wrong colour.
+                // When every healthy module on a bus shares one target colour a single NAD-0
+                // broadcast applies it instantly; a faulted module no longer forces the slow
+                // per-module sweep, and the broadcast is only used when nothing else on the
+                // bus could be left showing the wrong colour.
                 const healthyByBus = BUSES.map((_, bus) => healthy.filter((m) => m.bus === bus));
-                const discoveredByBus = BUSES.map((_, bus) => state.modules.filter((m) => m.bus === bus));
                 for (let bus = 0; bus < BUSES.length; bus++) {
                     const groups = looks.map((look) => ({ colour: look.colour, modules: look.modules.filter((m) => m.bus === bus) }))
                         .filter((group) => group.modules.length);
                     if (!groups.length) continue;
-                    const fullyHealthy = discoveredByBus[bus].length > 0
-                        && discoveredByBus[bus].length === healthyByBus[bus].length;
-                    const allHealthySelected = groups.reduce((sum, group) => sum + group.modules.length, 0) === healthyByBus[bus].length;
-                    const dominant = groups.slice().sort((a, b) => b.modules.length - a.modules.length)[0];
-                    let broadcastApplied = false;
-                    if (fullyHealthy && allHealthySelected && dominant.modules.length > 1) {
-                        const result = await sendFrame(bus, 0, dominant.colour);
-                        if (result.ok) { ok += dominant.modules.length; broadcastApplied = true; }
-                    }
-                    if (broadcastApplied) {
-                        for (const group of groups) {
-                            if (group === dominant) continue;
-                            for (const module of group.modules) {
-                                const result = await sendFrame(bus, module.nad, group.colour);
-                                if (result.ok) ok++; else failed++;
+                    const targetByModule = new Map();
+                    groups.forEach((group) => group.modules.forEach((m) => targetByModule.set(m, group.colour)));
+                    const covered = groups.reduce((sum, group) => sum + group.modules.length, 0);
+                    const needWrite = healthyByBus[bus].filter((m) => {
+                        const target = targetByModule.get(m);
+                        return !!target && (isRenewal || !appliedFresh(m, target));
+                    });
+                    if (!needWrite.length) continue;
+                    if (groups.length === 1 && covered === healthyByBus[bus].length) {
+                        // One colour for the whole bus: fade it in over ~0.3 s (three quick
+                        // broadcast steps) then land on the final brightness.
+                        const col = groups[0].colour;
+                        if (!isRenewal) {
+                            for (const f of [0.35, 0.7]) {
+                                await sendFrame(bus, 0, { rgb: col.rgb, brightness: Math.max(1, Math.round(col.brightness * f)) });
+                                await pause(110);
                             }
                         }
+                        const result = await sendFrame(bus, 0, col);
+                        if (result.ok) { ok += covered; healthyByBus[bus].forEach((m) => markApplied(m, col)); }
+                        else failed += needWrite.length;
                     } else {
-                        for (const group of groups) {
-                            for (const module of group.modules) {
-                                const result = await sendFrame(bus, module.nad, group.colour);
-                                if (result.ok) ok++; else failed++;
-                            }
+                        for (const module of needWrite) {
+                            const col = targetByModule.get(module);
+                            const result = await sendFrame(bus, module.nad, col);
+                            if (result.ok) { ok++; markApplied(module, col); }
+                            else failed++;
                         }
                     }
                 }
@@ -925,6 +941,10 @@ mgu.run({
                 return true;
             }
             if (state.activeCustom || state.blackoutOverride) {
+                if (state.look) {
+                    setNotice('AMBIENT ZONES OFF · YOUR AMBIENT LOOK RESTORED', C.cyan);
+                    return reapplyLook(null, true);
+                }
                 setNotice('AMBIENT ZONES OFF · RESTORING BMW AMBIENT LIGHTING', C.cyan);
                 return restoreBmw();
             }
@@ -1095,15 +1115,20 @@ mgu.run({
                 state.blackoutOverride = !!(applied && state.activeCustom);
                 queueRender();
                 return state.blackoutOverride;
-            } finally { state.blackoutApplying = false; retryOemToggleWhenIdle(); retryOemBrightnessWhenIdle(); }
+            } finally {
+                state.blackoutApplying = false; retryOemToggleWhenIdle(); retryOemBrightnessWhenIdle();
+                if (state.modeSyncPending && !stopped) setTimeout(() => syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e))), 0);
+            }
         }
         async function restoreBmw() {
             state.pendingCustomApply = null;
             if (state.applyBusy || state.scanBusy || state.busy) return false;
             clearTimeout(state.renewTimer); state.renewTimer = null; state.activeCustom = false; state.blackoutOverride = false;
             state.activeFeatureLighting = null; state.customByLocation = Object.create(null);
+            state.appliedByLocation = Object.create(null);
             if (!state.modules.length || !hasDiagnosticProxy()) {
                 state.upperRead = null; state.lowerRead = null; state.customUpper = null; state.customLower = null; state.customOther = null;
+                state.appliedByLocation = Object.create(null);
                 setNotice('RESTORE LINK UNAVAILABLE · THE SHORT BMW OVERRIDE WILL EXPIRE BY ITSELF', C.amber);
                 return false;
             }
@@ -1127,6 +1152,7 @@ mgu.run({
                     }
                 }, 700);
                 state.upperRead = null; state.lowerRead = null; state.customUpper = null; state.customLower = null; state.customOther = null;
+                state.appliedByLocation = Object.create(null);
                 if (ok > 0 && failed === 0) state.oemRestoreRequested = false;
                 setNotice('BMW LIGHTING RESTORED · ' + ok + ' MODULES' + (failed ? ' · ' + failed + ' DID NOT ACK' : ''), failed ? C.amber : C.green);
                 return ok > 0 && failed === 0;
@@ -1142,8 +1168,13 @@ mgu.run({
             if (!state.zoneRestorePending || state.zoneLightingEnabled || state.applyBusy || stopped) return;
             state.zoneRestorePending = false;
             if (state.activeCustom || state.blackoutOverride) {
-                setNotice('AMBIENT ZONES OFF · RESTORING BMW AMBIENT LIGHTING', C.cyan);
-                restoreBmw().catch((e) => log.warn('zone lighting restore: ' + shortError(e)));
+                if (state.look) {
+                    setNotice('AMBIENT ZONES OFF · YOUR AMBIENT LOOK RESTORED', C.cyan);
+                    reapplyLook(null, true).catch((e) => log.warn('zone lighting restore: ' + shortError(e)));
+                } else {
+                    setNotice('AMBIENT ZONES OFF · RESTORING BMW AMBIENT LIGHTING', C.cyan);
+                    restoreBmw().catch((e) => log.warn('zone lighting restore: ' + shortError(e)));
+                }
             } else {
                 setNotice('AMBIENT ZONES OFF · LIGHTING KEPT ON', C.green);
             }
@@ -1404,7 +1435,10 @@ mgu.run({
                 const z = ZONE_ROWS[i - 1]; if (!z) return;
                 if (!state.zoneLightingEnabled) { setNotice('TURN ON AMBIENT ZONES LIGHTING TO EDIT COLOURS', C.amber); return; }
                 state.zone = z.zone === 'footwell' ? 'lower' : 'upper';
-                saveLook(); setNotice('SELECTED ZONE · ' + z.name, C.cyan); return;
+                saveLook();
+                // The whole row is the button: tapping anywhere on it opens that zone's
+                // own colour page — the same path the joystick's target press takes.
+                return openZoneColorPicker(z.zone, i);
             }
             if (state.detail === 'combos') {
                 const c = COMBOS[i]; if (!c) return;
@@ -1877,8 +1911,11 @@ mgu.run({
                     const selectedPalette = PALETTE.findIndex((color) => color.c1.toLowerCase() === selectedColor.toLowerCase());
                     detailSel = selectedPalette >= 0 ? selectedPalette + 1 : -1;
                 }
+                const zonePickerTitle = state.zoneColorReturn
+                    ? ((ZONE_ROWS.find((r) => r.zone === state.zoneColorReturn.target) || {}).name || 'ZONE') + ' COLOR'
+                    : null;
                 const det = Sheet.drawDetailPanel(cv, G, {
-                    title: 'INTERIOR LIGHTING',
+                    title: zonePickerTitle || 'INTERIOR LIGHTING',
                     items: detailItems,
                     sel: detailSel,
                     focus: state.detailFocus,
@@ -1904,14 +1941,15 @@ mgu.run({
                     (det.targets || det.rows).forEach((r) => cv.target(r.x, r.y, r.w, r.h, () => pickDetailItem(r.i), 'drow' + r.i, 0));
                 }
             } else {
-                const zoneLook = state.look && state.look.type === 'zone-colours' ? zonePreviewColors() : null;
                 const hud = Sheet.drawInteriorLighting(cv, G, {
-                    enabled: state.oemEnabled, color: zoneLook ? (state.zone === 'lower' ? zoneLook.lower : zoneLook.upper)
-                        : state.selColour >= 0 ? PALETTE[state.selColour].c1 : (state.oemSelected ? state.oemSelected.color : '#18d8ff'),
+                    // The Color row always mirrors the user's own last pick — zone colours
+                    // belong to the Ambient Zones rows, they must not repaint this swatch.
+                    enabled: state.oemEnabled, color: state.selColour >= 0 ? PALETTE[state.selColour].c1
+                        : (state.oemSelected ? state.oemSelected.color
+                            : (state.look && state.look.type === 'zone-colours' ? zonePreviewColors().upper : '#18d8ff')),
                     featureLighting: featurePreview,
                     features: state.features,
-                    combo: zoneLook ? { c1: zoneLook.upper, c2: zoneLook.lower }
-                        : state.previewChoice === 'combo' && state.selCombo >= 0 ? COMBOS[state.selCombo] : null,
+                    combo: state.previewChoice === 'combo' && state.selCombo >= 0 ? COMBOS[state.selCombo] : null,
                     brightness: state.oemAccent, bgBrightness: state.oemBackground, night: state.oemNight, dynamic: state.oemDynamic, focus: state.oemFocus,
                     zone: state.zone, zoneColor: state.oemSelected ? state.oemSelected.color : '#18d8ff',
                     zonesImg: BgArt.zones(), scroll: state.oemScroll, extra: cv.extra || 0,
@@ -2149,6 +2187,13 @@ mgu.run({
                 if (state.oemFocus !== -1 || state.detailFocus !== -1) { state.oemFocus = -1; state.detailFocus = -1; queueRender(); }
             }
         }, 90);
+        // Watchdog: a drive-mode change arriving while the light link is busy parks itself in
+        // modeSyncPending. Every busy path retries it, but if one is ever missed the cabin
+        // would stay stuck on the old mode colour — this sweep guarantees the release lands.
+        modeSyncWatch = setInterval(() => {
+            if (stopped || !state.modeSyncPending || state.modeSyncBusy) return;
+            syncModeLighting().catch((e) => log.warn('drive-mode ambience: ' + shortError(e)));
+        }, 1500);
         if (ctx.app && typeof ctx.app.on === 'function') ctx.app.on('shutdown', () => {
             stopped = true; clearTimeout(state.renewTimer); clearTimeout(state.oemBrightnessTimer); clearTimeout(pendingApplyTimer);
             clearInterval(state.oemKeepalive); state.oemKeepalive = null;
@@ -2157,7 +2202,7 @@ mgu.run({
                 ctx.display._ccu = ccuPrevious;
                 delete ctx.display._moreAmbientsCcuBase;
             }
-            clearInterval(focusPoll);
+            clearInterval(focusPoll); clearInterval(modeSyncWatch);
             ctx._moreAmbientWatches.forEach((sub) => { try { if (sub && sub.shutdown) Promise.resolve(sub.shutdown()).catch(() => {}); } catch (e) {} });
             if (state.activeCustom && !state.blackoutOverride && hasDiagnosticProxy()) {
                 (async () => {
