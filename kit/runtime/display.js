@@ -260,13 +260,12 @@ class Display {
     }
     /** Settings is the header's last tab where the kit runs the screen (the app has a Settings button). */
     hasSettings() { return !!(this.screen && (this.screen.buttons || []).some((b) => b[0] === 'BTN_SETTINGS')); }
-    /** The header's tabs: the app's, then a Settings icon. { tabs, sel, badges, settings: index or -1 } */
+    /** The header's tabs: the app's own (Settings is a gear centred in the bottom bar instead). */
     _tabList() {
         const base = this.tabInfo || { tabs: [], sel: -1, badges: [] };
         const tabs = (base.tabs || []).slice();
-        const settings = this.own() && this.hasSettings() ? tabs.push({ label: 'Settings', icon: 'settings' }) - 1 : -1;
-        const sel = this.sheet && this.sheet.settings ? settings : this.sheet ? -1 : base.sel;
-        return { tabs, sel, badges: base.badges || [], settings };
+        const sel = this.sheet ? -1 : base.sel;
+        return { tabs, sel, badges: base.badges || [], settings: -1 };
     }
     /** Open header tab i: the app's page, or the settings (Settings tab). */
     _openTab(i) {
@@ -935,7 +934,7 @@ class Display {
         const by = H - this.barH();
         const btns = this.buttons().map((b) => ({ id: b.id, label: b.label, x: b.x - this.barOff - pl.x, w: b.w }));
         const flash = this.pressed && Date.now() - this.pressedT < 300 ? btns.findIndex((b) => b.id === this.pressed) : -1;
-        const focus = btns.findIndex((b) => b.id === this.focused);
+        const focus = btns.findIndex((b) => b.id === ((this.sheet && this.sheet.settings) ? 'BTN_SETTINGS' : this.focused));
         if (btns.length && this.barH()) G.menuBar(c, t, 0, by, W, FULL.barH, btns, focus, 'slim', flash);
         if (this.barH()) c.text('Created By VKDigitals.org', W - 16, by + FULL.barH / 2 + 6, 16,
             G.withAlpha('#ffffff', 0.45), { align: 'right', font: 'light' });
@@ -1015,9 +1014,9 @@ class Display {
      * with the controller, turn the pages); they stay in the HMI's bar for the other paths.
      */
     buttons() {
-        const own = this.ownable();
-        if (this._btns && this._btnsOwn === own) return this._btns;
-        this._btnsOwn = own;
+        const own = this.ownable(), real = this.own();
+        if (this._btns && this._btnsOwn === own && this._btnsReal === real) return this._btns;
+        this._btnsOwn = own; this._btnsReal = real;
         const m = new Recorder(1, 1);
         let x = HMI.btn.x;
         this._btns = (this.screen.buttons || []).filter((b) => !own || (PAGER.indexOf(b[0]) < 0 && b[0] !== 'BTN_SETTINGS' && !this.ownHidden.has(b[0]))).map((b) => {
@@ -1027,6 +1026,11 @@ class Display {
             x += w;
             return r;
         });
+        // the Settings gear the header used to show sits centred in the bar while the kit owns the screen
+        if (real && this.hasSettings() && !this.ownHidden.has('BTN_SETTINGS')) {
+            const gw = 96;
+            this._btns.push({ id: 'BTN_SETTINGS', label: '', x: this.barOff + this.place.x + Math.round(this.place.w / 2 - gw / 2), w: gw });
+        }
         return this._btns;
     }
 

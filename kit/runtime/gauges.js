@@ -770,7 +770,7 @@ function header(cv, t, x, y, w, h, title, tabs, sel, badges, flat, compact) {
     const right = badgeRow(cv, t, x + w - 16, y + (h - 30) / 2, 30, 18, badges || []);
     const parts = tabParts(tabs), names = parts.names, icons = parts.icons;
     const gapsW = TAB_GAP * Math.max(0, names.length - 1);
-    const tw = tabWidths(cv, names, 20, opt, 170, 64, right - x - 20 - gapsW, 24, icons, SETTINGS_TAB_W);
+    const tw = tabWidths(cv, names, 24, opt, 170, 64, right - x - 20 - gapsW, 24, icons, SETTINGS_TAB_W);
     const tabsW = tw.reduce((a, b) => a + b, 0) + gapsW;
     let tx = x + 20;
     const tsize = 38, titleW = title ? cv.textWidth(title, tsize) : 0;
@@ -788,7 +788,7 @@ function header(cv, t, x, y, w, h, title, tabs, sel, badges, flat, compact) {
             cv.fillRect(tx, y + h - 5, bw, 5, S);
         }
         if (icons[i]) settingsGear(cv, tx + bw / 2, y + h / 2, Math.min(34, h * 0.48), '#ffffff', t.bg);
-        else cv.text(n, tx + bw / 2, y + h / 2 + 7, 20, on ? t.selText || '#ffffff' : t.dim, opt);
+        else cv.text(n, tx + bw / 2, y + h / 2 + 8, 24, on ? t.selText || '#ffffff' : t.dim, opt);
         if (i < names.length - 1) cv.fillRect(tx + bw + TAB_GAP / 2, y + h * 0.28, 1, h * 0.44, withAlpha(TAB_DIVIDER, 0.48));
         tx += bw + TAB_GAP;
     });
@@ -805,7 +805,7 @@ function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges) {
     const room = w - 20 - (badgesW ? badgesW + 12 : 0);
     const gapsW = TAB_GAP * Math.max(0, names.length - 1);
     const tabRoom = room - 20 - gapsW;
-    const minTabSize = 18, maxTabSize = 24;
+    const minTabSize = 20, maxTabSize = 28;
     let tabSize = maxTabSize;
     let tw;
     for (; tabSize > minTabSize; tabSize--) {
@@ -873,10 +873,14 @@ function menuBar(cv, t, x, y, w, h, buttons, focus, variant, flash) {
             cv.gradientRect(bx, y, bw, h, [[0, withAlpha(sel, hit ? 0.5 : 0.08)], [1, withAlpha(sel, hit ? 0.7 : 0.4)]]);
             cv.fillRect(bx, y + h - 4 * u, bw, 4 * u, sel);
         }
-        cv.text(label, b.x + b.w / 2, y + h / 2 + bsize * 0.36, bsize, b.id === 'BTN_BACK' ? '#ffffff' : on || hit ? t.selText || '#ffffff' : std ? t.text : t.dim, topt);
-        if (b.id === 'BTN_BACK') {
-            cv.fillRect(bx, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
-            cv.fillRect(bx + bw, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
+        if (b.id === 'BTN_SETTINGS') {
+            settingsGear(cv, b.x + b.w / 2, y + h / 2, Math.min(40, h * 0.62), on || hit ? '#ffffff' : '#d4d8de', t.bg);
+        } else {
+            cv.text(label, b.x + b.w / 2, y + h / 2 + bsize * 0.36, bsize, b.id === 'BTN_BACK' ? '#ffffff' : on || hit ? t.selText || '#ffffff' : std ? t.text : t.dim, topt);
+            if (b.id === 'BTN_BACK') {
+                cv.fillRect(bx, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
+                cv.fillRect(bx + bw, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
+            }
         }
         if (i < buttons.length - 1) cv.fillRect(b.x + b.w, y + h * 0.25, Math.max(1, u), h * 0.5, withAlpha('#ffffff', 0.13));
     });
