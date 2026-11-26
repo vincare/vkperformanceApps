@@ -869,8 +869,13 @@ function menuBar(cv, t, x, y, w, h, buttons, focus, variant, flash) {
         }
         const label = std ? String(b.label) : upperText(b.label);
         const bsize = b.id === 'BTN_BACK' ? size * 1.45 : size;
-        cv.text(label, b.x + b.w / 2, y + h / 2 + bsize * 0.36, bsize, b.id === 'BTN_BACK' ? '#ffffff' : on || hit ? t.selText || '#ffffff' : std ? t.text : t.dim,
-            { align: 'center', font: std ? 'label' : 'bold', spacing: std ? 0 : 2 * u });
+        const topt = { align: 'center', font: std ? 'label' : 'bold', spacing: std ? 0 : 2 * u };
+        cv.text(label, b.x + b.w / 2, y + h / 2 + bsize * 0.36, bsize, b.id === 'BTN_BACK' ? '#ffffff' : on || hit ? t.selText || '#ffffff' : std ? t.text : t.dim, topt);
+        if (b.id === 'BTN_BACK') {
+            const tw = cv.textWidth(label, bsize, topt), gap = w * 0.03, cx = b.x + b.w / 2;
+            cv.fillRect(cx - tw / 2 - gap, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
+            cv.fillRect(cx + tw / 2 + gap, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
+        }
         if (i < buttons.length - 1) cv.fillRect(b.x + b.w, y + h * 0.25, Math.max(1, u), h * 0.5, withAlpha('#ffffff', 0.13));
     });
 }
