@@ -936,8 +936,20 @@ class Display {
         const flash = this.pressed && Date.now() - this.pressedT < 300 ? btns.findIndex((b) => b.id === this.pressed) : -1;
         const focus = btns.findIndex((b) => b.id === ((this.sheet && this.sheet.settings) ? 'BTN_SETTINGS' : this.focused));
         if (btns.length && this.barH()) G.menuBar(c, t, 0, by, W, FULL.barH, btns, focus, 'slim', flash);
-        if (this.barH()) c.text('Created By VKDigitals.org', W - 16, by + FULL.barH / 2 + 6, 16,
-            G.withAlpha('#ffffff', 0.45), { align: 'right', font: 'light' });
+        // the credit, leaned like italic: the renderer can't skew, so thin horizontal
+        // strips of the same text are each drawn a touch further right toward the top
+        if (this.barH()) {
+            const str = 'Created By VKDigitals.org', cs = 20, cbase = by + FULL.barH / 2 + 7;
+            const ctw = c.textWidth(str, cs, { font: 'light', spacing: 1 });
+            const lean = Math.round(cs * 0.26), ctop = Math.round(cbase - cs * 1.15);
+            const cbot = Math.round(cbase + cs * 0.15);
+            for (let sy = ctop; sy < cbot; sy += 2) {
+                const dx = Math.round(lean * (cbot - sy) / (cbot - ctop));
+                c.clip(W - 16 - ctw - lean - 2, sy, ctw + lean + 4, 2);
+                c.text(str, W - 16 - ctw + dx, cbase, cs, '#f32635', { font: 'light', spacing: 1, literal: true });
+            }
+            c.noclip();
+        }
         // the HMI's status icons and its back arrow column (home button, back arrow) show through;
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
         // mark the HMI draws above it when its bar is wider than the screen (eDrive's "Reset drive totals")
