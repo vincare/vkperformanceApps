@@ -28,7 +28,7 @@ const scaling = {
 };
 
 equal(app.id, 'performance', 'app id');
-equal(app.version, '0.6.74', 'app version');
+equal(app.version, '0.6.78', 'app version');
 equal(app.screens[0].title, '', 'screen title is hidden to avoid repeating Engine Data beside the section tabs');
 equal(app.settings.find((setting) => setting.key === 'drivetrainType').default, 'auto', 'drivetrain type defaults to automatic');
 const valveControl = app.settings.find((setting) => setting.key === 'valveControl');

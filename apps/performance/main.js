@@ -1196,6 +1196,9 @@ mgu.run({
             if (v) {
                 tyreExtra.dsc = v;
                 if (page === 0 || (page === 5 && carDataView === 'tyres') || (page === 1 && engineConfigView === 'dynamic')) queueRender();
+            } else if (payload && !setDsc.logged) {
+                setDsc.logged = true;
+                diagLog('dsc_undecoded', { keys: Object.keys(payload) });
             }
         };
 
@@ -1247,26 +1250,18 @@ mgu.run({
             if (!DSC_ENUMS[mode]) return dscStatus('MODE NOT AVAILABLE', true);
             if (dscWrite.busy) { dscStatus('COMMAND IN PROGRESS', true); return null; }
             const currentDsc = tyreExtra.dsc && tyreExtra.dsc.state;
-            if (mode === 'on') {
-                if (currentDsc === 'on') return dscStatus('DSC ON ALREADY ACTIVE', false);
-                if (!currentDsc) return dscStatus('WAIT FOR STATUS', true);
-                dscWrite.armed = null;
-                if (!tpmsProxy) return dscStatus('TPMS LINK UNAVAILABLE', true);
-                dscWrite.busy = true;
-                dscStatus('SENDING DSC ON', false);
-                dscSend('on');
-                return null;
-            }
-            if (!currentDsc) return dscStatus(DSC_LABEL[mode] + ' · WAIT FOR STATUS', true);
-            if (currentDsc === 'off') return dscStatus(mode === 'off' ? 'DSC OFF ALREADY ACTIVE' : 'ENABLE DSC FIRST', mode !== 'off');
+            if (currentDsc === 'on' && mode === 'on') return dscStatus('DSC ON ALREADY ACTIVE', false);
+            if (currentDsc === 'off')
+                return dscStatus(mode === 'off' ? 'DSC OFF ALREADY ACTIVE' : 'ENABLE DSC FIRST', mode !== 'off');
             if (mode === 'mdm') {
                 if (currentDsc === 'traction') return dscStatus('MDM ALREADY ACTIVE', false);
-                if (currentDsc !== 'on') return dscStatus('ENABLE DSC FIRST', true);
+                if (currentDsc && currentDsc !== 'on') return dscStatus('ENABLE DSC FIRST', true);
             }
-            dscWrite.armed = null;
+            // Missing live status must not block the write: BMW's own DSC button
+            // just sends the request and lets the ECU validate the transition.
             if (!tpmsProxy) { dscStatus('TPMS LINK UNAVAILABLE', true); return null; }
             dscWrite.busy = true;
-            dscStatus('SENDING ' + DSC_LABEL[mode], false);
+            dscStatus('SENDING ' + DSC_LABEL[mode] + (currentDsc ? '' : ' · NO LIVE STATUS'), false);
             dscSend(mode);
             return null;
         }
@@ -1660,7 +1655,7 @@ mgu.run({
             statusSwitchDriveDynamicSport2: setFesBoost,
             statusFESVehicleDynamicSwitchHMI: applyDrivingMode,
             statusDSCSwitchHMI: setDsc,
-        });
+        }, { pollMs: 3000 });
         startDriveModePoll();
 
         // Boost candidates use read-only ISO-TP/UDS 0x22 and OBD 0x01 requests.

@@ -98,8 +98,13 @@ function tyreState(v) {
 }
 
 // FES.statusDSCSwitchHMI: what DSC is doing now (what the cluster shows)
-const DSC = { DSC_EIN: 'on', DSC_AUS: 'off', TRAKTIONSMODUS_EIN: 'traction', ANFAHRHILFE_AKTIV: 'start-off assist' };
-function dsc(v) { const n = name(v && v.displayStatusDSC2); return n ? { state: DSC[n] || 'unknown', raw: n } : null; }
+const DSC = { DSC_EIN: 'on', DSC_EINSCHALTEN: 'on', DSC_AUS: 'off', DSC_AUSSCHALTEN: 'off',
+    TRAKTIONSMODUS_EIN: 'traction', TRAKTIONSMODUS_EINSCHALTEN: 'traction', ANFAHRHILFE_AKTIV: 'start-off assist' };
+function dsc(v) {
+    if (!v) return null;
+    const n = name(v.displayStatusDSC2) || name(v.displayStatusDSC) || name(v.statusDSCSwitchHMI) || name(v.statusDSC);
+    return n ? { state: DSC[n] || 'unknown', raw: n } : null;
+}
 
 // TPMSInternalData.tpmsInternalLastValues: the last value each wheel sensor reported —
 // pressure (mbar), target pressure (mbar), temperature (degC), battery. Backup feed for
