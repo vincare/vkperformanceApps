@@ -2145,17 +2145,24 @@ mgu.run({
             if (engineOff) for (const key in peaks.live) delete peaks.live[key];
             const rpm = engineOff ? 0 : heldNum('rpm');
             const tq = engineOff ? { value: 0, source: 'ENGINE OFF' } : selectTorque(now);
-            const powerPct = engineOff ? 0 : heldNum('powerPct');
-            const torque = tq ? tq.value : null;
             const gear = vehicleGearAt && now - vehicleGearAt <= CD_STALE ? vehicleGear : null;
             const speed = heldNum('speed');
+            const pedal = heldNum('pedalPct');
+            // Stopped with the foot off the pedal: the engine still reports ~15 Nm of idle
+            // torque (converter/AC load), but BMW's own sport display reads 0 - mirror that.
+            // Pressing the pedal while standing still raises it again. Without a pedal
+            // signal the same reads as "revs below idle-with-load" (~1150 rpm).
+            const idleStill = !engineOff && finite(speed) && speed < 1.5 &&
+                (finite(pedal) ? pedal < 5 : (finite(rpm) && rpm < 1150));
+            const powerPct = (engineOff || idleStill) ? 0 : heldNum('powerPct');
+            const torque = idleStill ? 0 : (tq ? tq.value : null);
             const result = {
                 demo: false, rpm, torque, torqueSource: tq ? tq.source : null,
                 power: powerFor(powerPct, torque, rpm), powerUnit,
                 powerPct,
                 speed: finite(speed) ? speed : gear === 'P' ? 0 : null,
                 gear,
-                torquePct: engineOff ? 0 : heldNum('torquePct'),
+                torquePct: (engineOff || idleStill) ? 0 : heldNum('torquePct'),
                 boost: engineOff ? { value: 0, approximate: false, source: 'ENGINE OFF' } : boostValue(now),
                 oil: heldNum('oilTemp'),
                 gearbox: heldNum('gearboxTemp'),
