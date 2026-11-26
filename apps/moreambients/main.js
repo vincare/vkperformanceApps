@@ -270,6 +270,20 @@ mgu.run({
                 c1: colours[row.zone], disabled: !state.zoneLightingEnabled,
             })));
         }
+        // When no explicit look object survives (zones were on across a restart, or nothing
+        // was picked this session) the last selection rows still say what the user wants —
+        // the Color row swatch itself. Falling back to BMW factory here is what painted the
+        // cabin the slot's blue while the UI kept showing the user's green.
+        function lookFromSelections() {
+            if (state.previewChoice === 'combo' && state.selCombo >= 0 && COMBOS[state.selCombo])
+                return { type: 'combo', index: state.selCombo };
+            if (state.previewChoice === 'colour' && state.selColour >= 0 && PALETTE[state.selColour])
+                return { type: 'colour', index: state.selColour };
+            if (state.selColour >= 0 && PALETTE[state.selColour]) return { type: 'colour', index: state.selColour };
+            if (state.selCombo >= 0 && COMBOS[state.selCombo]) return { type: 'combo', index: state.selCombo };
+            if (state.oemSelected) return { type: 'oem', name: state.oemSelected.name };
+            return null;
+        }
         function syncZoneColorsForTargets(upper, lower) {
             // Only fills slots the user has not picked yet: remembered zone colours survive
             // every other look change (colour pick, combo, studio, feature modes).
@@ -939,7 +953,9 @@ mgu.run({
                 state.zoneLightingEnabled = true;
                 disableAutomaticModesForManual(['upper', 'lower', 'other']);
                 // Remember the look zones are replacing so turning them back off restores it.
-                state.previousLook = state.look && state.look.type !== 'zone-colours' ? state.look : state.previousLook;
+                // With nothing else picked, the current selections are the look to return to.
+                state.previousLook = state.look && state.look.type !== 'zone-colours' ? state.look
+                    : (state.previousLook || lookFromSelections());
                 state.look = { type: 'zone-colours', dashboard: state.zoneColors.dashboard, doors: state.zoneColors.doors,
                     footwell: state.zoneColors.footwell, upper: state.zoneColors.dashboard, lower: state.zoneColors.footwell };
                 saveLook(); queueRender();
@@ -948,9 +964,11 @@ mgu.run({
             state.zoneLightingEnabled = false;
             state.pendingCustomApply = null;
             // Bring back whatever was live before zones took over — dropping it meant a
-            // later mode-release had no look to restore.
+            // later mode-release had no look to restore. No surviving look falls back to the
+            // last picked selections, never straight to BMW factory while the rows still
+            // show a colour of ours.
             state.look = state.previousLook && state.previousLook.type !== 'zone-colours' ? state.previousLook
-                : state.oemSelected ? { type: 'oem', name: state.oemSelected.name } : null;
+                : lookFromSelections();
             state.previousLook = null;
             saveLook(); queueRender();
             if (state.applyBusy) {
@@ -1063,6 +1081,7 @@ mgu.run({
                         state.activeFeatureLighting = null;
                         // The mode let go of the lights: bring the user's own look back instead
                         // of leaving the car on whatever BMW factory state it falls to.
+                        if (!state.look) state.look = lookFromSelections();
                         const reapplied = state.look ? await reapplyLook('YOUR AMBIENT LOOK RESTORED', true) : false;
                         result = reapplied ? reapplied
                             : wasMColor ? await restoreMColorFactoryProfile() : await restoreBmw();
@@ -1186,6 +1205,7 @@ mgu.run({
             if (!state.zoneRestorePending || state.zoneLightingEnabled || state.applyBusy || stopped) return;
             state.zoneRestorePending = false;
             if (state.activeCustom || state.blackoutOverride) {
+                if (!state.look) state.look = lookFromSelections();
                 if (state.look) {
                     setNotice('AMBIENT ZONES OFF · YOUR AMBIENT LOOK RESTORED', C.cyan);
                     reapplyLook(null, true).catch((e) => log.warn('zone lighting restore: ' + shortError(e)));
