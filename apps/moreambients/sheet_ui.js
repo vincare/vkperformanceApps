@@ -150,34 +150,78 @@ function id7Highlight(cv, G, x, y, w, h) {
 }
 const id7HighlightRed = id7Highlight;
 
+/** Four-point sparkle: two bright axes plus two faint diagonals. */
+function sparkle(cv, G, cx, cy, s, a) {
+    cv.line(cx - s, cy, cx + s, cy, 1.1, G.withAlpha('#ffffff', a));
+    cv.line(cx, cy - s, cx, cy + s, 1.1, G.withAlpha('#ffffff', a));
+    const d = Math.round(s * 0.55);
+    cv.line(cx - d, cy - d, cx + d, cy + d, 1, G.withAlpha('#cfe0f8', a * 0.55));
+    cv.line(cx - d, cy + d, cx + d, cy - d, 1, G.withAlpha('#cfe0f8', a * 0.55));
+    cv.circle(cx, cy, Math.max(1.2, s * 0.22), G.withAlpha('#ffffff', Math.min(1, a + 0.15)));
+}
+
+/** Tiny faceted gem for the header: red crystal with an ice glint across its crown. */
+function headerGem(cv, G, cx, cy, s) {
+    cv.quad([[cx, cy - s], [cx + s, cy], [cx, cy + s], [cx - s, cy]], '#a81426');
+    cv.quad([[cx, cy - s], [cx + s, cy], [cx, cy], [cx - s, cy]], '#d83448');
+    cv.quad([[cx - s * 0.4, cy - s * 0.42], [cx, cy - s], [cx + s * 0.4, cy - s * 0.42], [cx, cy - s * 0.05]],
+        G.withAlpha('#ffdfe4', 0.9));
+}
+
+/** Header band shared by both panels: frosted ice slab, sheen, gem + title. */
+function crystalHeader(cv, G, px, py, pw, headH, title, lx) {
+    cv.fillRect(px, py, pw, headH, G.withAlpha('#202634', 0.94));
+    cv.fillRect(px, py, pw, Math.round(headH * 0.48), G.withAlpha('#4e5f7c', 0.16));
+    // faint light fall under the band: the slab throws a little glow into the card
+    for (let i = 1; i <= 6; i++) {
+        cv.line(px, py + headH + i - 0.5, px + pw, py + headH + i - 0.5, 1, G.withAlpha('#8ea6c8', 0.08 * (1 - i / 6)));
+    }
+    cv.line(px, py + headH - 0.5, px + pw, py + headH - 0.5, 1.4, G.withAlpha('#a9bedd', 0.42));
+    headerGem(cv, G, lx - 14, py + headH / 2, 9);
+    cv.text(title, lx + 2, py + headH / 2 + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
+    sparkle(cv, G, px + pw - 18, py + 15, 5, 0.55);
+}
+
 /** Crystal glass card background: deep blue-charcoal, vertical depth, faceted
  * diagonal ice streaks, a specular top edge and glinting side rails. */
 function id8CardBg(cv, G, x, y, w, h) {
     // base: smoked crystal — near-black with a cool blue cast
-    cv.fillRect(x, y, w, h, G.withAlpha('#161a24', 0.95));
+    cv.fillRect(x, y, w, h, G.withAlpha('#141824', 0.96));
     // vertical depth: darker crystal toward the bottom (banded, cheap)
     const bands = 10;
     for (let i = 0; i < bands; i++) {
         const by = y + Math.round(h * i / bands);
-        cv.fillRect(x, by, w, Math.ceil(h / bands), G.withAlpha('#07090f', 0.08 + 0.30 * (i / (bands - 1))));
+        cv.fillRect(x, by, w, Math.ceil(h / bands), G.withAlpha('#06080e', 0.08 + 0.30 * (i / (bands - 1))));
     }
-    // crystal facets: a long diagonal ice plane + a second streak in the upper right
+    // cut-gem facets: overlapping diagonal ice planes crossing the card
     cv.quad([[x + w * 0.34, y], [x + w * 0.66, y], [x + w * 0.30, y + h], [x + w * 0.02, y + h]],
-        G.withAlpha('#a8c4e8', 0.05));
+        G.withAlpha('#a8c4e8', 0.055));
     cv.quad([[x + w * 0.56, y], [x + w, y], [x + w, y + h * 0.26], [x + w * 0.84, y + h * 0.08]],
-        G.withAlpha('#d4e4f8', 0.08));
+        G.withAlpha('#d4e4f8', 0.09));
+    cv.quad([[x + w * 0.06, y + h * 0.55], [x + w * 0.34, y + h * 0.30], [x + w * 0.52, y + h * 0.52], [x + w * 0.22, y + h]],
+        G.withAlpha('#8fb0d8', 0.045));
+    // a brighter light sweep across the upper third, as if sun hits the glass
+    cv.quad([[x + w * 0.10, y], [x + w * 0.44, y], [x + w * 0.14, y + h * 0.38], [x, y + h * 0.30]],
+        G.withAlpha('#eaf2ff', 0.07));
     // soft neutral wash down the left edge
     cv.rampRect(x, y, Math.round(w * 0.30), h, 0,
         [G.withAlpha('#b8c4d8', 0.12), G.withAlpha('#b8c4d8', 0)], x, Math.round(w * 0.30));
-    // specular top edge + the glow it throws into the glass just beneath it
+    // specular top edge + iridescent glints + the glow it throws into the glass beneath
     cv.line(x, y + 0.5, x + w, y + 0.5, 1.6, G.withAlpha('#eef4ff', 0.8));
+    cv.line(x + w * 0.12, y + 0.5, x + w * 0.24, y + 0.5, 2.2, G.withAlpha('#9fd8ff', 0.55));
+    cv.line(x + w * 0.47, y + 0.5, x + w * 0.60, y + 0.5, 2.2, G.withAlpha('#ffffff', 0.7));
+    cv.line(x + w * 0.78, y + 0.5, x + w * 0.88, y + 0.5, 2.2, G.withAlpha('#e8c8f4', 0.42));
     for (let i = 1; i <= 8; i++) {
         cv.line(x, y + i + 0.5, x + w, y + i + 0.5, 1, G.withAlpha('#c0d4ee', 0.10 * (1 - i / 8)));
     }
-    // glinting side rails + dark seat edge at the bottom
-    cv.line(x + 0.5, y, x + 0.5, y + h, 1.2, G.withAlpha('#e2ecfc', 0.5));
-    cv.line(x + w - 0.5, y, x + w - 0.5, y + h, 1, G.withAlpha('#c6d6ee', 0.34));
+    // glinting side rails, an inset cut-edge bevel and a dark seat edge at the bottom
+    cv.line(x + 0.5, y, x + 0.5, y + h, 1.4, G.withAlpha('#e6effe', 0.62));
+    cv.line(x + w - 0.5, y, x + w - 0.5, y + h, 1.1, G.withAlpha('#c6d6ee', 0.4));
+    cv.strokeRoundRect(x + 3, y + 3, w - 6, h - 6, 2, 1, G.withAlpha('#9fb2d0', 0.16));
     cv.line(x, y + h - 0.5, x + w, y + h - 0.5, 1.6, G.withAlpha('#000000', 0.6));
+    // resting sparkles: one catches the upper-right rail, one near the bottom-left cut
+    sparkle(cv, G, x + w - 16, y + h * 0.32, 4.5, 0.4);
+    sparkle(cv, G, x + 14, y + h - 18, 4, 0.3);
 }
 
 /** Small framed swatch: the colour fills the box cleanly, with a light border and outer glow. */
@@ -214,11 +258,7 @@ function drawInteriorLighting(cv, G, opts) {
 
     // Frosted crystal glass card (full panel)
     id8CardBg(cv, G, px, py, pw, ph);
-    // Header band: frosted ice slab with a sheen on its top half and a crystal edge
-    cv.fillRect(px, py, pw, headH, G.withAlpha('#202634', 0.94));
-    cv.fillRect(px, py, pw, Math.round(headH * 0.48), G.withAlpha('#4e5f7c', 0.16));
-    cv.line(px, py + headH - 0.5, px + pw, py + headH - 0.5, 1.4, G.withAlpha('#a9bedd', 0.42));
-    cv.text('INTERIOR LIGHTING', lx - 14, py + headH / 2 + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
+    crystalHeader(cv, G, px, py, pw, headH, 'INTERIOR LIGHTING', lx);
     const pin0 = py + headH;
     const rowTop = [];
     for (let i = 0; i <= rows.length; i++) {
@@ -458,13 +498,7 @@ function drawDetailPanel(cv, G, opts) {
     cv.line(px + pw, py, px + pw, py + avail, 1.2, G.withAlpha('#cfd8ec', 0.38));
     cv.line(px, py + avail, px + pw, py + avail, 1.4, G.withAlpha('#cfd8ec', 0.55));
 
-    // Header band: frosted ice slab with a sheen on its top half and a crystal edge
-    cv.fillRect(px, py, pw, headH, G.withAlpha('#202634', 0.94));
-    cv.fillRect(px, py, pw, Math.round(headH * 0.48), G.withAlpha('#4e5f7c', 0.16));
-    cv.line(px, py + headH - 0.5, px + pw, py + headH - 0.5, 1.4, G.withAlpha('#a9bedd', 0.42));
-    const bcy = py + headH / 2;
-    cv.text(opts.title || 'INTERIOR LIGHTING', lx - 14, bcy + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
-    cv.line(px, top0, px + pw, top0, 1, G.withAlpha('#9aa0ac', 0.14));
+    crystalHeader(cv, G, px, py, pw, headH, opts.title || 'INTERIOR LIGHTING', lx);
     const back = null;
 
     let sbar = null;
