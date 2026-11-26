@@ -498,10 +498,10 @@ function drawRuns(cv, G, t, s, actions) {
             Sheet.para(cv, sx, ry - 30, 6, ry + sy, 20, '#ff243b');
         }
         const rowNo = pg * RUNS_PER_PAGE + i + 1;
-        cv.text('#' + rowNo, 400, ry + 8, 18,
+        cv.text('#' + rowNo, 376, ry + 8, 18,
             sel ? '#ff243b' : G.withAlpha('#c8ced8', 0.45),
             { font: 'num', spacing: 0.5, literal: true });
-        cv.text(runStamp(run.at), 452, ry, 18, sel ? '#ffffff' : G.withAlpha('#e8c8ce', 0.85),
+        cv.text(runStamp(run.at), 428, ry, 18, sel ? '#ffffff' : G.withAlpha('#e8c8ce', 0.85),
             { font: 'bold', spacing: 0.8, literal: true });
         const trapV = run.trap && run.trap[sec.key];
         const uStr = unit === 'mph' ? 'mph' : 'km/h';
@@ -510,7 +510,7 @@ function drawRuns(cv, G, t, s, actions) {
         if (trapV) parts.push('TRAP ' + number(DragRunSpeed(trapV, unit), 0) + ' ' + uStr);
         if (peakG != null) parts.push('G PEAK ' + number(peakG, 2));
         if (run.vmax != null) parts.push('SPEED ' + number(DragRunSpeed(run.vmax, unit), 0) + uStr);
-        cv.text(parts.join('   ·   '), 452, ry + 26, 14, G.withAlpha('#e8c8ce', 0.6),
+        cv.text(parts.join('   ·   '), 428, ry + 26, 14, G.withAlpha('#e8c8ce', 0.6),
             { font: 'bold', spacing: 0.5, literal: true });
         const secT = run.result && run.result[sec.key];
         const secTxt = secT != null ? DragRunSeconds(secT) + ' S' : '--.--';
