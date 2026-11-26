@@ -101,6 +101,28 @@ function tyreState(v) {
 const DSC = { DSC_EIN: 'on', DSC_AUS: 'off', TRAKTIONSMODUS_EIN: 'traction', ANFAHRHILFE_AKTIV: 'start-off assist' };
 function dsc(v) { const n = name(v && v.displayStatusDSC2); return n ? { state: DSC[n] || 'unknown', raw: n } : null; }
 
+// TPMSInternalData.tpmsInternalLastValues: the last value each wheel sensor reported —
+// pressure (mbar), target pressure (mbar), temperature (degC), battery. Backup feed for
+// cars that never notify the TPMS pressure/target fields.
+const CORNER = { FRONT_LEFT: 'FL', FRONT_RIGHT: 'FR', REAR_LEFT: 'RL', REAR_RIGHT: 'RR' };
+function lastValues(v) {
+    if (!v) return null;
+    const out = [];
+    for (let i = 1; i <= 4; i++) {
+        const pos = name(v['tpmsInternalLastPositionId' + i]);
+        const m = pos && pos.match(/(FRONT_LEFT|FRONT_RIGHT|REAR_LEFT|REAR_RIGHT)$/);
+        if (!m) continue;
+        out.push({
+            corner: CORNER[m[1]],
+            pressureMbar: num(v['tpmsInternalLastPressureMbarId' + i]),
+            targetMbar: num(v['tpmsInternalLastTargetPressureMbarId' + i]),
+            tempC: num(v['tpmsInternalLastTemperatureDegCId' + i]),
+            battery: name(v['tpmsInternalLastBatteryStatusId' + i]),
+        });
+    }
+    return out.length ? out : null;
+}
+
 /* ---------- the write ---------- */
 // TPMS.chassisControl is one struct the HMI's tire menu and the DSC button share. Every member
 // "no request" means the receiving units ignore it; only operationModeTractionDSC carries our
@@ -120,4 +142,4 @@ function dscStruct(dscValue) {
     return Object.assign({}, CHASSIS_NO_ACTION, { operationModeTractionDSC: dscValue });
 }
 
-module.exports = { detection, calibration, tire, frontAxle, rearAxle, sensorTire, tyreState, dsc, dscStruct };
+module.exports = { detection, calibration, tire, frontAxle, rearAxle, sensorTire, tyreState, lastValues, dsc, dscStruct };

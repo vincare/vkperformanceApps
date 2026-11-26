@@ -1165,6 +1165,33 @@ mgu.run({
         const setTyreRear = tyreStore('rearTire', TyreData.rearAxle);
         const setTyreSensor = tyreStore('sensorTire', TyreData.sensorTire);
         const setTyreState = tyreStore('tyreState', TyreData.tyreState);
+        // tpmsInternalLastValues: per-sensor last reported values (mbar/degC). Backup feed
+        // for cars that never notify statusTyrePressure/statusTargetTyrePressure. Raw is
+        // stored in the same format the TPMS decoders expect so unit reconversion stays right.
+        const setTyreLastValues = (payload) => {
+            const list = TyreData.lastValues(payload);
+            if (!list) return;
+            const pressFactor = PRESS_TO_BAR[state.pressureUnit];
+            list.forEach((s) => {
+                if (finite(s.pressureMbar) && s.pressureMbar > 0) {
+                    const bar = s.pressureMbar / 1000;
+                    const raw = Math.round((pressFactor ? bar / pressFactor : bar) * 10);
+                    updateMetric('tyreP' + s.corner, raw, tyrePressureBar(raw), 'bar', 'tpms-internal',
+                        finite(tyrePressureBar(raw)) ? 'live' : 'invalid');
+                }
+                if (finite(s.targetMbar) && s.targetMbar > 0) {
+                    const bar = s.targetMbar / 1000;
+                    const raw = Math.round((pressFactor ? bar / pressFactor : bar) * 10);
+                    updateMetric('tyrePt' + s.corner, raw, tyrePressureBar(raw), 'bar', 'tpms-internal',
+                        finite(tyrePressureBar(raw)) ? 'live' : 'invalid');
+                }
+                if (finite(s.tempC)) {
+                    const raw = Math.round(state.tempUnit === 'F' ? s.tempC * 9 / 5 + 72 : s.tempC + 40);
+                    updateMetric('tyreT' + s.corner, raw, tyreTemperatureC(raw), 'degC', 'tpms-internal',
+                        finite(tyreTemperatureC(raw)) ? 'live' : 'invalid');
+                }
+            });
+        };
         const setDsc = (payload) => {
             const v = TyreData.dsc(payload);
             if (v) {
@@ -1580,11 +1607,13 @@ mgu.run({
         startWatch(KOMBI, { statusRangeTankStatus: setTank, statusBordcomputerAverage: setBoardAvg }, { pollMs: 10000 });
         startWatch(PEDAL, { AngleAcceleratorPedal: setPedal });
         // TPMS also needs a poll: BMW's own x_call only ever reads these, so a car may never notify them.
+        // Front/rear axle tire sizes live on TPMS on this car (not TPMSInternalData).
         startWatch(TPMS, { statusTyrePressure: setTyrePress, statusTyreTemperature: setTyreTemp,
-            statusTargetTyrePressure: setTyreTarget, statusTyreState: setTyreState }, { pollMs: 5000 });
+            statusTargetTyrePressure: setTyreTarget, statusTyreState: setTyreState,
+            statusFrontAxleTyre: setTyreFront, statusRearAxleTyre: setTyreRear }, { pollMs: 5000 });
         startWatch(TPMS_INTERNAL, { statusWheelTypeChange: setTyreDetection,
-            tpmsCalibrationData: setTyreCalibration, statusFrontAxleTyre: setTyreFront,
-            statusRearAxleTyre: setTyreRear, tpmsErfsActualTireData: setTyreSensor }, { pollMs: 15000 });
+            tpmsCalibrationData: setTyreCalibration,
+            tpmsErfsActualTireData: setTyreSensor, tpmsInternalLastValues: setTyreLastValues }, { pollMs: 15000 });
         startWatch(VEHICLE_INFO, { statusGearboxDrive: setGearboxStatus, DataPowerTrain2: setGearSelection });
         startWatch(FES, {
             statusActualValueTorque2: setFesTorque,
