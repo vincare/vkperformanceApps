@@ -421,7 +421,7 @@ function drawRunReport(cv, G, t, s, run, actions) {
                 { font: 'bold', spacing: 0.8, literal: true });
             cv.text(val, tx + 18, ty + 62, 27, '#ffffff',
                 { font: 'num', spacing: 0.5, literal: true });
-            cv.text(sub, tx + 18, ty + 80, 10.5, G.withAlpha('#e8c8ce', 0.45),
+            cv.text(sub, tx + 18, ty + 82, 10.5, G.withAlpha('#e8c8ce', 0.45),
                 { font: 'bold', spacing: 0.6, literal: true });
         });
     }
