@@ -849,6 +849,86 @@ mgu.run({
             Promise.resolve().then(() => sub.shutdown()).catch((e) => log.warn('signal shutdown: ' + shortError(e)));
         }
 
+        // Physical controller buttons (FrontCCU statusPushButtonsState). The HMI keeps the
+        // hardware BACK button and pops our screen for it. We detect the press, let the
+        // screen close, then reopen it one page level up (display.onBack), the same step
+        // the controller's push-left takes. Which frontOperationButton member is BACK is
+        // learned from the closes it causes (the button pressed right before our screen
+        // goes away); every press and close is logged for the QR log.
+        let hwBtnStates = null;          // member -> last decoded state
+        let hwLastPress = null;          // { member, at, consumed }
+        let hwLastHide = 0;              // when our screen last went away
+        const hwCloseVotes = {};         // member -> { n, at }: closes that member caused
+        let hwReopenTimer = null;
+
+        function hwBtnValue(v) {
+            if (v && typeof v === 'object') v = ('name' in v) ? v.name : v.value;
+            return (typeof v === 'number') ? { num: v, name: '' } : { num: NaN, name: String(v == null ? '' : v) };
+        }
+        function hwBtnPressed(v) {
+            const b = hwBtnValue(v);
+            if (b.name) return /KURZ|LANG|PRESS|SHORT/i.test(b.name) && !/BERUEHRT|TOUCH|RELEASED|KEINE/i.test(b.name);
+            return b.num === 1 || b.num === 2;   // KURZ_GEDRUECKT / LANG_GEDRUECKT
+        }
+        function hwBackMember() {
+            let best = null, bestN = 0, bestAt = 0;
+            Object.keys(hwCloseVotes).forEach((m) => {
+                const v = hwCloseVotes[m];
+                if (v.n > bestN || (v.n === bestN && v.at > bestAt)) { best = m; bestN = v.n; bestAt = v.at; }
+            });
+            return best;
+        }
+        // A controller button just closed our screen: count it toward the exit-button
+        // guess, and if it is the guess, step one level up and show the screen again.
+        function hwButtonClosed(member) {
+            const rec = hwCloseVotes[member] || (hwCloseVotes[member] = { n: 0, at: 0 });
+            rec.n++; rec.at = Date.now();
+            diagLog('hwbutton_close', { member, votes: rec.n });
+            if (member !== hwBackMember()) return;
+            let stayed = false;
+            try { stayed = !!(ctx.display && ctx.display.onBack && ctx.display.onBack()); }
+            catch (e) { log.warn('hw back: ' + shortError(e)); }
+            if (!stayed) return;                    // top level: exit, like before
+            log.info('hw back: ' + member + ' - reopening one page level up');
+            diagLog('hwbutton_back', { member });
+            clearTimeout(hwReopenTimer);
+            hwReopenTimer = setTimeout(() => {
+                Promise.resolve(ctx.ui.open('MAIN')).catch((e) => log.warn('hw reopen: ' + shortError(e)));
+            }, 250);
+        }
+        function onHwButtons(payload) {
+            if (!payload || typeof payload !== 'object') return;
+            const prev = hwBtnStates || {};
+            const cur = {};
+            Object.keys(payload).forEach((k) => {
+                if (!/^frontOperationButton\d+$/i.test(k)) return;
+                const v = payload[k];
+                cur[k] = v;
+                if (!hwBtnPressed(v) || hwBtnPressed(prev[k])) return;
+                hwLastPress = { member: k, at: Date.now(), consumed: false };
+                const b = hwBtnValue(v);
+                log.info('hw button: ' + k + ' = ' + (b.name || b.num));
+                diagLog('hwbutton', { member: k, value: b.name || b.num });
+                // the press notification can land right after the screen went away
+                if (ctx.ui && !ctx.ui.isVisible('MAIN') && Date.now() - hwLastHide < 600) {
+                    hwLastPress.consumed = true;
+                    hwButtonClosed(k);
+                }
+            });
+            hwBtnStates = cur;
+        }
+        function hookHwBack() {
+            if (!ctx.ui || typeof ctx.ui.onVisible !== 'function') return;
+            ctx.ui.onVisible((name, v) => {
+                if (name !== 'MAIN' || v) return;
+                hwLastHide = Date.now();
+                const p = hwLastPress;
+                if (!p || p.consumed || Date.now() - p.at > 2000) return;
+                p.consumed = true;
+                hwButtonClosed(p.member);
+            });
+        }
+
         function setRpm(payload, source) {
             const raw = payload && payload.actualValueRPMEngineCrankshaft;
             const value = Calc.rpm(raw, scaling.rpm);
@@ -1627,6 +1707,7 @@ mgu.run({
         const PEDAL = 'de.bmw.powertrain.AcceleratorPedal';
         const TPMS = 'de.bmw.infotainment.vehicle.TPMS';
         const TPMS_INTERNAL = 'de.bmw.infotainment.vehicle.TPMSInternalData';
+        const FRONTCCU = 'de.bmw.infotainment.controlelements.FrontCCU';
         startWatch(CDS, { statusEngineSpeed2: setRpm, statusEngineTemperature: setEngineTemps,
             statusEngineStatus: setEngineStatus, statusBattery2: setBattery, statusHandBrake: setHandBrake }, { pollMs: 10000 });
         startWatch(BASIC_DATA, { basicDataSet: setGearboxTemp }, { pollMs: 10000 });
@@ -1648,6 +1729,7 @@ mgu.run({
         startWatch(TPMS_INTERNAL, { statusWheelTypeChange: setTyreDetection,
             tpmsCalibrationData: setTyreCalibration,
             tpmsErfsActualTireData: setTyreSensor, tpmsInternalLastValues: setTyreLastValues }, { pollMs: 15000 });
+        startWatch(FRONTCCU, { statusPushButtonsState: onHwButtons });
         startWatch(VEHICLE_INFO, { statusGearboxDrive: setGearboxStatus, DataPowerTrain2: setGearSelection });
         startWatch(FES, {
             statusActualValueTorque2: setFesTorque,
@@ -3048,6 +3130,7 @@ mgu.run({
                 if (prevPage !== undefined) { setPage(prevPage); return true; }
                 return false;
             };
+            hookHwBack();
         }
 
         valveScanBusy = true;
