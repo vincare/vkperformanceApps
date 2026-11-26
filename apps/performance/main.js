@@ -3005,6 +3005,7 @@ mgu.run({
         if (ctx.display) {
             ctx.display.customBackBtn = false;
             ctx.display.hideBackBtn = true;
+            ctx.display.hideBar = true;              // starts on ENGINE DATA: no bar strip either
             ctx.display.ownHidden.add('BTN_BACK');   // starts on ENGINE DATA: no back at all
             ctx.display._btns = null;
             ctx.display.onBack = () => {
