@@ -433,9 +433,7 @@ function drawRunReport(cv, G, t, s, run, actions) {
         { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 196, 'ALL DYNO RUNS',
         { icon: 'fwd', run: actions && actions.viewRuns, key: 'performance_dyno_runs' });
-    if (run) Sheet.drawChip(cv, G, tagX, tagY + tagH + 78, 196,
-        s.baselineAt === run.at ? 'UNSET BASELINE' : 'SET BASELINE',
-        { run: actions && actions.toggleBaseline, key: 'performance_dyno_baseline' });
+
 
     // Right ribbon — run facts
     const ribX = 1128;
