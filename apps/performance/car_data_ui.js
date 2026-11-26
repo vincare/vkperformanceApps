@@ -145,7 +145,7 @@ function drawSheet(cv, G, t, s, car, actions) {
         if (s.side) {
             const scale = Math.min(maxW / s.side.width, maxH / s.side.height);
             const cw = s.side.width * scale, ch = s.side.height * scale;
-            cv.image(s.side.id, slabX + (slabW - cw) / 2 - slabS / 2 + (more ? 16 : 0), y0 + (more ? 66 : (y1 - y0 - ch) / 2 + 12), cw, ch);
+            cv.image(s.side.id, slabX + (slabW - cw) / 2 - slabS / 2 + (more ? 16 : 0), y0 + (more ? 92 : (y1 - y0 - ch) / 2 + 12), cw, ch);
         }
         if (more) {
             // The useful extras, spaced out: red tick, small dim label, white value that may wrap
