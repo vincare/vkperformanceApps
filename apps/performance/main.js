@@ -2120,7 +2120,13 @@ mgu.run({
                 coolant: demo ? 86 + 6 * Math.sin(now / 50000 + 0.6) : cdNum('coolantTemp'),
                 gearbox: demo ? 74 + 6 * Math.sin(now / 50000 + 1.2) : cdNum('gearboxTemp'),
             };
-            const warm = WarmupUi.BAND_READY;   // READY starts here per the band table
+            // READY points come from the user's settings (warmOil / warmCoolant / warmGearbox),
+            // falling back to the band table's ready edge.
+            const warm = {
+                oil: settings.get('warmOil') || WarmupUi.BAND_READY.oil,
+                coolant: settings.get('warmCoolant') || WarmupUi.BAND_READY.coolant,
+                gearbox: settings.get('warmGearbox') || WarmupUi.BAND_READY.gearbox,
+            };
             const etas = {
                 oil: warmup.eta('oil', d.oil, warm.oil, d),
                 coolant: warmup.eta('coolant', d.coolant, warm.coolant, d),
@@ -2249,6 +2255,18 @@ mgu.run({
                 return finite(tt) ? formatNumber(p, 2) + ' bar (' + formatNumber(tt, 0) + ' °C)'
                     : formatNumber(p, 2) + ' bar';
             };
+            // MORE TYRES INFO: the last value the TPMS reported, even when the sensor feed has
+            // gone quiet since (pressures barely change; a stale number beats a blank). Only a
+            // unit that does not offer TPMS, or one that never answered at all, shows a note.
+            const tpmsWait = (internal) => {
+                const avail = state.providers[internal ? TPMS_INTERNAL : TPMS];
+                return avail === false ? 'TPMS NOT ON THIS CAR' : 'WAITING FOR TPMS';
+            };
+            const tyreHold = (key) => {
+                const m = state[key];
+                if (m && finite(m.value)) return formatNumber(m.value, 1) + ' bar';
+                return tpmsWait();
+            };
             const rows = {
                 engineInfo: [
                     { label: 'MISFIRES', value: (() => {
@@ -2337,18 +2355,14 @@ mgu.run({
                         detail: 'traction control · as the cluster shows it' },
                 ],
                 tyresMore: [
-                    { label: 'RECOMMENDED - FRONT LEFT', value: finite(cdNum('tyrePtFL'))
-                        ? formatNumber(cdNum('tyrePtFL'), 1) + ' bar' : 'WAITING FOR TPMS',
+                    { label: 'RECOMMENDED - FRONT LEFT', value: tyreHold('tyrePtFL'),
                         detail: (() => { const ts = tyreExtra.tyreState; return ts ? [ts.loading, ts.season, ts.mode].filter(Boolean).join(' · ') : ''; })() },
-                    { label: 'RECOMMENDED - FRONT RIGHT', value: finite(cdNum('tyrePtFR'))
-                        ? formatNumber(cdNum('tyrePtFR'), 1) + ' bar' : 'WAITING FOR TPMS' },
-                    { label: 'RECOMMENDED - REAR LEFT', value: finite(cdNum('tyrePtRL'))
-                        ? formatNumber(cdNum('tyrePtRL'), 1) + ' bar' : 'WAITING FOR TPMS' },
-                    { label: 'RECOMMENDED - REAR RIGHT', value: finite(cdNum('tyrePtRR'))
-                        ? formatNumber(cdNum('tyrePtRR'), 1) + ' bar' : 'WAITING FOR TPMS' },
+                    { label: 'RECOMMENDED - FRONT RIGHT', value: tyreHold('tyrePtFR') },
+                    { label: 'RECOMMENDED - REAR LEFT', value: tyreHold('tyrePtRL') },
+                    { label: 'RECOMMENDED - REAR RIGHT', value: tyreHold('tyrePtRR') },
                     { label: 'FITTED TIRES', value: (() => {
                         const f = tyreExtra.frontTire, r = tyreExtra.rearTire;
-                        if (!f && !r) return 'WAITING FOR TPMS';
+                        if (!f && !r) return tpmsWait();
                         if (f && r && f.size === r.size) return f.size;
                         return (f ? f.size : '--') + ' + ' + (r ? r.size : '--');
                     })(), detail: (() => {
@@ -2362,8 +2376,9 @@ mgu.run({
                         return parts.join(' | ');
                     })() },
                     { label: 'TIRE DETECTION / TPMS RESET', value: (() => {
-                        const detection = tyreExtra.detection ? tyreExtra.detection.title : 'WAITING FOR TPMS';
-                        const calibration = tyreExtra.calibration ? tyreExtra.calibration.result : 'RESET UNKNOWN';
+                        const detection = tyreExtra.detection ? tyreExtra.detection.title : tpmsWait(true);
+                        const calibration = tyreExtra.calibration ? tyreExtra.calibration.result
+                            : (state.providers[TPMS_INTERNAL] === false ? 'NO RESET DATA ON THIS CAR' : 'RESET UNKNOWN');
                         return detection + ' · ' + calibration;
                     })(), detail: (() => {
                         const c = tyreExtra.calibration;
@@ -2784,9 +2799,9 @@ mgu.run({
             // The renderer maintains its own frame keepalive. Do not rebuild a
             // screen unless app data, navigation, or layout actually changed.
             // Exhaust smoke, burble flames and tyre smoke animate: those views alone
-            // render at 30 fps (a few dozen circles per frame — cheap), other pages keep 10.
+            // render at 50 fps (a few dozen circles per frame — cheap), other pages keep 10.
             const animating = page === 1 && ANIMATING_VIEWS.indexOf(engineConfigView) >= 0;
-            const renderInterval = page === 0 ? ENGINE_DATA_RENDER_MS : animating ? 33 : RENDER_MS;
+            const renderInterval = page === 0 ? ENGINE_DATA_RENDER_MS : animating ? 20 : RENDER_MS;
             if (!renderDirty || now - lastRenderAt < renderInterval) return;
 
             renderDirty = false;
@@ -3105,11 +3120,11 @@ mgu.run({
         diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', engineMonitorReadOnly: true,
             exhaustControlDisarmed: !valveController.armedSetting,
             rawDiagnostics: diagnostics(), dmeCandidates: settings.get('readDmeCandidates') === true });
-        // Engine Data gets 20 Hz; the exhaust/burbles views animate at 30 fps on the GPU
+        // Engine Data gets 20 Hz; the exhaust/burbles views animate at 50 fps on the GPU
         // renderer and up to 20 on software, everything else keeps its 10 Hz renderer cap.
         if (ctx.loop) mainLoop = ctx.loop('MAIN', 20, render, {
             gpuFps: () => page === 0 ? ENGINE_DATA_FPS
-                : (page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles' || engineConfigView === 'dynamic') ? 30 : 10),
+                : (page === 1 && (engineConfigView === 'exhaust' || engineConfigView === 'burbles' || engineConfigView === 'dynamic') ? 50 : 10),
         });
         render().catch((e) => log.warn('first render: ' + shortError(e)));
     },

@@ -63,8 +63,8 @@ function fitText(cv, s, size, w, opts) {
 /** A 270° temperature gauge: the fill takes the fluid's band colour (blue cold,
  *  amber warming, green ready/optimal, orange elevated, red high/cool-down), a
  *  green rim notch at the band's ready point and a red zone from its high point.
- *  maxC: session high, shown small under the live value. */
-function tempGauge(cv, G, cx, cy, r, val, key, label, maxC) {
+ *  targetC: the "warm at" point the fluid should reach (the user's setting). */
+function tempGauge(cv, G, cx, cy, r, val, key, label, targetC) {
     const A0 = -135, A1 = 135, MIN = 0, MAX = 150, thick = 10;
     const ang = (c) => A0 + Math.max(0, Math.min(1, (c - MIN) / (MAX - MIN))) * (A1 - A0);
     cv.arc(cx, cy, r - thick, r, A0, A1, G.withAlpha('#ffffff', 0.08), { round: true });
@@ -82,8 +82,10 @@ function tempGauge(cv, G, cx, cy, r, val, key, label, maxC) {
     cv.text(live ? Math.round(val) + '°' : '—', cx, cy + 10, 30,
         live ? col : G.withAlpha('#8c94a0', 0.5),
         { align: 'center', font: 'num' });
-    if (typeof maxC === 'number' && isFinite(maxC)) {
-        cv.text('(' + Math.round(maxC) + '° MAX)', cx, cy + 27, 11, G.withAlpha('#e8c8ce', 0.55),
+    if (typeof targetC === 'number' && isFinite(targetC)) {
+        const reached = live && val >= targetC;
+        cv.text((reached ? 'TARGET ' : 'NEED ') + Math.round(targetC) + '°', cx, cy + 27, 11,
+            reached ? G.withAlpha('#2fd27a', 0.8) : G.withAlpha('#e8c8ce', 0.55),
             { align: 'center', font: 'bold', spacing: 0.6, literal: true });
     }
     if (band) {
@@ -94,7 +96,7 @@ function tempGauge(cv, G, cx, cy, r, val, key, label, maxC) {
         { align: 'center', font: 'bold', spacing: 1.4, literal: true });
 }
 
-/** The 20-minute temperature trend: three lines, legend with live readings, faint guides. */
+/** The 20-minute temperature trend: three lines, legend with live readings, guides. */
 function trendChart(cv, G, x, y, w, h, trend, temps) {
     // legend spread across the row: OIL left, COOL centre, GBX right
     const legend = [['OT', RED, temps.oil], ['CT', COLD, temps.coolant], ['GO', '#b98cff', temps.gearbox]];
@@ -103,20 +105,24 @@ function trendChart(cv, G, x, y, w, h, trend, temps) {
         const txt = l[0] + ' ' + (typeof v === 'number' && isFinite(v) ? Math.round(v) + '°' : '—');
         const tw = txt.length * 9;
         if (i === 0) {
-            cv.circle(x + 6, y + 13, 5, l[1]);
+            cv.circle(x + 6, y + 13, 5.5, l[1]);
+            cv.circle(x + 6, y + 13, 2.5, '#0b0d10');
             cv.text(txt, x + 17, y + 18, 14, '#ffffff', { font: 'bold', spacing: 0.8, literal: true });
         } else if (i === 1) {
-            cv.circle(x + w / 2 - tw / 2 - 10, y + 13, 5, l[1]);
+            cv.circle(x + w / 2 - tw / 2 - 10, y + 13, 5.5, l[1]);
+            cv.circle(x + w / 2 - tw / 2 - 10, y + 13, 2.5, '#0b0d10');
             cv.text(txt, x + w / 2 + 7, y + 18, 14, '#ffffff',
                 { align: 'center', font: 'bold', spacing: 0.8, literal: true });
         } else {
-            cv.circle(x + w - tw - 20, y + 13, 5, l[1]);
+            cv.circle(x + w - tw - 20, y + 13, 5.5, l[1]);
+            cv.circle(x + w - tw - 20, y + 13, 2.5, '#0b0d10');
             cv.text(txt, x + w, y + 18, 14, '#ffffff',
                 { align: 'right', font: 'bold', spacing: 0.8, literal: true });
         }
     });
-    const cy = y + 30, ch = h - 40;
-    cv.roundRect(x, cy, w, ch, 8, G.withAlpha('#ffffff', 0.035));
+    const cy = y + 30, ch = h - 44;
+    cv.roundRect(x, cy, w, ch, 8, G.withAlpha('#ffffff', 0.055));
+    cv.line(x + 8, cy + ch - 1, x + w - 8, cy + ch - 1, 1, G.withAlpha('#ffffff', 0.16));
     // X axis spans the actual data, at least 5 min, at most 20 — a short drive
     // still draws a proper curve instead of a stub hugging the right edge.
     const now = trend.length ? trend[trend.length - 1][0] : 0;
@@ -126,29 +132,38 @@ function trendChart(cv, G, x, y, w, h, trend, temps) {
     const cols = [RED, COLD, '#b98cff'];
     [50, 100].forEach((g) => {
         const gy = cy + ch - (g / MAX) * ch;
-        cv.line(x + 8, gy, x + w - 8, gy, 1, G.withAlpha('#ffffff', g === 100 ? 0.14 : 0.07));
-        cv.text(String(g) + '°', x + 12, gy - 4, 10, G.withAlpha('#ffffff', 0.22), { literal: true });
+        cv.line(x + 8, gy, x + w - 8, gy, 1, G.withAlpha('#ffffff', g === 100 ? 0.2 : 0.1));
+        cv.text(String(g) + '°', x + 12, gy - 4, 10, G.withAlpha('#ffffff', 0.32), { literal: true });
     });
     // minute ticks along the bottom so the chart reads as a timeline
     for (let m = 0; m * 60000 <= span; m += 5) {
         const tx = x + w - (m * 60000 / span) * w;
         if (tx < x + 8) break;
-        cv.line(tx, cy + ch - 4, tx, cy + ch, 1.5, G.withAlpha('#ffffff', 0.25));
+        cv.line(tx, cy + ch - 5, tx, cy + ch, 2, G.withAlpha('#ffffff', 0.32));
         cv.text(m ? '-' + m + 'm' : 'now', Math.max(x + 10, Math.min(x + w - 24, tx - 8)),
-            cy + ch + 12, 9, G.withAlpha('#ffffff', 0.3), { literal: true });
+            cy + ch + 13, 9.5, G.withAlpha('#ffffff', 0.4), { literal: true });
     }
     const xOf = (p) => Math.max(x + 4, Math.min(x + w - 4, x + w - ((now - p[0]) / span) * w));
+    // soft fill under the oil line first, then all three traces on top of it
     [1, 2, 5].forEach((idx, li) => {
-        let px = null, py = null, ex = null, ey = null;
+        let px = null, py = null, ex = null, ey = null, firstX = null;
         for (const p of trend) {
             const v = p[idx];
             if (typeof v !== 'number' || !isFinite(v) || now - p[0] > span) { px = null; continue; }
             const tx = xOf(p);
             const ty = cy + ch - Math.max(0, Math.min(1, (v - MIN) / (MAX - MIN))) * ch;
-            if (px !== null) cv.line(px, py, tx, ty, 3, G.withAlpha(cols[li], 0.95));
+            if (px !== null) {
+                cv.line(px, py, tx, ty, 4, G.withAlpha(cols[li], 0.28));
+                cv.line(px, py, tx, ty, 2.2, cols[li]);
+            }
+            if (firstX === null) firstX = tx;
             px = tx; py = ty; ex = tx; ey = ty;
         }
-        if (ex !== null) cv.circle(ex, ey, 5.5, cols[li]);
+        if (ex !== null) {
+            cv.circle(ex, ey, 6, G.withAlpha(cols[li], 0.35));
+            cv.circle(ex, ey, 4, cols[li]);
+            cv.circle(ex, ey, 1.8, '#ffffff');
+        }
     });
 }
 
@@ -188,8 +203,9 @@ function draw(cv, G, t, s, actions) {
     const pulse = 0.45 + 0.55 * Math.sin(now / (st.kind === 'ready' ? 420 : 700));
     cv.circle(ix + 8, y0 + 50, 10, G.withAlpha(scol, 0.10 + 0.18 * pulse));
     cv.circle(ix + 8, y0 + 50, 4.5, scol);
+    const readyAt = s.warm || BAND_READY;
     const readyN = BAR_KEYS.reduce((n, b) =>
-        n + ((temps[b.key] || 0) >= BAND_READY[b.key] ? 1 : 0), 0);
+        n + ((temps[b.key] || 0) >= readyAt[b.key] ? 1 : 0), 0);
     cv.text(readyN + ' / 3 READY', ix + iw, y0 + 56, 15, G.withAlpha('#e8c8ce', 0.5),
         { align: 'right', font: 'bold', spacing: 1.3, literal: true });
     // status fits the room left of "n/3 READY" — it can no longer run over it
@@ -217,23 +233,17 @@ function draw(cv, G, t, s, actions) {
         gcy = y0 + 202;
     }
 
-    const gaugeR = 70;
+    const gaugeR = 66;
     const gxs = [ix + iw / 6, ix + iw / 2, ix + iw * 5 / 6];
-    // Session high per fluid from the trend history (oil idx1, coolant idx2, gearbox idx5)
-    const trend = s.trend || [];
-    const maxOf = (idx) => trend.reduce((m, p) => {
-        const v = p[idx];
-        return typeof v === 'number' && isFinite(v) && v > m ? v : m;
-    }, null);
-    const maxTemp = { oil: maxOf(1), coolant: maxOf(2), gearbox: maxOf(5) };
+    // The "warm at" target per fluid — the user's warmOil / warmCoolant / warmGearbox
+    // setting, shown under each gauge instead of the session high it used to print.
+    const warmTargets = s.warm || BAND_READY;
     BAR_KEYS.forEach((b, i) => {
-        const mx = maxTemp[b.key];
-        tempGauge(cv, G, gxs[i], gcy, gaugeR, temps[b.key], b.key, b.label,
-            typeof mx === 'number' ? Math.max(mx, temps[b.key] || 0) : temps[b.key]);
+        tempGauge(cv, G, gxs[i], gcy, gaugeR, temps[b.key], b.key, b.label, warmTargets[b.key]);
     });
 
-    const ty = gcy + gaugeR + 36;
-    trendChart(cv, G, ix, ty, iw, Math.max(56, y1 - 28 - ty), s.trend || [], temps);
+    const ty = gcy + gaugeR + 34;
+    trendChart(cv, G, ix, ty, iw, Math.max(84, y1 - 26 - ty), s.trend || [], temps);
 
     // ---- right ribbon
     const ribX = 1128;
