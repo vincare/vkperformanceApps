@@ -767,7 +767,7 @@ function header(cv, t, x, y, w, h, title, tabs, sel, badges, flat, compact) {
     cv.fillRect(x, y, w, h, t.bg);
     // flat: plain, to match the HMI's own black strip next to it
     if (!flat) cv.gradientRect(x, y, w, h, [[0, withAlpha('#ffffff', 0.02)], [1, withAlpha('#ffffff', 0.08)]]);
-    cv.fillRect(x, y + h - 2, w, 2, withAlpha('#ffffff', 0.22));
+    cv.fillRect(x, y + h - 8, w, 2, withAlpha('#ffffff', 0.22));
     const right = badgeRow(cv, t, x + w - 16, y + (h - 30) / 2, 30, 18, badges || []);
     const parts = tabParts(tabs), names = parts.names, icons = parts.icons;
     const gapsW = TAB_GAP * Math.max(0, names.length - 1);
@@ -827,7 +827,7 @@ function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges) {
     });
     end = Math.min(x + w, end + (badgesW ? 12 + badgesW : 0) + 16);
     cv.fillRect(x, y, end - x, h, t.bg);
-    cv.fillRect(x, y + h - 2, end - x, 2, withAlpha('#ffffff', 0.22));
+    cv.fillRect(x, y + h - 8, end - x, 2, withAlpha('#ffffff', 0.22));
     let tx = x + 20;
     if (showTitle) {
         cv.text(title, tx, y + h / 2 + tsize * 0.36, tsize, t.text);
