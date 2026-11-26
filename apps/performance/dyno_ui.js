@@ -42,6 +42,19 @@ function runStamp(at) {
         ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
 }
 
+function crown(cv, cx, cy, c) {
+    cv.quad([[cx - 11, cy + 7], [cx + 11, cy + 7], [cx + 9, cy + 3], [cx - 9, cy + 3]], c);
+    cv.line(cx - 11, cy + 3, cx - 12, cy - 6, 2.2, c);
+    cv.line(cx - 12, cy - 6, cx - 5, cy, 2.2, c);
+    cv.line(cx - 5, cy, cx, cy - 8, 2.2, c);
+    cv.line(cx, cy - 8, cx + 5, cy, 2.2, c);
+    cv.line(cx + 5, cy, cx + 12, cy - 6, 2.2, c);
+    cv.line(cx + 12, cy - 6, cx + 11, cy + 3, 2.2, c);
+    cv.circle(cx - 12, cy - 7, 1.8, c);
+    cv.circle(cx, cy - 9, 2.0, c);
+    cv.circle(cx + 12, cy - 7, 1.8, c);
+}
+
 // Chart drawn inside a parallelogram, sheared by `sh` px over its height so its
 // edges run parallel to the stage slab's diagonal edges.
 function chart(cv, G, t, s, current, rect) {
@@ -325,37 +338,41 @@ function drawRuns(cv, G, t, s, actions) {
     Sheet.para(cv, tagX, tagY, tagW, tagY + tagH, tagSlant, G.withAlpha('#c8192b', 0.94));
     cv.text('SAVED RUNS', tagX + (tagW - tagSlant) / 2, tagY + 41, 34, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.6, literal: true });
+    Sheet.drawChip(cv, G, tagX, tagY + tagH + 14, 224, 'CLEAR ALL RUNS',
+        { run: actions && actions.clear, key: 'performance_druns_clear' });
 
-    // Right ribbon — control rows, same style as the mode rows
+    // Right ribbon — TOP 3 RUNS leaderboard (crown on #1, same as DRAG RUNS)
     const ribX = 1128;
     Sheet.para(cv, ribX,       y0, 210, y1, SLANT, '#2a0b12');
     Sheet.para(cv, ribX + 210, y0, 112, y1, SLANT, '#1b070c');
     Sheet.para(cv, ribX + 322, y0, 62,  y1, SLANT, '#8c1122');
     Sheet.para(cv, ribX + 384, y0, 56,  y1, SLANT, '#d91c33');
 
-    const rows = [
-        ['NEXT RUN',   actions && actions.nextRun, 'performance_druns_next',  'next'],
-        ['CLEAR RUNS', actions && actions.clear,   'performance_druns_clear', 'clear'],
-    ];
-    rows.forEach(([label, run, key, fkey], i) => {
-        const ry = y0 + 68 + i * 106;
-        const rx = xAt(ribX + 26, ry);
-        const redBar = s.flashKey === fkey && Date.now() - s.flashAt < 1000;
-        const ic = redBar ? '#ffffff' : G.withAlpha('#c8ced8', 0.78);
-        cv.text(label, rx + 4, ry + 8, 21, ic, { font: 'bold', spacing: 1.2, literal: true });
-        Sheet.drawBarSegs(cv, G, rx + 4, ry + 18, redBar);
-        if (cv.own && run) cv.target(rx - 18, ry - 22, 348, 64,
-            () => { if (actions.flash) actions.flash(fkey); run(); }, key, 10, true);
-    });
-
-    // Status block
-    const setupY = y1 - 102, setupX = xAt(ribX + 12, setupY);
-    cv.text('RUNS · ' + (s.runs || []).length, setupX, setupY + 14, 20, '#ffffff',
-        { font: 'bold', spacing: 1.1, literal: true });
-    cv.text(selRun ? runStamp(selRun.at) : 'NONE SELECTED', setupX, setupY + 40, 13, '#ff8595',
+    const topX = xAt(ribX + 26, y0 + 36);
+    cv.text('TOP 3 RUNS', topX + 4, y0 + 44, 17, '#ffffff',
+        { font: 'bold', spacing: 1.4, literal: true });
+    cv.text('BY PEAK POWER', topX + 4, y0 + 64, 11.5, G.withAlpha('#ff8595', 0.75),
         { font: 'bold', spacing: 0.8, literal: true });
-    cv.text('TAP A RUN · BACK SHOWS IT', setupX, setupY + 64, 10.5,
-        G.withAlpha('#e8c8ce', 0.5), { font: 'bold', spacing: 0.5, literal: true });
+    const top3 = (s.runs || []).slice().sort((a, b) => b.peakP - a.peakP).slice(0, 3);
+    [0, 1, 2].forEach((i) => {
+        const r = top3[i];
+        const ry = y0 + 108 + i * 92;
+        const rx = xAt(ribX + 26, ry);
+        if (i === 0) crown(cv, rx + 14, ry + 8, r ? '#ffc738' : G.withAlpha('#8c94a0', 0.4));
+        else cv.text('#' + (i + 1), rx + 14, ry + 14, 17,
+            r ? G.withAlpha('#c8ced8', 0.75) : G.withAlpha('#8c94a0', 0.35),
+            { align: 'center', font: 'bold', literal: true });
+        cv.text(r ? Math.round(powerValue(r.peakP, s.powerUnit)) + ' ' + powerName(s.powerUnit).toUpperCase()
+            : '--.--', rx + 40, ry + 20, 28,
+            !r ? G.withAlpha('#8c94a0', 0.4) : i === 0 ? '#ffc738' : '#ff243b',
+            { font: 'num', spacing: 0.5, literal: true });
+        if (r) cv.text(runStamp(r.at), rx + 40, ry + 40, 11,
+            G.withAlpha('#e8c8ce', 0.5), { font: 'bold', spacing: 0.5, literal: true });
+        if (cv.own && r && actions && actions.select) {
+            cv.target(rx - 12, ry - 16, 300, 68,
+                () => actions.select(r.at), 'performance_dynotop_' + i, 10, true);
+        }
+    });
 }
 
 function draw(cv, G, t, s, car, actions) {
