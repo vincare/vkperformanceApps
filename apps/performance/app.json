@@ -996,6 +996,10 @@
       "title": "",
       "buttons": [
         [
+          "BTN_BACK",
+          "BACK"
+        ],
+        [
           "BTN_OPEN",
           "Open valves"
         ],

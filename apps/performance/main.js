@@ -2933,10 +2933,18 @@ mgu.run({
             if (page === 5) {
                 carDataView = 'menu';
             }
-            // No back arrow on the top-level ENGINE DATA page; everywhere else it steps back.
+            // No back arrow anywhere: the column is blacked out and BACK is a bar
+            // button at the bottom. On ENGINE DATA there is no back at all.
             if (ctx.display) {
-                ctx.display.customBackBtn = page !== 0;
-                ctx.display.hideBackBtn = page === 0;
+                ctx.display.customBackBtn = false;
+                ctx.display.hideBackBtn = true;
+                const hidden = ctx.display.ownHidden;
+                const hadBack = hidden.has('BTN_BACK');
+                if (page === 0) hidden.add('BTN_BACK'); else hidden.delete('BTN_BACK');
+                if (hidden.has('BTN_BACK') !== hadBack) {
+                    ctx.display._btns = null;
+                    if (ctx.display.place) ctx.display._place();
+                }
             }
             updateDynoActionLabel();
             queueRender();
@@ -2948,6 +2956,7 @@ mgu.run({
             if (index < 0) index = 2;
             return setPage(pages[(index + direction + pages.length) % pages.length]);
         }
+        ui.onClick('BTN_BACK', () => { if (ctx.display) ctx.display._back(); });
         ui.onClick('BTN_PAGE', () => topPageStep(1));
         ui.onClick('BTN_PREV', () => topPageStep(-1));
         ui.onClick('BTN_OPEN', valveActions.open);
@@ -2986,8 +2995,10 @@ mgu.run({
             return null;
         });
         if (ctx.display) {
-            ctx.display.customBackBtn = page !== 0;
-            ctx.display.hideBackBtn = page === 0;
+            ctx.display.customBackBtn = false;
+            ctx.display.hideBackBtn = true;
+            ctx.display.ownHidden.add('BTN_BACK');   // starts on ENGINE DATA: no back at all
+            ctx.display._btns = null;
             ctx.display.onBack = () => {
                 // Step back one subpage level; on a top-level tab, return false so the app closes.
                 if (page === 1 && engineConfigView !== 'sections') {
