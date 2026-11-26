@@ -40,7 +40,6 @@ const RENDER_MS = 100;
 const ENGINE_DATA_FPS = 20;
 const ENGINE_DATA_RENDER_MS = 1000 / ENGINE_DATA_FPS;
 const DME_POLL_MS = 1200;
-const PEAK_HOLD_MS = 15000;
 const CD_STALE = 120000;
 const GEARBOX_STALE_MS = 45000;
 const RPM_MAX = 8000;
@@ -2066,6 +2065,7 @@ mgu.run({
                 return result;
             }
             const engineOff = cdText('engineState') === 'ENGINE OFF';
+            if (engineOff) for (const key in peaks.live) delete peaks.live[key];
             const rpm = engineOff ? 0 : heldNum('rpm');
             const tq = engineOff ? { value: 0, source: 'ENGINE OFF' } : selectTorque(now);
             const powerPct = engineOff ? 0 : heldNum('powerPct');
@@ -2376,21 +2376,26 @@ mgu.run({
 
         function peakValues(group, values, now) {
             const source = peaks[group];
+            // Session maxima (BMW Sport Display semantics): the best value since the engine
+            // started. They reset on ENGINE OFF, never decay mid-drive — the old 15 s hold
+            // overwrote the peak with whatever value happened to be current, so markers
+            // jumped or vanished mid-acceleration.
             function peak(key, value) {
                 const old = source[key];
-                if (!finite(value)) {
-                    if (old && now - old.at > PEAK_HOLD_MS) delete source[key];
-                    return source[key] ? source[key].value : null;
-                }
-                if (!old || now - old.at > PEAK_HOLD_MS || value > old.value) source[key] = { value, at: now };
+                if (!finite(value)) return old ? old.value : null;
+                if (!old || value > old.value) source[key] = { value, at: now };
                 return source[key].value;
             }
-            return {
+            const out = {
                 rpm: peak('rpm', values.rpm), power: peak('power', values.power && values.power.value),
                 torque: peak('torque', values.torque), powerPct: peak('powerPct', values.powerPct),
                 torquePct: peak('torquePct', values.torquePct), boost: peak('boost', values.boost && values.boost.value),
                 speed: peak('speed', values.speed),
             };
+            // The car's own boost peak (Sport Display "since ignition on" max) beats ours.
+            const carBoostPeak = cdNum('boostPeak');
+            if (finite(carBoostPeak)) out.boost = carBoostPeak;
+            return out;
         }
 
         function drawDynoCurve(cv, t, run, x, y, w, h, modeColor) {
