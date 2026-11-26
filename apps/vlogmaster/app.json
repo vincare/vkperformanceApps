@@ -1,7 +1,7 @@
 {
   "id": "vlogmaster",
   "title": "VLogMaster",
-  "vendor": "VKPERFORMANCE",
+  "vendor": "VKPERFORMANCE & VKDIGITALS",
   "description": "Read-only BMW live data logger, log analyzer and evidence-based health overview for MGU / iDrive 7",
   "version": "0.1.0",
   "loggingId": "VLM1",

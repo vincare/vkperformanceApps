@@ -3,7 +3,7 @@
   "title": "Climate Control",
   "description": "Read-only driver and passenger climate setpoints and A/C status",
   "version": "0.4.3",
-  "vendor": "VKPERFORMANCE",
+  "vendor": "VKPERFORMANCE & VKDIGITALS",
   "loggingId": "OAA5",
   "iconGlyph": "temp",
   "mguHmi": ["ID7"],
