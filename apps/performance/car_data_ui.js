@@ -147,39 +147,6 @@ function drawSheet(cv, G, t, s, car, actions) {
             const cw = s.side.width * scale, ch = s.side.height * scale;
             cv.image(s.side.id, slabX + (slabW - cw) / 2 - slabS / 2 + (more ? 16 : 0), y0 + (more ? 92 : (y1 - y0 - ch) / 2 + 12), cw, ch);
         }
-        if (more) {
-            // The useful extras, spaced out: red tick, small dim label, white value that may wrap
-            // to a second line, hairlines between. The DSC row's detail is a static description —
-            // it stays in the ribbon and is skipped here.
-            const lines = (s.rows || []).filter((row) => row && row.detail && row.label !== 'DSC');
-            const textX = slabX + 52 - slabS / 2, textW = slabW - 120;
-            const wrap = (str) => {
-                const words = String(str).split(' '), out = [''];
-                words.forEach((word) => {
-                    const cand = out[out.length - 1] ? out[out.length - 1] + ' ' + word : word;
-                    if (cv.textWidth(cand, 16, { literal: true }) <= textW - 40) out[out.length - 1] = cand;
-                    else out.push(word);
-                });
-                return out.slice(0, 2);
-            };
-            let dy = y0 + 246;
-            if (lines.length) {
-                cv.text('DETAILS', textX + 16, dy, 13, G.withAlpha('#e8c8ce', 0.5),
-                    { font: 'bold', spacing: 1.8, literal: true });
-                dy += 20;
-            }
-            lines.forEach((line, i) => {
-                if (i) cv.fillRect(textX + 16, dy - 6, textW - 36, 1, G.withAlpha('#ffffff', 0.07));
-                const valueLines = wrap(line.text);
-                cv.fillRect(textX, dy + 4, 3, 28 + (valueLines.length - 1) * 21, G.withAlpha('#f32635', 0.8));
-                cv.text(fitText(cv, line.label, 13, textW - 40), textX + 16, dy + 14, 13, t.dim,
-                    { font: 'bold', spacing: 1.2, literal: true });
-                valueLines.forEach((v, j) => {
-                    cv.text(fitText(cv, v, 16, textW - 40), textX + 16, dy + 36 + j * 21, 16, '#ffffff', { literal: true });
-                });
-                dy += 48 + (valueLines.length - 1) * 21;
-            });
-        }
     }
 
 
