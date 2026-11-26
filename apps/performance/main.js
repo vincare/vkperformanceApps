@@ -1259,11 +1259,6 @@ mgu.run({
                 return null;
             }
             const now = Date.now();
-            // Only DSC OFF needs the car stopped — MDM (a button tap on the car) works rolling.
-            if (mode === 'off') {
-                if (!fresh(state.speed, now)) return dscStatus('DSC OFF LOCKED · WAIT FOR SPEED', true);
-                if (state.speed.value >= 0.5) return dscStatus('DSC OFF LOCKED · STOP FIRST', true);
-            }
             if (!currentDsc) return dscStatus(DSC_LABEL[mode] + ' · WAIT FOR STATUS', true);
             if (currentDsc === 'off') return dscStatus(mode === 'off' ? 'DSC OFF ALREADY ACTIVE' : 'ENABLE DSC FIRST', mode !== 'off');
             if (mode === 'mdm') {
