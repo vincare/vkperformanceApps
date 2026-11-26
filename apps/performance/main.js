@@ -203,8 +203,50 @@ mgu.run({
         }
 
         function saveDynoRuns() {
-            try { fs.writeFileSync(dynoFile, JSON.stringify({ runs: dynoRuns, baselineAt: dynoBaselineAt })); }
+            const runs = dynoRuns.filter((run) => !run.demo);
+            try { fs.writeFileSync(dynoFile, JSON.stringify({ runs,
+                baselineAt: dynoBaselineAt != null && runs.some((run) => run.at === dynoBaselineAt)
+                    ? dynoBaselineAt : null })); }
             catch (e) { log.warn('virtual dyno save: ' + shortError(e)); }
+        }
+
+        // Demo dyno pull: one synthetic run so SAVED RUNS has a sample in the
+        // emulator. In-memory only — saveDynoRuns() skips demo runs and
+        // turning demo off purges them again.
+        let demoDynoSeeded = false;
+        function seedDemoDynoRun() {
+            if (settings.get('demo') !== 'on') {
+                if (dynoRuns.some((run) => run.demo)) {
+                    dynoRuns = dynoRuns.filter((run) => !run.demo);
+                    if (dynoBaselineAt != null
+                        && !dynoRuns.some((run) => run.at === dynoBaselineAt)) dynoBaselineAt = null;
+                    if (dynoSelectedAt != null
+                        && !dynoRuns.some((run) => run.at === dynoSelectedAt)) dynoSelectedAt = null;
+                    demoDynoSeeded = false;
+                }
+                return;
+            }
+            if (dynoRuns.length || demoDynoSeeded) return;
+            demoDynoSeeded = true;
+            const curve = [];
+            for (let rpm = 1500; rpm <= 7000; rpm += 100) {
+                const tq = rpm < 1900 ? 300 + (rpm - 1500) * 0.55
+                    : rpm < 5200 ? 520 - (rpm - 1900) * 0.004
+                    : 507 - (rpm - 5200) * 0.075;
+                const powerW = Math.max(0, tq) * rpm * Math.PI / 30;
+                curve.push({ rpm, powerW: Math.round(powerW), torqueNm: Math.round(Math.max(0, tq)),
+                    ecuTorqueNm: Math.round(Math.max(0, tq) * 1.02) });
+            }
+            const peakP = curve.reduce((best, p) => p.powerW > best.powerW ? p : best, curve[0]);
+            const peakT = curve.reduce((best, p) => p.torqueNm > best.torqueNm ? p : best, curve[0]);
+            dynoRuns = [{
+                at: Date.now() - 5400000, demo: true, curve,
+                peakP: peakP.powerW, peakPrpm: peakP.rpm,
+                peakT: peakT.torqueNm, peakTrpm: peakT.rpm,
+                weight: 1725, loss: 18, body: 'g20', v0: 40, v1: 182,
+            }];
+            if (dynoSelectedAt == null) dynoSelectedAt = dynoRuns[0].at;
+            dynoDisplayCleared = false;
         }
 
         function displayedDynoRun() {
@@ -249,6 +291,7 @@ mgu.run({
             dynoSelectedAt = null;
             dynoRecorder.reset();
             lastDynoGate = null;
+            demoDynoSeeded = false;
             saveDynoRuns();
             updateDynoActionLabel();
             queueRender();
@@ -2539,6 +2582,7 @@ mgu.run({
             } else if (page === 3) {
                 const now = Date.now();
                 const recording = dynoRecorder.snapshot(now);
+                seedDemoDynoRun();
                 DynoUi.draw(cv, G, t, {
                     view: dynoView, runs: dynoRuns, selectedAt: dynoSelectedAt,
                     baselineAt: dynoBaselineAt, cleared: dynoDisplayCleared,
