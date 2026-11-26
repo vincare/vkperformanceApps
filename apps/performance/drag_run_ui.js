@@ -493,7 +493,7 @@ function drawRuns(cv, G, t, s, actions) {
         const isBest = best && best.at === run.at;
         if (sel) {
             const mile = sec.key === 'qm' || sec.key === 'em';
-            const sx = mile ? 290 : 370, sw = mile ? 752 : 592;
+            const sx = mile ? 330 : 370, sw = mile ? 704 : 592;
             Sheet.para(cv, sx, ry - 30, sw, ry + 34, 20, G.withAlpha('#ffffff', 0.1));
             Sheet.para(cv, sx, ry - 30, 6, ry + 34, 20, '#ff243b');
         }
