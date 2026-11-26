@@ -354,21 +354,7 @@ function drawSheet(cv, G, t, s, car, actions) {
     const ready = s.timerState === 'ready';
     if (ready) {
         const btnY = setupY + 37, bx = xAt(ribX + 12, btnY);
-        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 160);
-        const bw = 198, bh = 34;
-        Sheet.para(cv, bx, btnY, bw, btnY + bh, 10,
-            G.withAlpha('#2ee06f', 0.10 + 0.12 * pulse));
-        cv.line(bx + 1, btnY, bx + bw - 1, btnY, 2,
-            G.withAlpha('#2ee06f', 0.35 + 0.55 * pulse));
-        cv.line(bx + bw - 1, btnY + 1, bx + bw - 9, btnY + bh - 1, 2,
-            G.withAlpha('#2ee06f', 0.28 + 0.42 * pulse));
-        cv.line(bx - 9, btnY + bh - 1, bx - 1, btnY + 1, 2,
-            G.withAlpha('#2ee06f', 0.28 + 0.42 * pulse));
-        cv.line(bx + bw - 11, btnY + bh, bx - 9, btnY + bh, 2,
-            G.withAlpha('#2ee06f', 0.2 + 0.3 * pulse));
-        cv.circle(bx + 18, btnY + bh / 2, 3.6,
-            Math.floor(Date.now() / 300) % 2 ? '#2ee06f' : G.withAlpha('#2ee06f', 0.3));
-        cv.text('READY TO LAUNCH', bx + bw / 2 + 6, btnY + bh / 2 + 6, 16, '#2ee06f',
+        cv.text('READY TO LAUNCH', bx + 99, btnY + 23, 16, '#2ee06f',
             { align: 'center', font: 'bold', spacing: 1.2, literal: true });
     }
 }
