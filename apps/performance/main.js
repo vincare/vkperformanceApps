@@ -2934,7 +2934,10 @@ mgu.run({
                 carDataView = 'menu';
             }
             // No back arrow on the top-level ENGINE DATA page; everywhere else it steps back.
-            if (ctx.display) ctx.display.customBackBtn = page !== 0;
+            if (ctx.display) {
+                ctx.display.customBackBtn = page !== 0;
+                ctx.display.hideBackBtn = page === 0;
+            }
             updateDynoActionLabel();
             queueRender();
             return render();
@@ -2984,6 +2987,7 @@ mgu.run({
         });
         if (ctx.display) {
             ctx.display.customBackBtn = page !== 0;
+            ctx.display.hideBackBtn = page === 0;
             ctx.display.onBack = () => {
                 // Step back one subpage level; on a top-level tab, return false so the app closes.
                 if (page === 1 && engineConfigView !== 'sections') {

@@ -496,10 +496,10 @@ class Display {
         if (this.own()) {
             const pl = this.place, sx = x * pl.scale + pl.ox, sy = y * pl.scale + pl.oy;
             const bar = sy >= pl.h - this.barH() ? this.buttons().find((b) => sx >= b.x - this.barOff - pl.x && sx < b.x - this.barOff - pl.x + b.w) : null;
-            const backBtn = !bar && this.customBackBtn && sx >= 0 && sx < 140 && sy >= this.headH() && sy < HMI.colEnd - pl.y;
+            const backBtn = !bar && (this.customBackBtn || this.hideBackBtn) && sx >= 0 && sx < 140 && sy >= this.headH() && sy < HMI.colEnd - pl.y;
             if (backBtn) {
                 if (phase === 1) this.ownDown = 'backBtn';
-                else if (phase === 3 && this.ownDown === 'backBtn') { this.ownDown = null; this._back(); }
+                else if (phase === 3 && this.ownDown === 'backBtn') { this.ownDown = null; if (this.customBackBtn) this._back(); }
                 return;
             }
             // the header's tabs (Settings among them) work over a sheet too
@@ -579,7 +579,7 @@ class Display {
             const rects = [{ x: hx, y: 0, w: he - hx, h: this.headH() }, { x: hx, y: this.headH(), w: W - hx, h: pl.h - this.headH() }];
             // the back column (the claim must cover _touch's whole backBtn hit area, sx<140, not just the HMI's column —
             // a tap on the unclaimed strip hides the app (CLOSED) instead of stepping back)
-            if (this.customBackBtn && hx > 0) rects.push({ x: 0, y: this.headH(), w: Math.max(hx, Math.min(140, W)), h: HMI.colEnd - pl.y - this.headH() });
+            if ((this.customBackBtn || this.hideBackBtn) && hx > 0) rects.push({ x: 0, y: this.headH(), w: Math.max(hx, Math.min(140, W)), h: HMI.colEnd - pl.y - this.headH() });
             this.gpu.claim(rects.map(logical));
             return;
         }
@@ -954,6 +954,10 @@ class Display {
                 const cx = bx + bw / 2 + 3, cy = by0 + bh / 2;
                 c.line(cx + 6, cy - 14, cx - 8, cy, 4.2, '#ffffff');
                 c.line(cx - 8, cy, cx + 6, cy + 14, 4.2, '#ffffff');
+            } else if (this.hideBackBtn) {
+                // no back button at all: keep the home cell see-through, black out the column below it
+                c.clip(0, 0, hx, FULL.headH).clear(0).noclip();
+                c.fillRect(0, FULL.headH, hx, HMI.colEnd - pl.y - FULL.headH, '#000000');
             } else {
                 c.clip(0, 0, hx, HMI.colEnd - pl.y).clear(0).noclip();
             }
