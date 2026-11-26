@@ -72,8 +72,10 @@ function headUnit(stage, o) {
     settings.onChange = settings.onChange || (() => {});
     display = hu.display = new Display(ui, log, spec, settings, themeFn);
     if (live) ui.display = display;
-    else {
-        // every frame goes to the stream, also unchanged ones (frames=<n> must stay in step with time)
+    // Every frame goes to the stream, also unchanged ones: the page's tick that paces
+    // the app's loop only follows a received frame, so display.js's 1 s dedupe would
+    // stall a native-renderer session at ~1 fps (preview.js: frames=<n> stays in step).
+    {
         const send = display._send.bind(display);
         display._send = (n, x, s) => send(n, x, s, true);
     }
