@@ -99,7 +99,7 @@ function tempGauge(cv, G, cx, cy, r, val, key, label, maxC) {
 /** The 20-minute temperature trend: three lines, legend with live readings, faint guides. */
 function trendChart(cv, G, x, y, w, h, trend, temps) {
     // legend spread across the row: OIL left, COOL centre, GBX right
-    const legend = [['OIL', RED, temps.oil], ['COOL', COLD, temps.coolant], ['GBX', '#b98cff', temps.gearbox]];
+    const legend = [['OT', RED, temps.oil], ['CT', COLD, temps.coolant], ['GO', '#b98cff', temps.gearbox]];
     legend.forEach((l, i) => {
         const v = l[2];
         const txt = l[0] + ' ' + (typeof v === 'number' && isFinite(v) ? Math.round(v) + '°' : '—');
