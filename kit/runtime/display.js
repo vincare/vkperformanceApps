@@ -532,10 +532,20 @@ class Display {
                 const was = this.ownDown;
                 this.ownDown = null;
                 if (this.dragging) { this.dragging = false; if (this.sheet && this.sheet.release) this.sheet.release(); return; }
-                if (bar && was === key) { this._click(bar.id); return; }
+                // a tap whose down was never claimed (claim swap or a transient gate) still counts:
+                // fire whatever the finger lifted on instead of dropping the gesture. A recorded
+                // down elsewhere keeps the usual slide-off cancel.
+                if (!was && tab) { this._openTab(tab.i); return; }
+                if (!was && tgt) {
+                    this.pressed = key; this.pressedT = Date.now(); this._repaint();
+                    setTimeout(() => this._repaint(), 320);
+                    try { Promise.resolve(tgt.run()).catch((e) => this.log.error('target', e)); } catch (e) { this.log.error('target', e); }
+                    return;
+                }
+                if (bar && (was === key || !was)) { this._click(bar.id); return; }
                 if (this.sheet) {
                     const i = (this.sheetTargets || []).findIndex(inside);
-                    if (i >= 0 && was === key) this._sheetResult(() => this.sheetTargets[i].act());
+                    if (i >= 0 && (was === key || !was)) this._sheetResult(() => this.sheetTargets[i].act());
                     return;
                 }
                 if (was && was.indexOf('bar:') === 0) return;
@@ -550,7 +560,8 @@ class Display {
         else if (phase === 3) {
             const i = this.tabDown;
             this.tabDown = -1;
-            if (at && at.i === i && this.onTab) Promise.resolve().then(() => this.onTab(i)).catch((e) => this.log.error('tab', e));
+            // i < 0: the down was never seen — the lift still counts as a tap on the tab under it
+            if (at && (at.i === i || i < 0) && this.onTab) Promise.resolve().then(() => this.onTab(at.i)).catch((e) => this.log.error('tab', e));
         }
     }
 
