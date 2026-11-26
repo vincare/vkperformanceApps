@@ -162,7 +162,7 @@ function draw(cv, G, t, s, actions) {
     G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 4, [
         s.demo && { text: 'DEMO · NOT VEHICLE DATA', color: 'crit' },
     ]);
-    G.sectionRule(cv, t, 24, (G.TOP || 44) - 5, W - 48, t.stripes || RED);
+    G.sectionRule(cv, t, 24, (G.TOP || 44) - 10, W - 48, t.stripes || RED);
 
     cv.fillRect(0, y0, W, h, t.bg);
     Sheet.drawHexMesh(cv, G, y0, y1, false);
