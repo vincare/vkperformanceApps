@@ -37,7 +37,8 @@
  * keeps the upstream dialect. Should the renderer's foreground gate not have the app in front
  * while its screen shows, the app draws in the HMI's own image meanwhile (blocked).
  */
-const { Recorder, play } = require('./record');
+const { Recorder, play, setImage } = require('./record');
+const fonts = require('./fonts');
 const { Canvas } = require('./canvas');
 const { RenderClient } = require('./renderd');
 const G = require('./gauges');
@@ -968,17 +969,15 @@ class Display {
                 c.line(cx - 8, cy, cx + 6, cy + 14, 4.2, '#ffffff');
             } else if (this.hideBackBtn) {
                 // no back button at all: keep the home cell see-through, black out the column below it;
-                // the app's name runs down the blank column letter by letter (the canvas has no rotation)
+                // the app's name runs down it sideways (a rasterised, turned image: the canvas can't rotate)
                 c.clip(0, 0, hx, FULL.headH).clear(0).noclip();
                 c.fillRect(0, FULL.headH, hx, HMI.colEnd - pl.y - FULL.headH, '#000000');
-                const vname = String(this.spec && this.spec.title || '').toUpperCase();
-                const colTop = FULL.headH, colBot = HMI.colEnd - pl.y;
-                const step = Math.min(38, (colBot - colTop - 20) / Math.max(1, vname.length));
-                let vy = colTop + (colBot - colTop - step * (vname.length - 1)) / 2;
-                for (let li = 0; li < vname.length; li++) {
-                    c.text(vname[li], hx / 2, vy + 18, 26, '#f32635',
-                        { align: 'center', font: 'bold', literal: true });
-                    vy += step;
+                const img = this._vname(String(this.spec && this.spec.title || '').toUpperCase());
+                if (img) {
+                    const colTop = FULL.headH, colBot = HMI.colEnd - pl.y;
+                    const ih = Math.min(colBot - colTop - 16, img.h * (hx - 20) / img.w);
+                    const iw = img.w * ih / img.h;
+                    c.image(img.id, hx / 2 - iw / 2, colTop + (colBot - colTop - ih) / 2, iw, ih);
                 }
             } else {
                 c.clip(0, 0, hx, HMI.colEnd - pl.y).clear(0).noclip();
@@ -1054,6 +1053,53 @@ class Display {
             this._btns.push({ id: 'BTN_SETTINGS', label: '', x: this.barOff + this.place.x + Math.round(this.place.w / 2 - gw / 2), w: gw });
         }
         return this._btns;
+    }
+
+    /**
+     * The app's name as a turned pixel image for the covered back column: rasterised once from the
+     * 'bold' atlas (each glyph's alpha tinted red), then turned 90° counter-clockwise so it reads
+     * bottom to top. { id, w, h } or null while the font isn't baked.
+     */
+    _vname(str) {
+        if (this._vnameImg && this._vnameImg.str === str) return this._vnameImg;
+        const size = 30, f = fonts.get('bold', size, str);
+        if (!f) return null;
+        const scale = size / f.size;
+        const w = Math.ceil(fonts.measure(f, str) * scale), h = Math.ceil((f.ascent + f.descent) * scale);
+        const src = Buffer.alloc(w * h * 4);
+        let pen = 0;
+        for (const ch of str) {
+            const g = f.glyphs[ch.codePointAt(0)] || f.glyphs[63];
+            if (!g) { pen += 8; continue; }
+            const [gx, gy, gw, gh, ox, oy, adv] = g;
+            const dw = Math.round(gw * scale), dh = Math.round(gh * scale);
+            const dx = Math.round(pen + ox * scale), dy = Math.round(f.ascent * scale + oy * scale);
+            for (let py = 0; py < dh; py++) {
+                const ry = Math.min(gh - 1, Math.max(0, Math.round(py / scale - 0.5)));
+                for (let px = 0; px < dw; px++) {
+                    const rx = Math.min(gw - 1, Math.max(0, Math.round(px / scale - 0.5)));
+                    const v = f.alpha[(gy + ry) * f.atlasW + gx + rx];
+                    const X = dx + px, Y = dy + py;
+                    if (v && X >= 0 && X < w && Y >= 0 && Y < h) {
+                        const o = (Y * w + X) * 4;
+                        if (v > src[o + 3]) { src[o] = 246; src[o + 1] = 38; src[o + 2] = 53; src[o + 3] = v; }
+                    }
+                }
+            }
+            pen += adv * scale;
+        }
+        // turn 90° counter-clockwise (reads bottom to top): dst(x', y') = src(w - 1 - y', x')
+        const rw = h, rh = w, dst = Buffer.alloc(w * h * 4);
+        for (let y = 0; y < rh; y++) {
+            for (let x = 0; x < rw; x++) {
+                const sx = w - 1 - y, sy = x;
+                const so = (sy * w + sx) * 4, d = (y * rw + x) * 4;
+                dst[d] = src[so]; dst[d + 1] = src[so + 1]; dst[d + 2] = src[so + 2]; dst[d + 3] = src[so + 3];
+            }
+        }
+        setImage(0x5650, rw, rh, dst);
+        this._vnameImg = { str, id: 0x5650, w: rw, h: rh };
+        return this._vnameImg;
     }
 
     onTick(fn) { this.tickHandlers.push(fn); }
