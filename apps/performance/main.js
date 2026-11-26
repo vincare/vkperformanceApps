@@ -37,7 +37,7 @@ const FRESH_MS = 4500;
 const DYNO_FRESH_MS = 500;
 // Keep non-dashboard pages light; the main Engine Data page gets a smoother 20 Hz update.
 const RENDER_MS = 100;
-const ENGINE_DATA_FPS = 20;
+const ENGINE_DATA_FPS = 40;
 const ENGINE_DATA_RENDER_MS = 1000 / ENGINE_DATA_FPS;
 const DME_POLL_MS = 1200;
 const CD_STALE = 120000;
@@ -3126,7 +3126,7 @@ mgu.run({
         diagLog('startup', { version: ctx.spec && ctx.spec.version || 'unknown', engineMonitorReadOnly: true,
             exhaustControlDisarmed: !valveController.armedSetting,
             rawDiagnostics: diagnostics(), dmeCandidates: settings.get('readDmeCandidates') === true });
-        // Engine Data gets 20 Hz; the exhaust/burbles views animate at 50 fps on the GPU
+        // Engine Data gets 40 Hz; the exhaust/burbles views animate at 50 fps on the GPU
         // renderer and up to 20 on software, everything else keeps its 10 Hz renderer cap.
         if (ctx.loop) mainLoop = ctx.loop('MAIN', 20, render, {
             gpuFps: () => page === 0 ? ENGINE_DATA_FPS
