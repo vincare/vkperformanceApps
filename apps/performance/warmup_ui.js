@@ -36,8 +36,9 @@ function fitText(cv, s, size, w, opts) {
 }
 
 /** A 270° temperature gauge: one fill colour per state (blue cold / red warm / bright red hot),
- *  a thin green rim notch at the warm point, red zone past ~118 °C. */
-function tempGauge(cv, G, cx, cy, r, val, warm, label) {
+ *  a thin green rim notch at the warm point, red zone past ~118 °C. maxC: session high, shown
+ *  small under the live value. */
+function tempGauge(cv, G, cx, cy, r, val, warm, label, maxC) {
     const A0 = -135, A1 = 135, MIN = 0, MAX = 150, thick = 10;
     const ang = (c) => A0 + Math.max(0, Math.min(1, (c - MIN) / (MAX - MIN))) * (A1 - A0);
     cv.arc(cx, cy, r - thick, r, A0, A1, G.withAlpha('#ffffff', 0.08), { round: true });
@@ -56,6 +57,10 @@ function tempGauge(cv, G, cx, cy, r, val, warm, label) {
     cv.text(live ? Math.round(val) + '°' : '—', cx, cy + 10, 30,
         live ? (hot ? '#ff4a4a' : '#ffffff') : G.withAlpha('#8c94a0', 0.5),
         { align: 'center', font: 'num' });
+    if (typeof maxC === 'number' && isFinite(maxC)) {
+        cv.text('(' + Math.round(maxC) + '° MAX)', cx, cy + 27, 11, G.withAlpha('#e8c8ce', 0.55),
+            { align: 'center', font: 'bold', spacing: 0.6, literal: true });
+    }
     cv.text(label, cx, cy + r + 6, 15, '#ffffff',
         { align: 'center', font: 'bold', spacing: 1.4, literal: true });
 }
@@ -186,8 +191,17 @@ function draw(cv, G, t, s, actions) {
 
     const gaugeR = 58;
     const gxs = [ix + iw / 6, ix + iw / 2, ix + iw * 5 / 6];
+    // Session high per fluid from the trend history (oil idx1, coolant idx2, gearbox idx5)
+    const trend = s.trend || [];
+    const maxOf = (idx) => trend.reduce((m, p) => {
+        const v = p[idx];
+        return typeof v === 'number' && isFinite(v) && v > m ? v : m;
+    }, null);
+    const maxTemp = { oil: maxOf(1), coolant: maxOf(2), gearbox: maxOf(5) };
     BAR_KEYS.forEach((b, i) => {
-        tempGauge(cv, G, gxs[i], gcy, gaugeR, temps[b.key], warm[b.key] || 90, b.label);
+        const mx = maxTemp[b.key];
+        tempGauge(cv, G, gxs[i], gcy, gaugeR, temps[b.key], warm[b.key] || 90, b.label,
+            typeof mx === 'number' ? Math.max(mx, temps[b.key] || 0) : temps[b.key]);
     });
 
     const ty = gcy + gaugeR + 36;
