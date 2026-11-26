@@ -937,19 +937,9 @@ class Display {
         const flash = this.pressed && Date.now() - this.pressedT < 300 ? btns.findIndex((b) => b.id === this.pressed) : -1;
         const focus = btns.findIndex((b) => b.id === ((this.sheet && this.sheet.settings) ? 'BTN_SETTINGS' : this.focused));
         if (btns.length && this.barH()) G.menuBar(c, t, 0, by, W, FULL.barH, btns, focus, 'slim', flash);
-        // the credit, leaned like italic: the renderer can't skew, so thin horizontal
-        // strips of the same text are each drawn a touch further right toward the top
         if (this.barH()) {
-            const str = 'Created By VKDigitals.org', cs = 20, cbase = by + FULL.barH / 2 + 7;
-            const ctw = c.textWidth(str, cs, { font: 'light', spacing: 1 });
-            const lean = Math.round(cs * 0.26), ctop = Math.round(cbase - cs * 1.15);
-            const cbot = Math.round(cbase + cs * 0.15);
-            for (let sy = ctop; sy < cbot; sy += 2) {
-                const dx = Math.round(lean * (cbot - sy) / (cbot - ctop));
-                c.clip(W - 16 - ctw - lean - 2, sy, ctw + lean + 4, 2);
-                c.text(str, W - 16 - ctw + dx, cbase, cs, '#f32635', { font: 'light', spacing: 1, literal: true });
-            }
-            c.noclip();
+            const img = this._credit('Created By VKDigitals.org');
+            if (img) c.image(img.id, W - 16 - img.w, by + Math.round((FULL.barH - img.h) / 2), img.w, img.h);
         }
         // the HMI's status icons and its back arrow column (home button, back arrow) show through;
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
@@ -1102,6 +1092,46 @@ class Display {
         setImage(0x5650, rw, rh, dst);
         this._vnameImg = { str, id: 0x5650, w: rw, h: rh };
         return this._vnameImg;
+    }
+
+    /**
+     * The bar's credit as a leaned pixel image: rasterised once from the 'light' atlas, each row
+     * shifted right a touch more toward the top — a real italic-style shear (the canvas can't
+     * skew), so it stays sharp instead of clipped strips.
+     */
+    _credit(str) {
+        if (this._creditImg && this._creditImg.str === str) return this._creditImg;
+        const size = 20, f = fonts.get('light', size, str);
+        if (!f) return null;
+        const scale = size / f.size;
+        const w = Math.ceil(fonts.measure(f, str) * scale), h = Math.ceil((f.ascent + f.descent) * scale);
+        const lean = Math.round(h * 0.24), rw = w + lean;
+        const src = Buffer.alloc(rw * h * 4);
+        let pen = 0;
+        for (const ch of str) {
+            const g = f.glyphs[ch.codePointAt(0)] || f.glyphs[63];
+            if (!g) { pen += 8; continue; }
+            const [gx, gy, gw, gh, ox, oy, adv] = g;
+            const dw = Math.round(gw * scale), dh = Math.round(gh * scale);
+            const dx = Math.round(pen + ox * scale), dy = Math.round(f.ascent * scale + oy * scale);
+            for (let py = 0; py < dh; py++) {
+                const ry = Math.min(gh - 1, Math.max(0, Math.round(py / scale - 0.5)));
+                const shear = Math.round(lean * (1 - (dy + py) / h));
+                for (let px = 0; px < dw; px++) {
+                    const rx = Math.min(gw - 1, Math.max(0, Math.round(px / scale - 0.5)));
+                    const v = f.alpha[(gy + ry) * f.atlasW + gx + rx];
+                    const X = dx + px + shear, Y = dy + py;
+                    if (v && X >= 0 && X < rw && Y >= 0 && Y < h) {
+                        const o = (Y * rw + X) * 4;
+                        if (v > src[o + 3]) { src[o] = 246; src[o + 1] = 38; src[o + 2] = 53; src[o + 3] = v; }
+                    }
+                }
+            }
+            pen += adv * scale;
+        }
+        setImage(0x5651, rw, h, src);
+        this._creditImg = { str, id: 0x5651, w: rw, h };
+        return this._creditImg;
     }
 
     onTick(fn) { this.tickHandlers.push(fn); }
