@@ -141,5 +141,10 @@ const CHASSIS_NO_ACTION = Object.freeze({
 function dscStruct(dscValue) {
     return Object.assign({}, CHASSIS_NO_ACTION, { operationModeTractionDSC: dscValue });
 }
+/** chassisControl carrying the TPMS reset (RPA init) — iDrive's "Reset tyre pressure".
+ * The car stores the current pressures as the new targets while driving. */
+function tpmsResetStruct() {
+    return Object.assign({}, CHASSIS_NO_ACTION, { operationTyrePressureControl: 'RDC_S_RPA_SETZEN' });
+}
 
-module.exports = { detection, calibration, tire, frontAxle, rearAxle, sensorTire, tyreState, lastValues, dsc, dscStruct };
+module.exports = { detection, calibration, tire, frontAxle, rearAxle, sensorTire, tyreState, lastValues, dsc, dscStruct, tpmsResetStruct };

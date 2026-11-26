@@ -1279,6 +1279,44 @@ mgu.run({
             dscOff() { return dscRequest('off'); },
         };
 
+        // TPMS reset (RPA init): the same chassisControl path as DSC, double-tap to arm.
+        // After the write the car learns the current pressures as the new targets while driving.
+        const tpmsReset = { busy: false, armedUntil: 0, status: '', warn: false };
+        function tpmsResetStatus(text, warn) {
+            tpmsReset.status = text; tpmsReset.warn = !!warn;
+            queueRender();
+        }
+        function tpmsResetSend() {
+            let pending;
+            try { pending = ctx.signals.set(tpmsProxy, 'chassisControl', TyreData.tpmsResetStruct()); }
+            catch (e) { pending = Promise.reject(e); }
+            Promise.resolve(pending).then(() => {
+                tpmsReset.busy = false;
+                log.info('tpms reset request accepted via RDC_S_RPA_SETZEN');
+                tpmsResetStatus('RESET SENT · LEARNS WHILE DRIVING');
+            }, (e) => {
+                tpmsReset.busy = false;
+                log.warn('tpms reset: ' + shortError(e));
+                tpmsResetStatus('RESET REFUSED BY CAR', true);
+            });
+        }
+        function tpmsResetRequest() {
+            if (settings.get('demo') === 'on') return tpmsResetStatus('RESET TYRES PRESSURE · DEMO MODE', false);
+            if (tpmsReset.busy) { tpmsResetStatus('COMMAND IN PROGRESS', true); return null; }
+            const now = Date.now();
+            if (now > tpmsReset.armedUntil) {
+                tpmsReset.armedUntil = now + 4000;
+                tpmsResetStatus('PRESS AGAIN TO CONFIRM RESET', true);
+                return null;
+            }
+            tpmsReset.armedUntil = 0;
+            if (!tpmsProxy) { tpmsResetStatus('TPMS LINK UNAVAILABLE', true); return null; }
+            tpmsReset.busy = true;
+            tpmsResetStatus('SENDING TPMS RESET', false);
+            tpmsResetSend();
+            return null;
+        }
+
         // ENGINE DATA chip: cycles only between verified DSC ON/OFF requests.
         function dscGo(mode) {
             if (settings.get('demo') === 'on') return dscStatus(DSC_LABEL[mode] + ' · DEMO MODE', false);
@@ -2679,12 +2717,15 @@ mgu.run({
                 const tyresRowsView = carDataView === 'tyres' && tyrePage === 'more' ? 'tyresMore' : carDataView;
                 CarDataUi.draw(cv, G, t, {
                     view: carDataView, demo, rows: carDataRows(tyresRowsView, demo, s), tyrePage,
+                    tpmsResetArmed: Date.now() < tpmsReset.armedUntil,
+                    tpmsResetStatus: tpmsReset.status, tpmsResetWarn: tpmsReset.warn,
                     // Composite onto the slab's pure black, not theme.bg, so no grey frame shows.
                     side: carDataView === 'menu' ? null : selectedCarSideVisual({ bg: '#000000' }),
                 }, Object.assign({
                     back: () => { carDataView = 'menu'; tyrePage = 'main'; queueRender(); return render(); },
                     tyresMore: () => { tyrePage = 'more'; queueRender(); return render(); },
                     tyresMain: () => { tyrePage = 'main'; queueRender(); return render(); },
+                    tpmsReset: tpmsResetRequest,
                 }, sectionActions));
             } else if (page === 6) {
                 if (demo) {
