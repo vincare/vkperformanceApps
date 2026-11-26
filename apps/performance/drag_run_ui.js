@@ -265,8 +265,12 @@ function dragyGauge(cv, G, t, s, gx, gy, R, actions) {
         cv.text(s.elapsed.toFixed(2) + ' S', gx, gy + 72, 16, G.withAlpha('#ff8595', 0.9),
             { align: 'center', font: 'bold', spacing: 1, literal: true });
 
-    Sheet.drawChip(cv, G, gx - 59, gy + F + 16, 118, 'RESET',
-        { run: actions && actions.reset, key: 'performance_drag_gauge_reset' });
+    const cw = 104, ch = 42, cx0 = gx - cw / 2, cy0 = gy + F + 13;
+    Sheet.para(cv, cx0, cy0, cw, cy0 + ch, 12, G.withAlpha('#ffffff', 0.08));
+    cv.text('RESET', cx0 + cw / 2, cy0 + ch / 2 + 7, 15, '#ffffff',
+        { align: 'center', font: 'bold', spacing: 1.4, literal: true });
+    if (cv.own && actions && actions.reset)
+        cv.target(cx0 - 6, cy0 - 4, cw + 12, ch + 8, actions.reset, 'performance_drag_gauge_reset', 10);
 }
 
 // Live sheet: same shell as DYNO RUN — tag, chips, slanted stage with the trace,
@@ -296,8 +300,7 @@ function drawSheet(cv, G, t, s, car, actions) {
     cv.text('SPEEDOMETER', 316, y0 + 36, 15, t.dim, { font: 'bold', spacing: 1.4, literal: true });
     cv.roundRect(316, y0 + 56, 18, 5, 2, RED);
     cv.text(unitL, 341, y0 + 63, 12, t.dim, { font: 'bold', spacing: 0.5, literal: true });
-    dragyGauge(cv, G, t, s, 606, y0 + 230, 144, actions);
-    drawCar(cv, t, car, { x: 820, y: y0 + 14, w: 175, h: 88 });
+    dragyGauge(cv, G, t, s, 622, y0 + 230, 144, actions);
 
     // 3. Title tag and actions
     const tagX = 40, tagY = y0 + 24, tagW = Sheet.titleTagWidth(cv, 'DRAG RUN', 34, 196), tagH = 52, tagSlant = 15;
