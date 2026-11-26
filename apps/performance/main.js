@@ -2621,13 +2621,13 @@ mgu.run({
             // reach the bottom. The renderer otherwise vertically centres those pages, moving
             // their x=24, y=44 red-and-grey rule below Engine Data.
             G.pageBottom(cv);
+            const activeMode = modeName(drivingMode) || '';
+            const modeColor = /COMFORT/i.test(activeMode) ? '#55a9ff'
+                : /ECO/i.test(activeMode) ? '#3ddb7f'
+                : /ADAPTIVE/i.test(activeMode) ? '#b07cff'
+                : /^SPORT/i.test(activeMode) ? '#f32635' : activeMode ? 'dim' : null;
+            const modeBadge = activeMode.toUpperCase().replace(/\+/g, ' PLUS');
             if (page === 0) {
-                const activeMode = modeName(drivingMode) || '';
-                const modeColor = /COMFORT/i.test(activeMode) ? '#55a9ff'
-                    : /ECO/i.test(activeMode) ? '#3ddb7f'
-                    : /ADAPTIVE/i.test(activeMode) ? '#b07cff'
-                    : /^SPORT/i.test(activeMode) ? '#f32635' : activeMode ? 'dim' : null;
-                const modeBadge = activeMode.toUpperCase().replace(/\+/g, ' PLUS');
                 const vehicleDataReady = s.rpm !== null && s.speed !== null;
                 drawEngine(cv, t, s, modeColor);
                 const notice = valveActionNotice && Date.now() < valveActionNoticeUntil ? valveActionNotice : '';
@@ -2637,6 +2637,8 @@ mgu.run({
                     .concat(notice ? [{ text: notice, color: 'crit' }] : []));
             } else if (page === 1) {
                 const valveView = currentValveView();
+                valveView.modeBadge = modeBadge;
+                valveView.modeColor = modeColor;
                 valveView.dsc = {
                     state: tyreExtra.dsc ? tyreExtra.dsc.state : null,
                     busy: dscWrite.busy,
@@ -2646,6 +2648,7 @@ mgu.run({
                     selectedCarVisual({ bg: FlapUi.CAR_TILE_BG || t.bg }), Date.now(), engineConfigView, sectionActions);
             } else if (page === 2) {
                 RaceModesUi.draw(cv, G, t, {
+                    modeBadge, modeColor,
                     dyno() { dynoView = 'sheet'; dynoDisplayCleared = false; return setPage(3); },
                     drag() { dragView = 'live'; return setPage(4); },
                 });
@@ -2667,6 +2670,7 @@ mgu.run({
                     ecuTorque: settings.get('dynoEcuTorque') !== false,
                     graphMaxRpm: settings.get('dynoGraphMaxRpm') || 0,
                     flashAt: dynoFlashAt, flashKey: dynoFlashKey,
+                    modeBadge, modeColor,
                 }, selectedCarSideVisual({ bg: '#000000' }), {
                     toggleView: toggleDynoView, toggleBaseline: toggleDynoBaseline,
                     clear: clearDynoRuns, nextRun: nextDynoRun, select: selectDynoRun,
@@ -2700,6 +2704,7 @@ mgu.run({
                     slope: demoMode ? -0.52 + 0.06 * Math.sin(now / 3000)
                         : (slopeAt && now - slopeAt <= 2000 ? slopePct : null),
                     flashAt: dynoFlashAt, flashKey: dynoFlashKey,
+                    modeBadge, modeColor,
                 }, selectedCarSideVisual({ bg: '#000000' }), {
                     toggleView: toggleDragView, reset: resetDragTimer, clear: clearDragHistory,
                     select: selectDragRun, nextRun: nextDragRun, flash: dynoFlash,
@@ -2726,6 +2731,7 @@ mgu.run({
                     tpmsResetStatus: tpmsReset.status, tpmsResetWarn: tpmsReset.warn,
                     // Composite onto the slab's pure black, not theme.bg, so no grey frame shows.
                     side: carDataView === 'menu' ? null : selectedCarSideVisual({ bg: '#000000' }),
+                    modeBadge, modeColor,
                 }, Object.assign({
                     back: () => { carDataView = 'menu'; tyrePage = 'main'; queueRender(); return render(); },
                     tyresMore: () => { tyrePage = 'more'; queueRender(); return render(); },
@@ -2748,6 +2754,8 @@ mgu.run({
                 }
                 const wv = warmupView(demo, s);
                 wv.demo = demo;
+                wv.modeBadge = modeBadge;
+                wv.modeColor = modeColor;
                 WarmupUi.draw(cv, G, t, wv);
             }
             if (!demo && Date.now() < fuelReserveUntil) {

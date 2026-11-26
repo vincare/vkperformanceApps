@@ -46,7 +46,8 @@ function card(cv, G, t, x, y, w, h, title, subtitle, kind, onOpen) {
 
 function draw(cv, G, t, actions) {
     cv.clear(t.bg);
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 2);
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 2,
+        actions.modeBadge ? [{ text: actions.modeBadge, color: actions.modeColor }] : []);
     G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || '#f32635');
     // Same card geometry and badge size as ENGINE CONFIG's section picker (flap_ui drawSectionMenu).
     const y = (G.TOP || 44) + 30, h = 414, w = 760, gap = 32;

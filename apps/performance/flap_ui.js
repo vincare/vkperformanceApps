@@ -803,7 +803,8 @@ function drawActionButton(cv, G, t, x, y, w, h, label, run, opts) {
 
 function draw(cv, G, t, v, act, car, now, view, sectionActions) {
     cv.clear(t.bg);
-    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 1, []);
+    G.frame(cv, t, ['Engine Data', 'ENGINE CONFIG', 'RACE MODES', 'CAR DATA', 'WARMUP'], 1,
+        v.modeBadge ? [{ text: v.modeBadge, color: v.modeColor }] : []);
     G.sectionRule(cv, t, 24, G.TOP || 44, W - 48, t.stripes || RED);
     if (view === 'sections') drawSectionMenu(cv, G, t, car, sectionActions);
     else if (view === 'burbles') drawBurbles(cv, G, t, v, car, act, now);
