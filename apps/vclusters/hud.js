@@ -2201,10 +2201,17 @@ class HudApp {
             });
             c.uniform(ref, 'u_segMax', [0, 1, 2, 3].map((i) => (bars[i] && bars[i].max) || 1));
             c.uniform(ref, 'u_segSlant', [isNum(w.segSlant) ? w.segSlant : 9]);
+            const lvls = Array.isArray(w.levelbars) ? w.levelbars.slice(0, 2) : [];
+            [0, 1].forEach((i) => {
+                const b = lvls[i];
+                c.uniform(ref, 'u_lvl' + i, b ? [b.x - w.x, b.y - w.y, b.w, b.h] : [0, 0, 0, 0]);
+            });
+            c.uniform(ref, 'u_lvlHot', [0, 1].map((i) => isNum(lvls[i] && lvls[i].hot) ? lvls[i].hot : 0.85));
             c.uniform(ref, 'u_hole', this._hole(w));
             c.uniform(ref, 'u_holeR', [this._holeRadius(w)]);
             x.gauges = [['u_gaugeL', L], ['u_gaugeR', R]];
             x.bars = bars;
+            x.lvls = lvls;
         } else if (w.type === 'mtach') {
             const max = w.max || 8000, [redFrom, orange] = this._redMarks(max);
             const right = w.side === 'right';
@@ -2780,11 +2787,16 @@ class HudApp {
                 const s = x.bars[i], v = s && s.signal ? this._raw(s.signal) : null;
                 return s && isNum(v) ? Math.max(0, Math.min(s.max || 1, Math.round(v))) : 0;
             });
-            const key = vals.map((v) => v[2]).join('|') + '|' + lit.join('|');
+            const lv = [0, 1].map((i) => {
+                const b = (x.lvls || [])[i], v = b && b.signal ? this._raw(b.signal) : null;
+                return b && isNum(v) ? Math.round(Math.min(1, Math.max(0, (v - b.min) / (b.max - b.min))) * 200) / 200 : 0;
+            });
+            const key = vals.map((v) => v[2]).join('|') + '|' + lit.join('|') + '|' + lv.join('|');
             if (!force && key === x.last) return;
             x.last = key;
             vals.forEach(([u, G, v]) => x.c.uniform(x.ref, u, [G.cx || 0, G.cy || 0, G.r || 0, v]));
             x.c.uniform(x.ref, 'u_segLit', lit);
+            if (x.lvls && x.lvls.length) x.c.uniform(x.ref, 'u_lvlV', lv);
         } else if (w.type === 'mtach') {
             const rpm = this._raw('rpm'), sp = this._shift();
             const v = isNum(rpm) ? Math.min(1, Math.max(0, rpm / (w.max || 8000))) : 0;

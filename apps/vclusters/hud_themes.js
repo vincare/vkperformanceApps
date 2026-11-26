@@ -75,6 +75,7 @@ const THEMES = {
         bg: [0, 0, 0, 255], panel: [0, 0, 0, 255], line: [196, 202, 212, 255], head: [226, 228, 232, 255],
         ink: [12, 12, 14, 255], accent: [226, 36, 44, 255], well: [0, 0, 0, 255], redTrack: [90, 16, 20, 255],
         chrome: [182, 188, 198, 255], grey: [160, 166, 176, 255], grey2: [104, 110, 122, 255], faint: [96, 104, 118, 255],
+        tellG: [0, 210, 110, 255], tellA: [255, 150, 30, 255],
     },
     // Vector (layout vector.json, design/gen_vector.py): black with grey bracket lines, white numbers, coloured rings.
     vector: {

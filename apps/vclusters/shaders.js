@@ -466,6 +466,10 @@ uniform vec4 u_seg3;
 uniform vec4 u_segLit;    // the level per bar (1-based; 0 = none lit)
 uniform vec4 u_segMax;    // segments per bar
 uniform float u_segSlant; // px each segment leans
+uniform vec4 u_lvl0;      // level bars (coolant / boost on the M8's left card): x, y, w, h (w 0 = none)
+uniform vec4 u_lvl1;
+uniform vec2 u_lvlV;      // fill 0..1 per bar
+uniform vec2 u_lvlHot;    // red-zone start 0..1 per bar
 uniform vec4 u_hole;      // the map window x, y, w, h px, already inset (w 0 = none): cut see-through over the map
 uniform float u_holeR;    // its corner radius px
 
@@ -555,6 +559,23 @@ vec4 segbar(vec2 p, vec4 b, vec2 s, vec4 c) {
     vec3 col = on ? u_red * mix(0.85, 1.0, fx / (slot - gap)) : vec3(0.5, 0.53, 0.58);
     return over(vec4(col, (on ? 1.0 : 0.8) * a), c);
 }
+// a level bar as the M8 draws the coolant / boost gauges on its left card: a thin rounded track, the part
+// up to the value in bright chrome, the part past the "hot" fraction in red; the ends lean back like the
+// setup bars' slant
+vec4 lvlbar(vec2 p, vec4 b, float v, float hot, vec4 c) {
+    if (b.w <= 0.0 || p.y < b.y - 1.0 || p.y > b.y + b.w + 1.0 || p.x < b.x - 8.0 || p.x > b.x + b.z + 2.0) return c;
+    float fy = (p.y - b.y) / b.w;
+    float x = p.x - b.x - 5.0 * (1.0 - fy);         // the same backwards lean as the setup bars
+    float a = clamp(x + 0.5, 0.0, 1.0) * clamp(b.z - x + 0.5, 0.0, 1.0) *
+        clamp(p.y - b.y + 0.5, 0.0, 1.0) * clamp(b.y + b.w - p.y + 0.5, 0.0, 1.0);
+    if (a <= 0.0) return c;
+    float fx = clamp(x / b.z, 0.0, 1.0);
+    vec3 col = vec3(0.5, 0.53, 0.58);
+    float al = 0.8;
+    if (fx >= hot) { col = u_red; al = 0.9; }
+    if (fx <= v && fx < hot) { col = vec3(0.93, 0.94, 0.97); al = 1.0; }
+    return over(vec4(col, a * al), c);
+}
 
 // a side dial as the M8 draws it, traced off the photo: not a round gauge but a tall thin bracket cut from big
 // circles. The glass lies inside a circle of radius 120 round the anchor g.xy and outside one of radius 180 round
@@ -634,6 +655,10 @@ void main() {
     c = segbar(p, u_seg2, vec2(u_segLit.z, u_segMax.z), c);
     c = segbar(p, u_seg3, vec2(u_segLit.w, u_segMax.w), c);
 
+    // the M8's left-card gauges: coolant / boost level bars
+    c = lvlbar(p, u_lvl0, u_lvlV.x, u_lvlHot.x, c);
+    c = lvlbar(p, u_lvl1, u_lvlV.y, u_lvlHot.y, c);
+
     // the map window between the rev blades ("Show Waze map inside the theme"): a rounded see-through hole
     if (u_hole.z > 0.0) {
         vec2 hs = u_hole.zw * 0.5;
@@ -705,7 +730,7 @@ void main() {
         float inBand = clamp(d + 0.5, 0.0, 1.0) * clamp(w - d + 0.5, 0.0, 1.0);
         float across = clamp(d / w, 0.0, 1.0);
         float yn = y0 - u_value * (y0 - y8);
-        vec4 g = vec4(0.62, 0.67, 0.74, mix(0.42, 0.06, across));          // empty glass (bright at the outer edge, as the M8's)
+        vec4 g = vec4(0.66, 0.71, 0.78, mix(0.55, 0.16, across));          // empty glass (bright at the outer edge, as the M8's)
         if (p.y > yn) g = u_shiftNow > 0.5 ? vec4(u_red * 0.8, 0.6) : vec4(mix(vec3(0.86, 0.88, 0.92), vec3(0.6, 0.63, 0.68), across), mix(0.34, 0.22, across));
         // the foot: the bottom 20 px as an outlined grey block, as the M8 draws it
         if (p.y > y0 - 20.0) g = over(vec4(0.7, 0.72, 0.78, 0.22), g);

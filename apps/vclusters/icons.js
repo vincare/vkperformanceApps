@@ -38,6 +38,31 @@ const ICONS = {
         return d;
     },
     oilcan: (x, y) => Math.min(seg(x, y, 0.2, 0.62, 0.6, 0.62) - 0.12, seg(x, y, 0.6, 0.58, 0.9, 0.44) - 0.04, disc(x, y, 0.92, 0.66, 0.05), seg(x, y, 0.3, 0.46, 0.3, 0.34) - 0.035, seg(x, y, 0.22, 0.34, 0.38, 0.34) - 0.04),
+    turbo: (x, y) => Math.min(arc(x, y, 0.42, 0.44, 0.26, -1.9 * Math.PI, 0.15 * Math.PI) - 0.055, disc(x, y, 0.42, 0.44, 0.1), seg(x, y, 0.42, 0.74, 0.42, 0.9) - 0.05, seg(x, y, 0.42, 0.88, 0.8, 0.88) - 0.05, seg(x, y, 0.8, 0.76, 0.8, 0.88) - 0.05),
+    beam: (x, y) => {
+        let d = Math.min(seg(x, y, 0.12, 0.34, 0.12, 0.66) - 0.05, arc(x, y, 0.12, 0.5, 0.16, -0.5 * Math.PI, 0.5 * Math.PI) - 0.05, seg(x, y, 0.12, 0.34, 0.34, 0.34) - 0.05, seg(x, y, 0.12, 0.66, 0.34, 0.66) - 0.05);
+        for (let i = 0; i < 3; i++) { const yy = 0.36 + i * 0.14; d = Math.min(d, seg(x, y, 0.48, yy, 0.88, yy - 0.1) - 0.04); }
+        return d;
+    },
+    dsc: (x, y) => {
+        let car = Math.min(seg(x, y, 0.14, 0.5, 0.3, 0.3) - 0.045, seg(x, y, 0.3, 0.3, 0.62, 0.3) - 0.045, seg(x, y, 0.62, 0.3, 0.78, 0.5) - 0.045, seg(x, y, 0.1, 0.5, 0.9, 0.5) - 0.045, ring(x, y, 0.3, 0.56, 0.07) - 0.04, ring(x, y, 0.7, 0.56, 0.07) - 0.04);
+        let s1 = Math.min(seg(x, y, 0.24, 0.74, 0.38, 0.74) - 0.035, seg(x, y, 0.38, 0.74, 0.44, 0.68) - 0.035, seg(x, y, 0.6, 0.74, 0.74, 0.74) - 0.035, seg(x, y, 0.74, 0.74, 0.8, 0.68) - 0.035);
+        let s2 = Math.min(seg(x, y, 0.2, 0.84, 0.34, 0.84) - 0.035, seg(x, y, 0.34, 0.84, 0.4, 0.78) - 0.035, seg(x, y, 0.56, 0.84, 0.7, 0.84) - 0.035, seg(x, y, 0.7, 0.84, 0.76, 0.78) - 0.035);
+        return Math.min(car, s1, s2);
+    },
+    mdot: (x, y) => disc(x, y, 0.5, 0.5, 0.46),
+    mring: (x, y) => ring(x, y, 0.5, 0.5, 0.44) - 0.035,
+    limit: (x, y) => {                            // the M8's speed-limit badge: a ring with LIMIT in tiny caps
+        let d = ring(x, y, 0.5, 0.5, 0.46) - 0.055;
+        const s = 0.022, t = 0.42, b = 0.6;       // letter stroke, cap top / foot
+        d = Math.min(d, seg(x, y, 0.24, t, 0.24, b) - s, seg(x, y, 0.24, b, 0.31, b) - s);                 // L
+        d = Math.min(d, seg(x, y, 0.36, t, 0.36, b) - s);                                                  // I
+        d = Math.min(d, seg(x, y, 0.43, t, 0.43, b) - s, seg(x, y, 0.43, t, 0.49, 0.54) - s,
+            seg(x, y, 0.49, 0.54, 0.55, t) - s, seg(x, y, 0.55, t, 0.55, b) - s);                          // M
+        d = Math.min(d, seg(x, y, 0.62, t, 0.62, b) - s);                                                  // I
+        d = Math.min(d, seg(x, y, 0.68, t, 0.8, t) - s, seg(x, y, 0.74, t, 0.74, b) - s);                  // T
+        return d;
+    },
 };
 
 function paintIcon(name, w, h, color) {
