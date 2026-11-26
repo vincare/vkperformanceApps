@@ -975,9 +975,9 @@ class Display {
                 const img = this._vname(String(this.spec && this.spec.title || '').toUpperCase());
                 if (img) {
                     const colTop = FULL.headH, colBot = HMI.colEnd - pl.y;
-                    const ih = Math.min(colBot - colTop - 16, img.h * (hx - 20) / img.w);
+                    const ih = Math.min(colBot - colTop - 8, img.h * (hx - 14) / img.w);
                     const iw = img.w * ih / img.h;
-                    c.image(img.id, hx / 2 - iw / 2, colTop + (colBot - colTop - ih) / 2, iw, ih);
+                    c.image(img.id, hx / 2 - iw / 2, colBot - 4 - ih, iw, ih);
                 }
             } else {
                 c.clip(0, 0, hx, HMI.colEnd - pl.y).clear(0).noclip();
@@ -1062,10 +1062,10 @@ class Display {
      */
     _vname(str) {
         if (this._vnameImg && this._vnameImg.str === str) return this._vnameImg;
-        const size = 30, f = fonts.get('bold', size, str);
+        const size = 30, f = fonts.get('bold', size, str), sp = size * 0.30;
         if (!f) return null;
         const scale = size / f.size;
-        const w = Math.ceil(fonts.measure(f, str) * scale), h = Math.ceil((f.ascent + f.descent) * scale);
+        const w = Math.ceil(fonts.measure(f, str) * scale + sp * Math.max(0, str.length - 1)), h = Math.ceil((f.ascent + f.descent) * scale);
         const src = Buffer.alloc(w * h * 4);
         let pen = 0;
         for (const ch of str) {
@@ -1082,11 +1082,12 @@ class Display {
                     const X = dx + px, Y = dy + py;
                     if (v && X >= 0 && X < w && Y >= 0 && Y < h) {
                         const o = (Y * w + X) * 4;
-                        if (v > src[o + 3]) { src[o] = 246; src[o + 1] = 38; src[o + 2] = 53; src[o + 3] = v; }
+                        const a = Math.round(v * 0.75);
+                        if (a > src[o + 3]) { src[o] = 246; src[o + 1] = 38; src[o + 2] = 53; src[o + 3] = a; }
                     }
                 }
             }
-            pen += adv * scale;
+            pen += adv * scale + sp;
         }
         // turn 90° counter-clockwise (reads bottom to top): dst(x', y') = src(w - 1 - y', x')
         const rw = h, rh = w, dst = Buffer.alloc(w * h * 4);
