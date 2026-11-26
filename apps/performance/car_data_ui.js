@@ -191,8 +191,9 @@ function drawSheet(cv, G, t, s, car, actions) {
         { align: 'center', font: 'bold', spacing: 1.6, literal: true });
     // TYRES INFO gets a second page: the chip under its title steps between them.
     if (def.key === 'tyres') {
-        if (more) {
-            navChip(cv, G, tagX, tagY + tagH + 16, 'TYRES INFO', false, actions && actions.tyresMain, 'performance_tyres_main');
+        if (more) navChip(cv, G, tagX, tagY + tagH + 16, 'TYRES INFO', false, actions && actions.tyresMain, 'performance_tyres_main');
+        else {
+            navChip(cv, G, tagX, tagY + tagH + 16, 'MORE TYRES INFO', true, actions && actions.tyresMore, 'performance_tyres_more');
             Sheet.drawChip(cv, G, tagX, tagY + tagH + 78, 236,
                 s.tpmsResetArmed ? 'CONFIRM RESET' : 'RESET TYRES PRESSURE',
                 { run: actions && actions.tpmsReset, key: 'performance_tpms_reset' });
@@ -201,7 +202,7 @@ function drawSheet(cv, G, t, s, car, actions) {
                     s.tpmsResetWarn ? '#ff243b' : G.withAlpha('#e8c8ce', 0.55),
                     { font: 'bold', spacing: 0.6, literal: true });
             }
-        } else navChip(cv, G, tagX, tagY + tagH + 16, 'MORE TYRES INFO', true, actions && actions.tyresMore, 'performance_tyres_more');
+        }
     }
 
     // 4. Smooth diagonal panel on the right (same ribbon as DYNO RUN)
