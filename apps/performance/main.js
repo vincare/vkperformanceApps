@@ -1205,9 +1205,9 @@ mgu.run({
         // actual mode from FES.statusDSCSwitchHMI instead of treating an accepted write as success.
         let tpmsProxy = null;
         const dscWrite = { busy: false, armed: null, armedUntil: 0, status: '', warn: false };
-        // These two request enums are documented by the TPMS chassisControl reference.
-        // MDM's request enum is not verified; never send guessed values to the stability system.
-        const DSC_ENUMS = { on: 'DSC_EINSCHALTEN', off: 'DSC_AUSSCHALTEN' };
+        // Request enums verified against the car's interface spec: OperationModeTractionDSC
+        // (DSC_EINSCHALTEN 0 · DSC_AUSSCHALTEN 1 · TRAKTIONSMODUS_EINSCHALTEN 4 = MDM).
+        const DSC_ENUMS = { on: 'DSC_EINSCHALTEN', mdm: 'TRAKTIONSMODUS_EINSCHALTEN', off: 'DSC_AUSSCHALTEN' };
         const DSC_LABEL = { on: 'DSC ON', mdm: 'MDM', off: 'DSC OFF' };
         function dscStatus(text, warn) {
             dscWrite.status = text; dscWrite.warn = !!warn;
@@ -1215,14 +1215,16 @@ mgu.run({
         }
         function dscSend(mode) {
             const value = DSC_ENUMS[mode];
-            if (!value) {
-                dscWrite.busy = false;
-                dscStatus('MDM NOT VERIFIED · USE CAR BUTTON', true);
-                return;
-            }
+            if (!value) { dscWrite.busy = false; dscStatus('MODE NOT AVAILABLE', true); return; }
+            const struct = TyreData.dscStruct(value);
             let pending;
-            try { pending = ctx.signals.set(tpmsProxy, 'chassisControl', TyreData.dscStruct(value)); }
+            try { pending = ctx.signals.set(tpmsProxy, 'chassisControl', struct); }
             catch (e) { pending = Promise.reject(e); }
+            // The setter is unreliable SOME/IP: the HMI's own x_call repeats the write, so do the
+            // same — two extra best-effort sends behind the tracked first one.
+            [140, 300].forEach((ms) => setTimeout(() => {
+                try { ctx.signals.set(tpmsProxy, 'chassisControl', struct); } catch (e) { /* best effort */ }
+            }, ms));
             Promise.resolve(pending).then(() => {
                 log.info('dsc ' + mode + ' request accepted via ' + value);
                 dscStatus('REQUEST SENT · CHECKING CLUSTER');
@@ -1243,10 +1245,12 @@ mgu.run({
         }
         function dscRequest(mode) {
             if (settings.get('demo') === 'on') return dscStatus(DSC_LABEL[mode] + ' · DEMO MODE', false);
-            if (!DSC_ENUMS[mode]) return dscStatus('MDM NOT VERIFIED · USE CAR BUTTON', true);
+            if (!DSC_ENUMS[mode]) return dscStatus('MODE NOT AVAILABLE', true);
             if (dscWrite.busy) { dscStatus('COMMAND IN PROGRESS', true); return null; }
+            const currentDsc = tyreExtra.dsc && tyreExtra.dsc.state;
             if (mode === 'on') {
-                if (tyreExtra.dsc && tyreExtra.dsc.state === 'on') return dscStatus('DSC ON ALREADY ACTIVE', false);
+                if (currentDsc === 'on') return dscStatus('DSC ON ALREADY ACTIVE', false);
+                if (!currentDsc) return dscStatus('WAIT FOR STATUS', true);
                 dscWrite.armed = null;
                 if (!tpmsProxy) return dscStatus('TPMS LINK UNAVAILABLE', true);
                 dscWrite.busy = true;
@@ -1255,12 +1259,17 @@ mgu.run({
                 return null;
             }
             const now = Date.now();
-            if (!fresh(state.speed, now)) return dscStatus('DSC OFF LOCKED · WAIT FOR SPEED', true);
-            if (state.speed.value >= 0.5) return dscStatus('DSC OFF LOCKED · STOP FIRST', true);
-            const currentDsc = tyreExtra.dsc && tyreExtra.dsc.state;
-            if (!currentDsc) return dscStatus('DSC OFF LOCKED · WAIT FOR STATUS', true);
-            if (currentDsc === 'off') return dscStatus('DSC OFF ALREADY ACTIVE', false);
-            if (currentDsc !== 'on') return dscStatus('DSC OFF LOCKED · ENABLE DSC FIRST', true);
+            // Only DSC OFF needs the car stopped — MDM (a button tap on the car) works rolling.
+            if (mode === 'off') {
+                if (!fresh(state.speed, now)) return dscStatus('DSC OFF LOCKED · WAIT FOR SPEED', true);
+                if (state.speed.value >= 0.5) return dscStatus('DSC OFF LOCKED · STOP FIRST', true);
+            }
+            if (!currentDsc) return dscStatus(DSC_LABEL[mode] + ' · WAIT FOR STATUS', true);
+            if (currentDsc === 'off') return dscStatus(mode === 'off' ? 'DSC OFF ALREADY ACTIVE' : 'ENABLE DSC FIRST', mode !== 'off');
+            if (mode === 'mdm') {
+                if (currentDsc === 'traction') return dscStatus('MDM ALREADY ACTIVE', false);
+                if (currentDsc !== 'on') return dscStatus('ENABLE DSC FIRST', true);
+            }
             if (dscWrite.armed !== mode || now > dscWrite.armedUntil) {
                 dscWrite.armed = mode; dscWrite.armedUntil = now + 4000;
                 dscStatus('PRESS AGAIN TO SEND ' + DSC_LABEL[mode], mode === 'off');
@@ -1287,9 +1296,13 @@ mgu.run({
             queueRender();
         }
         function tpmsResetSend() {
+            const struct = TyreData.tpmsResetStruct();
             let pending;
-            try { pending = ctx.signals.set(tpmsProxy, 'chassisControl', TyreData.tpmsResetStruct()); }
+            try { pending = ctx.signals.set(tpmsProxy, 'chassisControl', struct); }
             catch (e) { pending = Promise.reject(e); }
+            [140, 300].forEach((ms) => setTimeout(() => {
+                try { ctx.signals.set(tpmsProxy, 'chassisControl', struct); } catch (e) { /* best effort */ }
+            }, ms));
             Promise.resolve(pending).then(() => {
                 tpmsReset.busy = false;
                 log.info('tpms reset request accepted via RDC_S_RPA_SETZEN');
@@ -1320,7 +1333,7 @@ mgu.run({
         // ENGINE DATA chip: cycles only between verified DSC ON/OFF requests.
         function dscGo(mode) {
             if (settings.get('demo') === 'on') return dscStatus(DSC_LABEL[mode] + ' · DEMO MODE', false);
-            if (!DSC_ENUMS[mode]) return dscStatus('MDM NOT VERIFIED · USE CAR BUTTON', true);
+            if (!DSC_ENUMS[mode]) return dscStatus('MODE NOT AVAILABLE', true);
             if (mode === 'off') return dscRequest('off');
             if (dscWrite.busy) { dscStatus('COMMAND IN PROGRESS', true); return null; }
             if (!tpmsProxy) { dscStatus('TPMS LINK UNAVAILABLE', true); return null; }

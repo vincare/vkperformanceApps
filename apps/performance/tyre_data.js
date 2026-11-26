@@ -125,17 +125,17 @@ function lastValues(v) {
 
 /* ---------- the write ---------- */
 // TPMS.chassisControl is one struct the HMI's tire menu and the DSC button share. Every member
-// "no request" means the receiving units ignore it; only operationModeTractionDSC carries our
-// DSC request (DSC_EINSCHALTEN = on, DSC_AUSSCHALTEN = off, a traction-mode value = MDM).
+// carries the "idle" defaultValue from the car's interface spec — anything else makes the ECU
+// treat the member as a real request. Only the member we explicitly set carries our request.
 const CHASSIS_NO_ACTION = Object.freeze({
-    operationTyreSeasonTyrePressureControl: 'KEINE_AENDERUNG',
-    operationTyrePressureControl: 'KEINE_AKTION',
-    operationModeTractionDSC: 'SIGNAL_UNGUELTIG',
-    operationTargetPressureLoadingConditionTyrePressureControl: 'SIGNAL_UNGUELTIG',
-    requestObjectListTyrePressureControl: 'KEINE_LISTE_ANGEFORDERT',
-    operationSelectionTyreAvailable: 255,
-    operationIDRSelection: 'KEINE_AKTION',
-    statusIDRMessageCenter: 'KEINE_AKTION_DURCHGEFUEHRT',
+    operationTyreSeasonTyrePressureControl: 'SIGNAL_UNGUELTIG',          // def 3
+    operationTyrePressureControl: 'SIGNAL_UNGUELTIG',                    // def 3
+    operationModeTractionDSC: 'SIGNAL_UNGUELTIG',                        // def 7
+    operationTargetPressureLoadingConditionTyrePressureControl: 'SIGNAL_UNGUELTIG', // def 3
+    requestObjectListTyrePressureControl: 'SIGNAL_UNGUELTIG',            // def 3
+    operationSelectionTyreAvailable: 63,                                 // def 63 (no selector)
+    operationIDRSelection: 'SIGNAL_UNBEFUELLT',                          // def 3
+    statusIDRMessageCenter: 'SIGNAL_UNBEFUELLT',                         // def 3
 });
 /** The chassisControl struct carrying exactly one DSC request value. */
 function dscStruct(dscValue) {
