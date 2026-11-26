@@ -46,7 +46,7 @@ function drawTireSmoke(cv, G, t, car, imageRect, now) {
     const seconds = (now || Date.now()) / 1000;
     [[0.14, -1], [0.86, 1]].forEach((w, wi) => {
         const ox = imageRect.x + w[0] * imageRect.w;
-        const oy = imageRect.y + imageRect.h * 0.90 + H * 0.02;
+        const oy = imageRect.y + imageRect.h * 0.90 + H * 0.06;
         const outward = w[1];
         for (let puff = 0; puff < 14; puff++) {
             const phase = (seconds * 0.5 + puff / 14 + wi * 0.29) % 1;
