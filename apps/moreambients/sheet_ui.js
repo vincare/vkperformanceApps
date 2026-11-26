@@ -180,7 +180,6 @@ function drawInteriorLighting(cv, G, opts) {
     const avail = bottom - py;
     const sc = Math.max(avail / basePh, 1.10);
     const rows = baseRows.map((r) => Math.round(r * sc));
-    const pinH = rows[0];
     const headH = 69;
     const contentH = rows.reduce((a, b) => a + b, 0);
     const maxScroll = Math.max(0, contentH - avail + headH);
@@ -200,24 +199,23 @@ function drawInteriorLighting(cv, G, opts) {
     cv.text('INTERIOR LIGHTING', lx - 14, py + headH / 2 + 11, 32, '#c81f33', { font: 'bold', spacing: 0.8, literal: true });
     cv.line(px, py + headH, px + pw, py + headH, 1, G.withAlpha('#9aa0ac', 0.14));
     const pin0 = py + headH;
-    const rowTop = [pin0];
-    for (let i = 1; i <= rows.length; i++) {
-        rowTop[i] = pin0 + pinH + rows.slice(1, i).reduce((a, b) => a + b, 0) - scrollY;
+    const rowTop = [];
+    for (let i = 0; i <= rows.length; i++) {
+        rowTop[i] = pin0 + rows.slice(0, i).reduce((a, b) => a + b, 0) - scrollY;
     }
 
-    // 0. Pinned row (Ambient lighting): drawn first, outside the scroll clip
-    if (focus === 0) id7Highlight(cv, G, px, pin0, pw, pinH);
-    const c0 = pin0 + pinH / 2 + 4;
+    // Every row scrolls together under the header band (the master toggle is not
+    // pinned: a sticky row reads as a rendering bug while scrolling the list).
+    cv.clip(px, pin0, pw, ph - headH);
+    if (focus >= 0) id7Highlight(cv, G, px, rowTop[focus], pw, rows[focus]);
+    rowTop.slice(1).forEach((y) => {
+        if (y > pin0 + 14 && y <= py + ph) cv.line(divX0, y, divX1, y, 1.2, lineC);
+    });
+
+    // 0. Ambient lighting — first scrolling row
+    const c0 = rowTop[0] + rows[0] / 2;
     cv.text('Ambient lighting', lx, c0 + 8, 26, txtC(0), { font: 'bold', literal: true });
     id7Toggle(cv, G, rx - 52, c0 - 12, !!opts.enabled, true);
-    cv.line(px, pin0 + pinH, px + pw, pin0 + pinH, 1.2, G.withAlpha('#ffffff', 0.55));
-
-    // Scrolling rows (1..n) inside the single clip below the pinned header
-    cv.clip(px, pin0 + pinH, pw, ph - headH - pinH);
-    if (focus > 0) id7Highlight(cv, G, px, rowTop[focus], pw, rows[focus]);
-    rowTop.slice(2).forEach((y) => {
-        if (y > pin0 + pinH + 14 && y <= py + ph) cv.line(divX0, y, divX1, y, 1.2, lineC);
-    });
 
     // 1. Color + swatch(es): a picked combo shows its two zone colours, a colour one box
     const c1 = rowTop[1] + rows[1] / 2;
@@ -298,7 +296,7 @@ function drawInteriorLighting(cv, G, opts) {
     }
 
     const vis = (r) => {
-        const top = r.i === 0 ? pin0 : pin0 + pinH;
+        const top = pin0;
         const y = Math.max(top, r.y);
         return { x: r.x, y, w: r.w, h: Math.min(py + ph, r.y + r.h) - y, i: r.i, key: r.key };
     };
@@ -314,10 +312,10 @@ function drawInteriorLighting(cv, G, opts) {
         minus:   vis({ x: lx - 8, y: byAc - 22, w: 44, h: 44, key: 'accentDown', i: 4 }),
         plus:    vis({ x: rx - 32, y: byAc - 22, w: 44, h: 44, key: 'accentUp', i: 4 }),
         accentBar: vis({ x: segX0, y: byAc - 20, w: segX1 - segX0, h: 40, key: 'oemBrightness', zone: 'accent', i: 4 }),
-        scroll: { y: pin0 + pinH, max: maxScroll, cur: scrollY, bar: sbar },
+        scroll: { y: pin0, max: maxScroll, cur: scrollY, bar: sbar },
         box: { x: px, y: py, w: pw, h: ph },
-        offsets: rows.map((h, i) => i ? rows.slice(1, i).reduce((a, b) => a + b, 0) : 0),
-        rowHs: rows, pinH: pinH + headH,
+        offsets: rows.map((h, i) => rows.slice(0, i).reduce((a, b) => a + b, 0)),
+        rowHs: rows, pinH: headH,
     };
 }
 
