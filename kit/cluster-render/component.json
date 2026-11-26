@@ -1,0 +1,63 @@
+{
+  "id": "cluster-render",
+  "kind": "tool",
+  "version": "0.8.14",
+  "title": "Cluster renderer",
+  "description": "Draws every app's layers on the instrument cluster and the HUD, sharing the display slots and one upload budget",
+  "files": [
+    {
+      "path": "cluster-render",
+      "mode": "0755",
+      "sha256": "87d96e27acd70c0e7bbdfb294fa0216e0d02afa7b86c453bc765d612db1a8018"
+    },
+    {
+      "path": "cluster-render-idrive7",
+      "mode": "0755",
+      "sha256": "bd642f863c397288b40020005dec0a9854d8e8b15710aa2ca9f1c66fc89c3181"
+    },
+    {
+      "path": "cluster-render-idrive8",
+      "mode": "0755",
+      "sha256": "4c8ee8b2c25b881ef13425f986e4dde862a2825e3b36d57c15d723a4027c2556"
+    },
+    {
+      "path": "cluster-render.conf",
+      "mode": "0644",
+      "sha256": "6becba434fbee74c2338f87942d1c2ec72877ba4c9a2e4234423ac9941c4c186"
+    },
+    {
+      "path": "cluster_render_client.js",
+      "mode": "0644",
+      "sha256": "345e7b9e93bae1f7eedead7c710d8fc01fa5fda18d8866b9592b318d5dbedb43"
+    },
+    {
+      "path": "cluster_render_text.js",
+      "mode": "0644",
+      "sha256": "dc159624c4265f26c54fd92e69c892a4cfdf6c508b3dd1a16a49284f1cd02426"
+    }
+  ],
+  "units": [
+    {
+      "name": "cluster-render.socket"
+    },
+    {
+      "name": "cluster-render.service"
+    }
+  ],
+  "enable": [
+    {
+      "unit": "cluster-render.socket",
+      "target": "sockets.target"
+    }
+  ],
+  "recmgr": [
+    "cluster-render"
+  ],
+  "restart": [
+    "cluster-render.service"
+  ],
+  "mguHmi": [
+    "ID7",
+    "ID8"
+  ]
+}

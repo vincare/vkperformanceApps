@@ -31,6 +31,14 @@
       "optional": false,
       "uninstallable": true,
       "mguHmi": ["ID7", "ID8"]
+    },
+    {
+      "id": "cluster-render",
+      "path": "kit/cluster-render",
+      "title": "Cluster renderer",
+      "description": "Draws apps' layers on the instrument cluster and the HUD (VClusters themes); upstream robertnisipeanu/idrive-apps service 0.8.14 (iDrive 7 and iDrive 8)",
+      "uninstallable": true,
+      "mguHmi": ["ID7", "ID8"]
     }
   ]
 }
