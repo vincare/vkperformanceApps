@@ -863,18 +863,20 @@ function menuBar(cv, t, x, y, w, h, buttons, focus, variant, flash) {
     const size = (std ? 30 : 19) * u;
     buttons.forEach((b, i) => {
         const on = i === focus, hit = i === flash;
-        if (on || hit) {
-            cv.gradientRect(b.x, y, b.w, h, [[0, withAlpha(sel, hit ? 0.5 : 0.08)], [1, withAlpha(sel, hit ? 0.7 : 0.4)]]);
-            cv.fillRect(b.x, y + h - 4 * u, b.w, 4 * u, sel);
-        }
         const label = std ? String(b.label) : upperText(b.label);
         const bsize = b.id === 'BTN_BACK' ? size * 1.45 : size;
         const topt = { align: 'center', font: std ? 'label' : 'bold', spacing: std ? 0 : 2 * u };
+        // BACK is framed by its two side lines: the highlight fills exactly the frame, not the button cell
+        const bw = b.id === 'BTN_BACK' ? cv.textWidth(label, bsize, topt) + w * 0.06 : b.w;
+        const bx = b.x + (b.w - bw) / 2;
+        if (on || hit) {
+            cv.gradientRect(bx, y, bw, h, [[0, withAlpha(sel, hit ? 0.5 : 0.08)], [1, withAlpha(sel, hit ? 0.7 : 0.4)]]);
+            cv.fillRect(bx, y + h - 4 * u, bw, 4 * u, sel);
+        }
         cv.text(label, b.x + b.w / 2, y + h / 2 + bsize * 0.36, bsize, b.id === 'BTN_BACK' ? '#ffffff' : on || hit ? t.selText || '#ffffff' : std ? t.text : t.dim, topt);
         if (b.id === 'BTN_BACK') {
-            const tw = cv.textWidth(label, bsize, topt), gap = w * 0.03, cx = b.x + b.w / 2;
-            cv.fillRect(cx - tw / 2 - gap, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
-            cv.fillRect(cx + tw / 2 + gap, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
+            cv.fillRect(bx, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
+            cv.fillRect(bx + bw, y + h * 0.18, Math.max(1.5, u), h * 0.64, withAlpha('#ffffff', 0.6));
         }
         if (i < buttons.length - 1) cv.fillRect(b.x + b.w, y + h * 0.25, Math.max(1, u), h * 0.5, withAlpha('#ffffff', 0.13));
     });
