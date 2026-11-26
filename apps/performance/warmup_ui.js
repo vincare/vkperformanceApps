@@ -220,7 +220,7 @@ function draw(cv, G, t, s, actions) {
         gcy = y0 + 202;
     }
 
-    const gaugeR = 58;
+    const gaugeR = 70;
     const gxs = [ix + iw / 6, ix + iw / 2, ix + iw * 5 / 6];
     // Session high per fluid from the trend history (oil idx1, coolant idx2, gearbox idx5)
     const trend = s.trend || [];
