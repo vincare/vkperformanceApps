@@ -45,7 +45,7 @@ function drawTireSmoke(cv, G, t, car, imageRect, now) {
     if (!car) return;
     const seconds = (now || Date.now()) / 1000;
     [[0.14, -1], [0.86, 1]].forEach((w, wi) => {
-        const ox = imageRect.x + w[0] * imageRect.w + w[1] * W * 0.02;
+        const ox = imageRect.x + w[0] * imageRect.w + w[1] * W * 0.01;
         const oy = imageRect.y + imageRect.h * 0.90 + H * 0.065;
         const outward = w[1];
         for (let puff = 0; puff < 14; puff++) {
@@ -61,14 +61,14 @@ function drawTireSmoke(cv, G, t, car, imageRect, now) {
         }
         // Sparks kicked off the spinning tyre — flung outward from the contact
         // patch in short arcs, hot yellow fading to ember orange.
-        for (let s = 0; s < 8; s++) {
+        for (let s = 0; s < 14; s++) {
             const h1 = hash(wi * 91.3 + s * 17.7);
             const h2 = hash(wi * 47.1 + s * 29.3);
             const phase = (seconds * (1.4 + h1) + h2) % 1;
-            const arc = Math.min(60, imageRect.w * 0.10) * (0.5 + h1);
+            const arc = Math.min(80, imageRect.w * 0.13) * (0.5 + h1);
             const sx = ox + outward * phase * arc + Math.sin(seconds * 24 + s * 2.7) * 2;
             const sy = oy - 6 + phase * phase * (26 + h2 * 40) - phase * (10 + h1 * 14);
-            const sr = (1 - phase) * (1.1 + h2 * 1.6);
+            const sr = (1 - phase) * (1.8 + h2 * 2.4);
             if (sr <= 0.15) continue;
             const col = phase < 0.4 ? '#ffe9a8' : phase < 0.75 ? '#ffb31f' : '#ff5a1f';
             cv.circle(sx, sy, sr, G.withAlpha(col, (1 - phase) * 0.9));
