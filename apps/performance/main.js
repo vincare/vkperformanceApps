@@ -2186,6 +2186,7 @@ mgu.run({
                         { label: 'FRONT RIGHT', value: '2.41 bar (26 °C)' },
                         { label: 'REAR LEFT', value: '2.55 bar (27 °C)' },
                         { label: 'REAR RIGHT', value: '2.56 bar (28 °C)' },
+                        { label: 'DSC MODE', value: 'ON' },
                     ],
                     tyresMore: [
                         { label: 'RECOMMENDED PRESSURE · FRONT LEFT', value: '2.4 bar' },
@@ -2292,6 +2293,8 @@ mgu.run({
                     { label: 'FRONT RIGHT', value: tyreWheel('tyrePFR', 'tyreTFR') },
                     { label: 'REAR LEFT', value: tyreWheel('tyrePRL', 'tyreTRL') },
                     { label: 'REAR RIGHT', value: tyreWheel('tyrePRR', 'tyreTRR') },
+                    { label: 'DSC MODE', value: tyreExtra.dsc ? tyreExtra.dsc.state.toUpperCase() : null,
+                        detail: 'traction control · as the cluster shows it' },
                 ],
                 tyresMore: [
                     { label: 'RECOMMENDED PRESSURE · FRONT LEFT', value: finite(cdNum('tyrePtFL'))
