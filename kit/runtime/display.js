@@ -1082,7 +1082,7 @@ class Display {
                     const X = dx + px, Y = dy + py;
                     if (v && X >= 0 && X < w && Y >= 0 && Y < h) {
                         const o = (Y * w + X) * 4;
-                        const a = Math.round(v * 0.50);
+                        const a = Math.round(v * 0.25);
                         if (a > src[o + 3]) { src[o] = 246; src[o + 1] = 38; src[o + 2] = 53; src[o + 3] = a; }
                     }
                 }
