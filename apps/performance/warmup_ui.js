@@ -28,6 +28,13 @@ const BAR_KEYS = [
     { key: 'gearbox', label: 'GEARBOX OIL' },
 ];
 
+function fitText(cv, s, size, w, opts) {
+    s = String(s || '');
+    if (cv.textWidth(s, size, opts) <= w) return s;
+    while (s.length > 1 && cv.textWidth(s + '...', size, opts) > w) s = s.slice(0, -1);
+    return s + '...';
+}
+
 /** A 270° temperature gauge: one fill colour per state (blue cold / red warm / bright red hot),
  *  a thin green rim notch at the warm point, red zone past ~118 °C. */
 function tempGauge(cv, G, cx, cy, r, val, warm, label) {
@@ -76,22 +83,35 @@ function trendChart(cv, G, x, y, w, h, trend, temps) {
     });
     const cy = y + 30, ch = h - 40;
     cv.roundRect(x, cy, w, ch, 8, G.withAlpha('#ffffff', 0.035));
-    const span = 20 * 60 * 1000;
+    // X axis spans the actual data, at least 5 min, at most 20 — a short drive
+    // still draws a proper curve instead of a stub hugging the right edge.
     const now = trend.length ? trend[trend.length - 1][0] : 0;
+    const dataSpan = trend.length > 1 ? now - trend[0][0] : 0;
+    const span = Math.max(5 * 60 * 1000, Math.min(20 * 60 * 1000, dataSpan));
     const MIN = 0, MAX = 150;
     const cols = [RED, COLD, '#b98cff'];
     [50, 100].forEach((g) => {
         const gy = cy + ch - (g / MAX) * ch;
         cv.line(x + 8, gy, x + w - 8, gy, 1, G.withAlpha('#ffffff', g === 100 ? 0.14 : 0.07));
+        cv.text(String(g) + '°', x + 12, gy - 4, 10, G.withAlpha('#ffffff', 0.22), { literal: true });
     });
+    // minute ticks along the bottom so the chart reads as a timeline
+    for (let m = 0; m * 60000 <= span; m += 5) {
+        const tx = x + w - (m * 60000 / span) * w;
+        if (tx < x + 8) break;
+        cv.line(tx, cy + ch - 4, tx, cy + ch, 1.5, G.withAlpha('#ffffff', 0.25));
+        cv.text(m ? '-' + m + 'm' : 'now', Math.max(x + 10, Math.min(x + w - 24, tx - 8)),
+            cy + ch + 12, 9, G.withAlpha('#ffffff', 0.3), { literal: true });
+    }
+    const xOf = (p) => Math.max(x + 4, Math.min(x + w - 4, x + w - ((now - p[0]) / span) * w));
     [1, 2, 5].forEach((idx, li) => {
         let px = null, py = null, ex = null, ey = null;
         for (const p of trend) {
             const v = p[idx];
-            if (typeof v !== 'number' || !isFinite(v)) { px = null; continue; }
-            const tx = x + w - ((now - p[0]) / span) * w;
+            if (typeof v !== 'number' || !isFinite(v) || now - p[0] > span) { px = null; continue; }
+            const tx = xOf(p);
             const ty = cy + ch - Math.max(0, Math.min(1, (v - MIN) / (MAX - MIN))) * ch;
-            if (px !== null) cv.line(px, py, tx, ty, 4, G.withAlpha(cols[li], 0.95));
+            if (px !== null) cv.line(px, py, tx, ty, 3, G.withAlpha(cols[li], 0.95));
             px = tx; py = ty; ex = tx; ey = ty;
         }
         if (ex !== null) cv.circle(ex, ey, 5.5, cols[li]);
@@ -135,11 +155,13 @@ function draw(cv, G, t, s, actions) {
     const pulse = 0.45 + 0.55 * Math.sin(now / (st.kind === 'ready' ? 420 : 700));
     cv.circle(ix + 8, y0 + 50, 10, G.withAlpha(scol, 0.10 + 0.18 * pulse));
     cv.circle(ix + 8, y0 + 50, 4.5, scol);
-    cv.text(st.text, ix + 30, y0 + 60, 26, scol, { font: 'bold', spacing: 2.2, literal: true });
     const readyN = BAR_KEYS.reduce((n, b) =>
         n + ((temps[b.key] || 0) >= (warm[b.key] || 90) ? 1 : 0), 0);
-    cv.text(readyN + ' / 3 READY', ix + iw, y0 + 58, 15, G.withAlpha('#e8c8ce', 0.5),
+    cv.text(readyN + ' / 3 READY', ix + iw, y0 + 56, 15, G.withAlpha('#e8c8ce', 0.5),
         { align: 'right', font: 'bold', spacing: 1.3, literal: true });
+    // status fits the room left of "n/3 READY" — it can no longer run over it
+    cv.text(fitText(cv, st.text, 19, iw - 150, { font: 'bold', spacing: 1.4, literal: true }),
+        ix + 30, y0 + 58, 19, scol, { font: 'bold', spacing: 1.4, literal: true });
     cv.rampRect(ix, y0 + 76, iw, 2.5, 1, [G.withAlpha(scol, 0.65), G.withAlpha(scol, 0.04)]);
 
     // turbo cool-down countdown strip while the turbo needs a gentle minute
