@@ -514,10 +514,10 @@ function drawRuns(cv, G, t, s, actions) {
             { font: 'bold', spacing: 0.5, literal: true });
         const secT = run.result && run.result[sec.key];
         const secTxt = secT != null ? DragRunSeconds(secT) + ' S' : '--.--';
-        cv.text(secTxt, 968, ry + 11, 28,
+        cv.text(secTxt, 968, ry + 9, 28,
             isBest ? '#ff243b' : '#ffffff', { align: 'right', font: 'num', literal: true });
         if (isBest) {
-            const bw = 54, bh = 18, bx = 968 - bw, by = ry + 16;
+            const bw = 54, bh = 18, bx = 968 - bw, by = ry + 14;
             Sheet.para(cv, bx, by, bw, by + bh, 8, '#c8192b');
             cv.text('BEST', bx + bw / 2 - 4, by + 14, 12, '#ffffff',
                 { align: 'center', font: 'bold', spacing: 0.8, literal: true });
