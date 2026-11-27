@@ -681,12 +681,10 @@ function drawExhaustSheet(cv, G, t, valve, car, actions, now) {
     const fullMode = FULL_MODE_NAMES[selKey] || FULL_MODE_NAMES[valve.modeLabel] || 'OEM CONTROL';
     const modeTitle = 'MODE · ' + fullMode;
     cv.text(modeTitle, setupX, setupY + 14, 20, '#ffffff', { font: 'bold', spacing: 1.1, literal: true });
-    const status = valve.commandStatus || 'READY FOR COMMAND';
+    const status = valve.commandStatus === undefined ? 'READY FOR COMMAND' : valve.commandStatus;
     const warn = /DISARMED|UNAVAILABLE|REJECTED|BLOCKED|WAITING|NOT SENT|NOT CONFIRMED/.test(status);
-    cv.text(status, setupX, setupY + 42, 13,
+    if (status) cv.text(status, setupX, setupY + 42, 13,
         warn ? '#ff5c70' : '#ff8595', { font: 'bold', spacing: 0.8, literal: true });
-    cv.text('VALVE POSITION NOT SENSED', setupX, setupY + 66, 10, G.withAlpha('#e8c8ce', 0.55),
-        { font: 'bold', spacing: 0.6, literal: true });
 }
 
 // DYNAMIC CONFIG — same sheet language as EXHAUST SYSTEM: hex backdrop, slanted

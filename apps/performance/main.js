@@ -1453,7 +1453,7 @@ mgu.run({
             if (!valveReady) commandStatus = 'DIAGNOSTIC LINK STARTING';
             else if (!armed) commandStatus = 'DISARMED · NO COMMAND SENT';
             else if (control.comm !== 'OK') commandStatus = 'DIAGNOSTIC LINK UNAVAILABLE';
-            else if (!matched) commandStatus = 'WAITING FOR MATCHED DME';
+            else if (!matched) commandStatus = '';
             else if (control.blocked) commandStatus = 'CONTROL BLOCKED';
             else if (valveCommandActive || control.busy) commandStatus = 'COMMAND IN PROGRESS';
             else if (control.accepted === false) commandStatus = 'LAST COMMAND NOT ACCEPTED';
