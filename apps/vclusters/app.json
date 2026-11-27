@@ -96,15 +96,11 @@
       "key": "hudLayout",
       "label": "Theme (when not by drive mode)",
       "type": "choice",
-      "default": "m",
+      "default": "m340",
       "options": [
         [
           "off",
           "Off (BMW's own cluster)"
-        ],
-        [
-          "m",
-          "M3 / M4 G80 / G82"
         ],
         [
           "m340",
@@ -122,15 +118,11 @@
       "key": "inComfort",
       "label": "In Comfort",
       "type": "choice",
-      "default": "m",
+      "default": "m340",
       "options": [
         [
           "off",
           "Off (BMW's own cluster)"
-        ],
-        [
-          "m",
-          "M"
         ],
         [
           "m340",
@@ -142,15 +134,11 @@
       "key": "inSport",
       "label": "In Sport",
       "type": "choice",
-      "default": "m",
+      "default": "m340",
       "options": [
         [
           "off",
           "Off (BMW's own cluster)"
-        ],
-        [
-          "m",
-          "M"
         ],
         [
           "m340",
@@ -162,15 +150,11 @@
       "key": "inEco",
       "label": "In Eco Pro",
       "type": "choice",
-      "default": "m",
+      "default": "m340",
       "options": [
         [
           "off",
           "Off (BMW's own cluster)"
-        ],
-        [
-          "m",
-          "M"
         ],
         [
           "m340",
@@ -182,15 +166,11 @@
       "key": "inHybrid",
       "label": "In Hybrid",
       "type": "choice",
-      "default": "m",
+      "default": "m340",
       "options": [
         [
           "off",
           "Off (BMW's own cluster)"
-        ],
-        [
-          "m",
-          "M"
         ],
         [
           "m340",
@@ -202,15 +182,11 @@
       "key": "inElectric",
       "label": "In Electric",
       "type": "choice",
-      "default": "m",
+      "default": "m340",
       "options": [
         [
           "off",
           "Off (BMW's own cluster)"
-        ],
-        [
-          "m",
-          "M"
         ],
         [
           "m340",
