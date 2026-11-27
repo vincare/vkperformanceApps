@@ -4,14 +4,24 @@
   "theme": "mdash",
   "widgets": [
     {
+      "id": "m340_cover",
+      "type": "fill",
+      "x": 0,
+      "y": 26,
+      "w": 1920,
+      "h": 636,
+      "z": 0,
+      "color": "bg"
+    },
+    {
       "id": "m340_photo",
       "type": "artwork",
       "asset": "m340",
       "own": true,
       "x": 0,
-      "y": 26,
+      "y": 56,
       "w": 1920,
-      "h": 650,
+      "h": 546,
       "z": 1
     },
     {
