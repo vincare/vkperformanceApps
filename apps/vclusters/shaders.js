@@ -1764,4 +1764,29 @@ void main() {
 }
 `;
 
-module.exports = { shiftbar: SHIFTBAR, arc: ARC, revbar: REVBAR, lights: LIGHTS, fill: FILL, box: BOX, grid: GRID, segbar: SEGBAR, mdash: MDASH, mtach: MTACH, sdash: SDASH, boxes: BOXES, atext: ATEXT, meter: METER, gmeter: GMETER, revarc: REVARC, tiles: TILES, ribbon: RIBBON, deco: DECO, mview: MVIEW, vdash: VDASH };
+// The photo supplies the scale and outlines. Only the live RPM lighting is drawn here.
+const MTACH_PHOTO = `
+precision highp float;
+varying vec2 v_uv;
+uniform vec2 u_size;
+uniform float u_side;
+uniform vec4 u_geoA;
+uniform float u_value;
+uniform vec3 u_red;
+void main() {
+    vec2 p = v_uv * u_size;
+    if (u_side > 0.0) p.x = u_size.x - p.x;
+    float t = clamp((u_geoA.x - p.y) / (u_geoA.x - u_geoA.y), 0.0, 1.0);
+    float d = (p.y - u_geoA.z) / (u_geoA.x - u_geoA.y);
+    float edge = u_geoA.w + (d < 0.0 ? 480.0 : 320.0) * d * d;
+    float width = mix(41.0, 18.0, t) + 28.0 * sin(t * 3.14159);
+    float x = p.x - edge;
+    float mask = smoothstep(3.0, 11.0, x) * (1.0 - smoothstep(width - 8.0, width, x));
+    float amp = step(0.002, u_value) * step(u_geoA.y, p.y) * step(p.y, u_geoA.x - 8.0);
+    float delta = (u_value - t) * (u_geoA.x - u_geoA.y);
+    float glow = 0.40 * exp(-abs(delta) / 38.0) * step(0.0, delta);
+    float stripe = 0.85 * (1.0 - smoothstep(2.0, 4.0, abs(delta)));
+    gl_FragColor = vec4(u_red, mask * amp * max(stripe, glow));
+}
+`;
+module.exports = { mtachPhoto: MTACH_PHOTO, shiftbar: SHIFTBAR, arc: ARC, revbar: REVBAR, lights: LIGHTS, fill: FILL, box: BOX, grid: GRID, segbar: SEGBAR, mdash: MDASH, mtach: MTACH, sdash: SDASH, boxes: BOXES, atext: ATEXT, meter: METER, gmeter: GMETER, revarc: REVARC, tiles: TILES, ribbon: RIBBON, deco: DECO, mview: MVIEW, vdash: VDASH };

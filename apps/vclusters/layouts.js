@@ -33,6 +33,7 @@ const TYPES = {
     vdash: ['tach', 'segs'],
     mtach: ['side', 'y0', 'y8', 'ym', 'xm', 'kTop', 'kBot', 'wBot', 'wTop'],
     icon: ['icon'],
+    artwork: ['asset'],
     swatch: [],
     swatchimg: [],
     boxes: ['boxes'],
@@ -111,6 +112,7 @@ class Layouts {
             ['x', 'y', 'w', 'h'].forEach((k) => { if (typeof w[k] !== 'number' || w[k] < 0) bad(at + ' needs a number ' + k); });
             if (w.x + w.w > this.size[0] || w.y + w.h > this.size[1]) bad(at + ' runs off the ' + this.size[0] + 'x' + this.size[1] + ' display');
             if (w.class && CLASSES.indexOf(w.class) < 0) bad(at + ' has unknown class "' + w.class + '"');
+            if (w.type === 'artwork' && !/^[a-z0-9_-]+$/.test(w.asset)) bad(at + ' has an invalid artwork name');
             if (w.exclusive) bad(at + ' sets exclusive, which would hide everything under it (the CarPlay / Android Auto map too)');
             if (w.conn !== undefined && !(Number.isInteger(w.conn) && w.conn >= 0 && w.conn <= 3)) bad(at + ' "conn" must be 0..3 (the connection to cluster-render)');
             if (w.toggle !== undefined && !/^!?[a-zA-Z0-9_]+(=[a-zA-Z0-9_]+)?$/.test(String(w.toggle))) bad(at + ' has a bad toggle "' + w.toggle + '"');

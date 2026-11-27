@@ -266,6 +266,8 @@ const sun = require('./sun');
 const textRaster = require('./hud_text');
 const { paintIcon } = require('./icons');
 const shaders = require('./shaders');
+const artworkData = require('./hud_data');
+const { inflateSync } = require('zlib');
 const calibration = require('./calibration');
 const Car = require('./kit/car');
 const Waze = require('./waze');
@@ -291,7 +293,7 @@ const CLAIM_MS = 1000;
 
 const BOOST_SCALE = { factor: 0.01, offset: 0, invalid: 255 }; // see header comment
 // the widget types drawn as pixels (image layers, packed into sheets unless "own": true); the rest are shaders
-const IMAGE_TYPES = { text: true, scale: true, stripe: true, badge: true, gridlabels: true, icon: true, swatchimg: true, nav: true, garland: true };
+const IMAGE_TYPES = { artwork: true, text: true, scale: true, stripe: true, badge: true, gridlabels: true, icon: true, swatchimg: true, nav: true, garland: true };
 const STATUS_ASK_MS = 2000;      // after a rebuild: ask cluster-render for its own status text
 // an image layer is "stalled" until its first pixels reach cluster-render, which after a rebuild takes a second or two
 // through the upload budget: normal. Only one still stalled this long is logged as a problem (and its recovery)
@@ -300,7 +302,8 @@ const LAYER_BUDGET = 8;          // cluster-render's limit per client connection
 const MAX_CONN = 4;              // connections a layout may ask for ("conn"): 32 layers service-wide / 8 per connection
 const PIXEL_BYTES = 16 * 1024 * 1024;   // cluster-render's pixel memory for every app's images together (CompositorLimits.pixel_bytes)
 const SHEET_AREA_FRAC = 4;       // the first sheet size limit: 1/4 of the target area (see the header)
-const TICK_MS = 50;              // 20 Hz: shift bar and gauges
+const TICK_MS = 50;              // 20 Hz: shift bar and gauges (the "fps60" setting off)
+const FAST_TICK_MS = 17;         // ~60 Hz with "fps60" on: the gauges move as smoothly as the render can draw
 const TEXT_MS = 200;             // text re-draws at most 5 times a second (what BMW's own readouts do)
 const TARGET_SIZES = { hud: [800, 480], panel: [1920, 720] };
 const MODE_KEY = { comfort: 'inComfort', sport: 'inSport', eco: 'inEco' };
@@ -574,6 +577,7 @@ class HudApp {
             if (['hudLayout', 'inComfort', 'inSport', 'inEco', 'byMode'].indexOf(key) >= 0 && this.screen.yielded) this.screen.release();
             if (PLACE_KEYS.indexOf(key) >= 0) this._guard('place', () => this._place());
             else if (LIVE_KEYS.indexOf(key) >= 0) this.widgets.forEach((x) => { x.last = null; });
+            else if (key === 'fps60' && this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = setInterval(() => this._guard('tick', () => this._tick()), this._tickMs()); }
             else if (key !== 'demo') this._rebuild(); else this._status();
         });
     }
@@ -691,6 +695,9 @@ class HudApp {
     placeInfo() { return { x: this._offset().x, y: this._offset().y, scale: this._scale(), box: this._placedBox() }; }
 
     /** A setting's value, or its default when the saved value isn't one the schema allows. */
+    /** The gauge tick: 60 Hz while the "fps60" setting is on, the battery-friendly 20 Hz off. */
+    _tickMs() { return this.setting('fps60') ? FAST_TICK_MS : TICK_MS; }
+
     setting(key) {
         // "mapUp": not saved, the Waze map is showing inside the theme now (the setting on, waze.js says so)
         if (key === 'mapUp') return !!(this.waze && this.waze.up && this.ctx.settings.get('mapInTheme') === true);
@@ -912,7 +919,7 @@ class HudApp {
         this.log.info('connecting to cluster-render at ' + this.socketPath);
         this.started = true;
         this.clients.forEach((c) => c.connect());
-        this.tickTimer = setInterval(() => this._guard('tick', () => this._tick()), TICK_MS);
+        this.tickTimer = setInterval(() => this._guard('tick', () => this._tick()), this._tickMs());
         // Auto theme: check for sunrise / sunset once a minute; the status line too
         this.themeTimer = setInterval(() => this._guard('theme check', () => {
             if (this._themeName() !== this.themeName || this._nightDim() !== this.nightOn || this._hudHoliday() !== (this.hudHoliday || null) ||
@@ -2084,7 +2091,10 @@ class HudApp {
             c = this._clientAt(this._connOf(w));
             const base = { target: this.target, klass: w.class || 'content', z: w.z || 0, x: w.x, y: w.y, w: w.w, h: w.h };
             if (IMAGE_TYPES[w.type]) ref = c.image(Object.assign({ iw: w.w, ih: w.h }, w.type === 'nav' ? this._navImage(w) : null, base));
-            else ref = c.effect(Object.assign({ fs: w.type === 'swatch' ? calibration.SWATCH : shaders[w.type] }, base));
+            else {
+                const shader = w.type === 'mtach' && w.finish === 'photo' ? shaders.mtachPhoto : shaders[w.type];
+                ref = c.effect(Object.assign({ fs: w.type === 'swatch' ? calibration.SWATCH : shader }, base));
+            }
             if (!ref) { this.log.warn('widget "' + w.id + '": layer refused'); return; }
             this.placed.push({ c, ref, x: w.x, y: w.y, w: w.w, h: w.h });
         }
@@ -2107,6 +2117,13 @@ class HudApp {
         } else if (w.type === 'gridlabels') this._paintGridLabels(x);
         else if (w.type === 'nav') this._navCreate(x);
         else if (w.type === 'garland') { x.tw = new Garland.Twinkle(w); this._blit(x, null, Garland.paint(w, x.tw.lvl, null)); }
+        else if (w.type === 'artwork') {
+            const asset = artworkData.json('art/' + w.asset + '.json');
+            if (!asset || typeof asset.rgba !== 'string') throw new Error('Missing artwork ' + w.asset);
+            const pixels = inflateSync(Buffer.from(asset.rgba, 'base64'));
+            if (pixels.length !== w.w * w.h * 4) throw new Error('Artwork dimensions do not match ' + w.asset);
+            this._blit(x, null, pixels);
+        }
         else if (w.type === 'icon') this._blit(x, null, paintIcon(w.icon, w.w, w.h, color(t, w.color || 'fg')));
         else if (w.type === 'sdash') {
             c.uniform(ref, 'u_size', [w.w, w.h]);
