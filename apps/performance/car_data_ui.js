@@ -49,18 +49,7 @@ function fitText(cv, s, size, w) {
     return s + '...';
 }
 
-function menuCard(cv, G, t, x, y, w, h, def, action, artReady) {
-    // Keep the menu visually consistent while the badges are being prepared:
-    // display either all eight images or the full set of vector fallbacks.
-    const art = artReady ? Sheet.cachedSectionArt(def.key, t.bg) : null;
-    if (art) {
-        // The supplied badge already carries the section's name; the badge itself is the button.
-        const ih = 180, iw = Math.round(ih * art.w / art.h);
-        const ix = x + (w - iw) / 2, iy = y + (h - ih) / 2;
-        cv.image(art.id, ix, iy, iw, ih);
-        if (cv.own && action) cv.target(ix, iy, iw, ih, action, 'performance_cardata_' + def.key, 30);
-        return;
-    }
+function menuCard(cv, G, t, x, y, w, h, def, action) {
     cv.roundRect(x, y, w, h, 9, G.withAlpha('#ffffff', 0.035));
     cv.strokeRoundRect(x, y, w, h, 9, 1.5, G.withAlpha('#ffffff', 0.18));
     cv.fillRect(x + 1, y + 20, 4, 52, t.accent);
@@ -74,14 +63,13 @@ function menuCard(cv, G, t, x, y, w, h, def, action, artReady) {
 function drawMenu(cv, G, t, actions) {
     // Eight sections: 4 cards on each of two rows.
     const w = 370, h = 196, gap = 20, y1 = (G.TOP || 44) + 30, y2 = y1 + h + gap;
-    const artReady = SECTIONS.every((def) => Sheet.cachedSectionArt(def.key, t.bg));
     const row = SECTIONS.slice(0, 4), row2 = SECTIONS.slice(4);
     row.forEach((def, i) => {
-        menuCard(cv, G, t, 24 + i * (w + gap), y1, w, h, def, actions && actions[def.key], artReady);
+        menuCard(cv, G, t, 24 + i * (w + gap), y1, w, h, def, actions && actions[def.key]);
     });
     const x0 = row2.length >= 4 ? 24 : (W - (row2.length * w + (row2.length - 1) * gap)) / 2;
     row2.forEach((def, i) => {
-        menuCard(cv, G, t, x0 + i * (w + gap), y2, w, h, def, actions && actions[def.key], artReady);
+        menuCard(cv, G, t, x0 + i * (w + gap), y2, w, h, def, actions && actions[def.key]);
     });
 }
 
@@ -210,4 +198,4 @@ function draw(cv, G, t, s, actions) {
     return cv;
 }
 
-module.exports = { W, H, draw, SECTIONS, prepareArt: Sheet.sectionArt };
+module.exports = { W, H, draw, SECTIONS };

@@ -151,8 +151,7 @@ mgu.run({
         const diagnosticDedup = Object.create(null);
         let renderTimer = null, renderQueued = false, renderInFlight = null;
         let renderDirty = true, lastRenderAt = 0;
-        let freshnessTimer = null, dmeTimer = null, demoTimer = null, carDataArtTimer = null;
-        let carDataArtIndex = 0, carDataArtBg = null;
+        let freshnessTimer = null, dmeTimer = null, demoTimer = null;
         let link = null, reader = null, dmeInit = null;
         let lastDynoGate = null;
         let vehicleGear = null, vehicleGearAt = 0;
@@ -1810,37 +1809,6 @@ mgu.run({
         const misfireSaveTimer = setInterval(misfireSave, 60000);
         let misfireAvgDirty = false;
 
-        function warmCarDataArt() {
-            if (state.stopped) {
-                carDataArtTimer = null;
-                return;
-            }
-            const sections = CarDataUi.SECTIONS;
-            if (carDataArtIndex >= sections.length) {
-                carDataArtTimer = null;
-                if (page === 5 && carDataView === 'menu') queueRender();
-                return;
-            }
-            CarDataUi.prepareArt(sections[carDataArtIndex++].key, carDataArtBg);
-            if (carDataArtIndex >= sections.length) {
-                carDataArtTimer = null;
-                if (page === 5 && carDataView === 'menu') queueRender();
-                return;
-            }
-            carDataArtTimer = setTimeout(warmCarDataArt, 40);
-        }
-
-        function scheduleCarDataArtWarmup(bg) {
-            if (carDataArtBg !== bg) {
-                carDataArtBg = bg;
-                carDataArtIndex = 0;
-            }
-            if (carDataArtTimer || carDataArtIndex >= CarDataUi.SECTIONS.length) return;
-            // Prepare the badges in short slices while the app is already
-            // displaying its first page, then reveal the complete menu together.
-            carDataArtTimer = setTimeout(warmCarDataArt, 0);
-        }
-
         // Conditions snapshot for a misfire event (aref_misfire ctx): what the car was doing.
         function misfireCtx() {
             const n = Date.now();
@@ -2716,7 +2684,7 @@ mgu.run({
             const s = current(demo);
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
-            scheduleCarDataArtWarmup(t.bg);
+
             // Engine Data keeps its tuned dashboard sizing; every other page
             // uses larger, measured text so labels and values stay readable.
             cv.fontSizeScale = page === 0 ? 1 : PAGE_TEXT_SCALE;
@@ -2944,7 +2912,7 @@ mgu.run({
             if (dragPulse) { clearInterval(dragPulse); dragPulse = null; }
             if (dmeTimer) { clearInterval(dmeTimer); dmeTimer = null; }
             if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
-            if (carDataArtTimer) { clearTimeout(carDataArtTimer); carDataArtTimer = null; }
+
             if (smokeTick) { clearInterval(smokeTick); smokeTick = null; }
             if (valveRescanTimer) { clearInterval(valveRescanTimer); valveRescanTimer = null; }
             if (valveNoticeTimer) { clearTimeout(valveNoticeTimer); valveNoticeTimer = null; }

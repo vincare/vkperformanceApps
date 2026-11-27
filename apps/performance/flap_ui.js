@@ -246,55 +246,13 @@ function cachedSectionArt(kind, bg) {
 }
 
 function drawConfigCard(cv, G, t, x, y, w, h, title, subtitle, kind, action) {
-    const art = sectionArt(kind, t.bg);
-    if (art) {
-        // Every badge at the same on-screen height: the badge itself is the button.
-        const ih = 230, iw = Math.round(ih * art.w / art.h);
-        const ix = x + (w - iw) / 2, iy = y + (h - ih) / 2;
-        cv.image(art.id, ix, iy, iw, ih);
-        if (cv.own && action) { cv.target(ix, iy, iw, ih, action, 'performance_' + kind + '_section', 30); return; }
-    } else {
-        cv.roundRect(x, y, w, h, 9, G.withAlpha('#ffffff', 0.035));
-        cv.strokeRoundRect(x, y, w, h, 9, 1.5, G.withAlpha('#ffffff', 0.18));
-        cv.fillRect(x + 1, y + 24, 4, 64, t.accent);
-        const is = 220, ix = x + (w - is) / 2, iy = y + (h - is) / 2, cx = ix + is / 2, cy = iy + is / 2, k = is / 144;
-        cv.roundRect(ix, iy, is, is, 10, G.withAlpha('#111317', 0.96));
-        cv.strokeRoundRect(ix, iy, is, is, 10, 2, G.withAlpha(t.accent, 0.72));
-        cv.fillRect(ix + 22 * k, iy + 14 * k, 44 * k, 3 * k, t.accent);
-        if (kind === 'exhaust') {
-            // A muffler body feeding dual M-style tips; the left tip shows the butterfly vane it controls.
-            cv.roundRect(cx - 64 * k, cy - 6 * k, 26 * k, 12 * k, 4 * k, G.withAlpha('#7d858f', 0.92));
-            cv.roundRect(cx - 40 * k, cy - 17 * k, 52 * k, 34 * k, 11 * k, G.withAlpha('#9ca4ae', 0.94));
-            cv.roundRect(cx - 36 * k, cy - 13 * k, 44 * k, 26 * k, 8 * k, G.withAlpha('#191c21', 1));
-            cv.line(cx - 30 * k, cy - 15.5 * k, cx + 4 * k, cy - 15.5 * k, 2 * k, G.withAlpha('#e2e7ec', 0.35));
-            cv.roundRect(cx + 12 * k, cy - 5 * k, 26 * k, 10 * k, 4 * k, G.withAlpha('#7d858f', 0.92));
-            [cx + 44 * k, cx + 62 * k].forEach((tx) => {
-                cv.circle(tx, cy, 9.5 * k, G.withAlpha('#d4d9df', 0.98));
-                cv.circle(tx, cy, 7 * k, G.withAlpha('#14161a', 1));
-            });
-            const fa = -0.7, fx = cx + 44 * k;
-            cv.line(fx - Math.cos(fa) * 6 * k, cy - Math.sin(fa) * 6 * k, fx + Math.cos(fa) * 6 * k, cy + Math.sin(fa) * 6 * k,
-                3.4 * k, G.withAlpha(t.accent, 0.95));
-            cv.circle(fx, cy, 1.6 * k, G.withAlpha('#d4d9df', 0.9));
-        } else {
-            // One tip on the left popping staggered starbursts out to the right.
-            cv.line(cx - 60 * k, cy, cx - 47 * k, cy, 13 * k, G.withAlpha('#7d858f', 0.92));
-            cv.circle(cx - 38 * k, cy, 13.5 * k, G.withAlpha('#d4d9df', 0.98));
-            cv.circle(cx - 38 * k, cy, 9.5 * k, G.withAlpha('#14161a', 1));
-            cv.circle(cx - 38 * k, cy, 9.5 * k, G.withAlpha(t.accent, 0.14));
-            const burst = (bx, by, r, c) => {
-                for (let i = 0; i < 8; i++) {
-                    const a = i * Math.PI / 4, r0 = r * 0.34, r1 = i % 2 ? r : r * 0.6;
-                    cv.line(bx + Math.cos(a) * r0, by + Math.sin(a) * r0,
-                        bx + Math.cos(a) * r1, by + Math.sin(a) * r1, 2.6 * k, c);
-                }
-                cv.circle(bx, by, r * 0.24, c);
-            };
-            burst(cx + 4 * k, cy - 16 * k, 15 * k, G.withAlpha('#ffb35c', 0.92));
-            burst(cx + 32 * k, cy + 4 * k, 19 * k, G.withAlpha(t.accent, 0.95));
-            burst(cx + 14 * k, cy + 24 * k, 11 * k, G.withAlpha('#ff8a3c', 0.9));
-        }
-    }
+    cv.roundRect(x, y, w, h, 9, G.withAlpha('#ffffff', 0.035));
+    cv.strokeRoundRect(x, y, w, h, 9, 1.5, G.withAlpha('#ffffff', 0.18));
+    cv.fillRect(x + 1, y + 24, 4, 64, t.accent);
+    const cx = x + w / 2;
+    cv.text(title, cx, y + h / 2 - 10, 34, '#ffffff', { align: 'center', font: 'bold', spacing: 1.5, literal: true });
+    cv.fillRect(cx - 44, y + h / 2 + 8, 88, 4, t.accent);
+    cv.text(subtitle, cx, y + h / 2 + 38, 15, t.dim, { align: 'center', font: 'label' });
     if (cv.own && action) cv.target(x, y, w, h, action, 'performance_' + kind + '_section', 20);
 }
 
