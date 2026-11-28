@@ -85,7 +85,8 @@
         255,
         255,
         255
-      ]
+      ],
+      "own": true
     },
     {
       "id": "gear_stage",
@@ -104,7 +105,8 @@
         255,
         255,
         255
-      ]
+      ],
+      "own": true
     },
     {
       "id": "gear_bars",
@@ -135,7 +137,8 @@
         255,
         255,
         255
-      ]
+      ],
+      "own": true
     },
     {
       "id": "speed_u",
@@ -149,7 +152,8 @@
       "align": "center",
       "conn": 2,
       "z": 4,
-      "color": "fg"
+      "color": "fg",
+      "own": true
     },
     {
       "id": "setup_engine",
