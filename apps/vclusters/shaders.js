@@ -1867,4 +1867,38 @@ void main() {
     gl_FragColor = vec4(paint, inset * alpha * step(0.001, u_value));
 }
 `;
-module.exports = { mtachPhoto: MTACH_PHOTO, shiftbar: SHIFTBAR, arc: ARC, revbar: REVBAR, lights: LIGHTS, fill: FILL, box: BOX, grid: GRID, segbar: SEGBAR, mdash: MDASH, mtach: MTACH, sdash: SDASH, boxes: BOXES, atext: ATEXT, meter: METER, gmeter: GMETER, revarc: REVARC, tiles: TILES, ribbon: RIBBON, deco: DECO, mview: MVIEW, vdash: VDASH };
+const CORNER_ARC = `
+precision mediump float;
+varying vec2 v_uv;
+uniform float u_value;
+uniform float u_start;
+uniform float u_sweep;
+uniform vec3 u_color;
+
+void main() {
+    vec2 p = vec2((v_uv.x - 0.5) * 2.18, (0.5 - v_uv.y) * 1.94);
+    float angle = atan(p.x, p.y);
+    float side = sign(u_sweep);
+    float rel = mod((angle - u_start) * side + 6.2831853, 6.2831853);
+    float sweep = abs(u_sweep);
+    if (rel > sweep + 0.025) { gl_FragColor = vec4(0.0); return; }
+
+    float t = clamp(rel / sweep, 0.0, 1.0);
+    float r = length(p);
+    float scale = smoothstep(0.61, 0.64, r) * (1.0 - smoothstep(0.94, 0.96, r));
+    float reflection = exp(-abs(r - 0.82) * 12.0);
+    vec3 graphite = mix(vec3(0.075, 0.092, 0.12), vec3(0.24, 0.28, 0.34), reflection * 0.62);
+    float rail = 1.0 - smoothstep(0.008, 0.026, abs(r - 0.91));
+    float innerRail = 0.38 * (1.0 - smoothstep(0.006, 0.018, abs(r - 0.65)));
+    float major = min(min(t, 1.0 - t), abs(t - 0.5));
+    float ticks = (1.0 - smoothstep(0.008, 0.018, major)) * smoothstep(0.73, 0.76, r);
+    vec3 metal = vec3(0.78, 0.84, 0.91);
+    vec3 face = mix(graphite, metal, max(max(rail, innerRail), ticks));
+
+    float marker = 1.0 - smoothstep(0.016, 0.036, abs(t - u_value));
+    marker *= smoothstep(0.64, 0.68, r) * (1.0 - smoothstep(0.85, 0.89, r));
+    vec3 paint = mix(face, max(u_color, vec3(0.86, 0.045, 0.065)), marker);
+    gl_FragColor = vec4(paint, scale);
+}
+`;
+module.exports = { cornerArc: CORNER_ARC, mtachPhoto: MTACH_PHOTO, shiftbar: SHIFTBAR, arc: ARC, revbar: REVBAR, lights: LIGHTS, fill: FILL, box: BOX, grid: GRID, segbar: SEGBAR, mdash: MDASH, mtach: MTACH, sdash: SDASH, boxes: BOXES, atext: ATEXT, meter: METER, gmeter: GMETER, revarc: REVARC, tiles: TILES, ribbon: RIBBON, deco: DECO, mview: MVIEW, vdash: VDASH };

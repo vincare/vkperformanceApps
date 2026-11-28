@@ -9,7 +9,7 @@
       "x": 0,
       "y": 26,
       "w": 1920,
-      "h": 540,
+      "h": 694,
       "z": 0,
       "color": "bg"
     },
@@ -78,15 +78,14 @@
       "text": "{{gearInD}}",
       "font": "sq_speed",
       "align": "center",
-      "conn": 1,
+      "conn": 3,
       "z": 4,
       "color": [
         255,
         255,
         255,
         255
-      ],
-      "own": true
+      ]
     },
     {
       "id": "gear_stage",
@@ -98,15 +97,14 @@
       "text": "{{stage}}",
       "font": "sq_gear",
       "align": "center",
-      "conn": 1,
+      "conn": 3,
       "z": 4,
       "color": [
         255,
         255,
         255,
         255
-      ],
-      "own": true
+      ]
     },
     {
       "id": "gear_bars",
@@ -130,15 +128,14 @@
       "rate": 1,
       "font": "sq_speed",
       "align": "center",
-      "conn": 1,
+      "conn": 2,
       "z": 4,
       "color": [
         255,
         255,
         255,
         255
-      ],
-      "own": true
+      ]
     },
     {
       "id": "speed_u",
@@ -150,10 +147,9 @@
       "text": "{{u:speedLc}}",
       "font": "m_tiny",
       "align": "center",
-      "conn": 1,
+      "conn": 2,
       "z": 4,
-      "color": "fg",
-      "own": true
+      "color": "fg"
     },
     {
       "id": "setup_engine",
@@ -591,6 +587,145 @@
       "w": 233,
       "h": 504,
       "z": 3
+    },
+    {
+      "id": "bottom_range",
+      "type": "text",
+      "x": 177,
+      "y": 673,
+      "w": 180,
+      "h": 32,
+      "z": 4,
+      "text": "{{range}} {{u:distLc}}",
+      "font": "rc_reg",
+      "align": "center",
+      "color": "fg",
+      "stripRow": true
+    },
+    {
+      "id": "bottom_clock",
+      "type": "text",
+      "x": 390,
+      "y": 673,
+      "w": 180,
+      "h": 32,
+      "z": 4,
+      "text": "{{time}} {{ampmLc}}",
+      "font": "rc_reg",
+      "align": "center",
+      "color": "fg",
+      "stripRow": true
+    },
+    {
+      "id": "bottom_temp",
+      "type": "text",
+      "x": 1490,
+      "y": 673,
+      "w": 180,
+      "h": 32,
+      "z": 4,
+      "text": "{{ambient}} {{u:temp}}",
+      "font": "rc_reg",
+      "align": "center",
+      "color": "fg",
+      "stripRow": true
+    },
+    {
+      "id": "corner_fuel",
+      "type": "arc",
+      "x": 73,
+      "y": 491,
+      "w": 132,
+      "h": 157,
+      "z": 2,
+      "conn": 0,
+      "start": 147,
+      "sweep": 161,
+      "width": 6,
+      "color": "hot",
+      "signal": "fuel",
+      "min": 0,
+      "max": 1,
+      "finish": "corner"
+    },
+    {
+      "id": "corner_fuel_0",
+      "type": "text",
+      "x": 88,
+      "y": 539,
+      "w": 112,
+      "h": 30,
+      "z": 4,
+      "font": "rc_reg",
+      "align": "center",
+      "color": "dim",
+      "text": "FUEL",
+      "warnFlash": false,
+      "stripRow": true
+    },
+    {
+      "id": "corner_fuel_1",
+      "type": "text",
+      "x": 88,
+      "y": 568,
+      "w": 112,
+      "h": 30,
+      "z": 4,
+      "font": "rc_reg",
+      "align": "center",
+      "color": "fg",
+      "text": "{{fuelPct}} %",
+      "warnFlash": false,
+      "stripRow": true
+    },
+    {
+      "id": "corner_oil",
+      "type": "arc",
+      "x": 1715,
+      "y": 491,
+      "w": 132,
+      "h": 157,
+      "z": 2,
+      "conn": 2,
+      "start": 213,
+      "sweep": -161,
+      "width": 6,
+      "color": "hot",
+      "signal": "oil",
+      "min": 50,
+      "max": 150,
+      "finish": "corner"
+    },
+    {
+      "id": "corner_oil_0",
+      "type": "text",
+      "x": 1717,
+      "y": 539,
+      "w": 112,
+      "h": 30,
+      "z": 4,
+      "font": "rc_reg",
+      "align": "center",
+      "color": "dim",
+      "text": "OIL",
+      "warnFlash": true,
+      "stripRow": true
+    },
+    {
+      "id": "corner_oil_1",
+      "type": "text",
+      "x": 1717,
+      "y": 568,
+      "w": 112,
+      "h": 30,
+      "z": 4,
+      "font": "rc_reg",
+      "align": "center",
+      "color": "fg",
+      "text": "{{oil}} {{u:temp}}",
+      "warnFlash": true,
+      "stripRow": true
     }
-  ]
+  ],
+  "packWaste": 4
 }

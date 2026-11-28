@@ -2,7 +2,7 @@
   "id": "vclusters",
   "title": "VClusters",
   "description": "VClusters: a BMW M3/M4 G80/G82-inspired digital instrument cluster with twin 0–8 rev blades, central gear and speed, M setup rows, side gauges, and the existing live vehicle data.",
-  "version": "1.0.8",
+  "version": "1.0.7",
   "vendor": "VKPERFORMANCE & VKDIGITALS",
   "loggingId": "VCL1",
   "autostart": true,

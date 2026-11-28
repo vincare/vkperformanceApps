@@ -533,6 +533,7 @@ class HudApp {
         this.atlases = new Map();        // "<conn>:<font>" -> { ref, c, ci, cols, rows, cellW, cellH, chars, bytes }: R8 assets, kept across rebuilds
         this.targetState = null;         // { state, holder, reason } of our target
         this.rpmF = null; this.rpmShown = null; this.lastTickT = 0;
+        this.rpmInput = null; this._sigRaw = null; this._sigAt = 0; this._sigRate = null;
         this.themeName = null;
         this.flash = false;
         this.problem = null;             // why nothing shows (a bad layout), for the status line
@@ -2135,7 +2136,8 @@ class HudApp {
             const base = { target: this.target, klass: w.class || 'content', z: w.z || 0, x: w.x, y: w.y, w: w.w, h: w.h };
             if (IMAGE_TYPES[w.type]) ref = c.image(Object.assign({ iw: w.w, ih: w.h }, w.type === 'nav' ? this._navImage(w) : null, base));
             else {
-                const shader = w.type === 'mtach' && w.finish === 'photo' ? shaders.mtachPhoto : shaders[w.type];
+                const shader = w.type === 'arc' && w.finish === 'corner' ? shaders.cornerArc
+                    : w.type === 'mtach' && w.finish === 'photo' ? shaders.mtachPhoto : shaders[w.type];
                 ref = c.effect(Object.assign({ fs: w.type === 'swatch' ? calibration.SWATCH : shader }, base));
             }
             if (!ref) { this.log.warn('widget "' + w.id + '": layer refused'); return; }
@@ -2608,15 +2610,35 @@ class HudApp {
         return this.tripMs >= 60000 ? this.tripKm / (this.tripMs / 3600000) : null;
     }
 
-    /** BMW-like tach: a 120 ms filter, and a readout that moves in 50 rpm steps, only by 40 rpm or more. */
+    /** BMW-like tach: a 120 ms filter, and a readout that moves in 50 rpm steps, only by 40 rpm or more.
+     * The car notifies rpm at its own rate, so rpmInput (what the photo needles draw) is extrapolated
+     * between samples along the recent slew rate - the needle glides instead of stepping at signal rate. */
     _smoothRpm(now) {
         const test = this._testRpm(now);
         const raw = isNum(test) ? test : this.car.data().rpm;
-        this.rpmInput = raw;
         const dt = this.lastTickT ? Math.min(500, now - this.lastTickT) : 0;
         this.lastTickT = now;
-        if (!isNum(raw)) { this.rpmF = null; this.rpmShown = null; return; }
-        this.rpmF = isNum(this.rpmF) ? this.rpmF + (raw - this.rpmF) * (1 - Math.exp(-dt / 120)) : raw;
+        if (!isNum(raw)) { this.rpmF = null; this.rpmShown = null; this.rpmInput = null; return; }
+        if (isNum(test)) {
+            this.rpmInput = raw;
+            this._sigRaw = raw; this._sigAt = now; this._sigRate = 0;
+        } else {
+            if (raw !== this._sigRaw) {
+                const gap = isNum(this._sigRaw) ? now - (this._sigAt || now) : 0;
+                if (gap > 20 && gap < 1500) {
+                    const inst = (raw - this._sigRaw) / gap;          // rpm per ms between samples
+                    this._sigRate = isNum(this._sigRate) ? this._sigRate + (inst - this._sigRate) * 0.45 : inst;
+                }
+                this._sigRaw = raw; this._sigAt = now;
+            }
+            const stale = now - (this._sigAt || now);
+            const pred = stale <= 350 ? raw + (this._sigRate || 0) * Math.min(stale, 200) : raw;
+            const target = Math.max(0, pred);
+            this.rpmInput = isNum(this.rpmInput)
+                ? this.rpmInput + (target - this.rpmInput) * (1 - Math.exp(-dt / 60))
+                : target;
+        }
+        this.rpmF = isNum(this.rpmF) ? this.rpmF + (this.rpmInput - this.rpmF) * (1 - Math.exp(-dt / 120)) : this.rpmInput;
         if (!isNum(this.rpmShown) || Math.abs(this.rpmF - this.rpmShown) >= 40) this.rpmShown = Math.max(0, Math.round(this.rpmF / 50) * 50);
     }
 
