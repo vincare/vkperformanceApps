@@ -1853,7 +1853,7 @@ void main() {
     pearl *= channel;
     float bevel = smoothstep(0.88, 0.98, across);
     pearl = mix(pearl, steel * 1.11, bevel * 0.72);
-    float fadeStrength = 1.0 - smoothstep(6000.0, 7000.0, rpm);
+    float fadeStrength = rpm <= 7500.0 ? mix(1.0, 0.18, smoothstep(6000.0, 7500.0, rpm)) : 0.0;
     float fadeLength = mix(4.0, 42.0, fadeStrength);
     float ahead = tip - y;
     float fade = 1.0 - smoothstep(5.0, fadeLength + 5.0, ahead);

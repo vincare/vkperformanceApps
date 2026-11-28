@@ -634,12 +634,12 @@ const parked = () => Object.assign(driveFrame(0), { rpm: 850, speed: 0, torque: 
 
 /* ---------- manual THROTTLE / BRAKE simulator (40 ms steps) ---------- */
 const RPK = [0, 115, 77, 51, 41, 31, 24, 20, 16];   // engine rpm per km/h in gears 1-8
-const ACC = [0, 26, 20, 15, 11, 9, 7, 6, 5];        // full-throttle km/h per s, gears 1-8
-const TOPV = 250;
+const ACC = [0, 32, 27, 22, 18, 14, 11, 9, 7];      // full-throttle km/h per s, gears 1-8
+const TOPV = 290;
 const PEDAL_PROFILES = {
-    COMFORT:    { curve: 1.12, launch: 2200, lockSpeed: 23, response: 6, pull: 1,    shift: 5600 },
-    SPORT:      { curve: 0.86, launch: 3400, lockSpeed: 31, response: 9, pull: 1.18, shift: 6400 },
-    SPORT_PLUS: { curve: 0.62, launch: 4900, lockSpeed: 40, response: 15, pull: 1.43, shift: 7000 },
+    COMFORT:    { curve: 1.12, launch: 2200, lockSpeed: 23, response: 8,  pull: 1.3,  shift: 6200 },
+    SPORT:      { curve: 0.86, launch: 3400, lockSpeed: 31, response: 13, pull: 1.65, shift: 7000 },
+    SPORT_PLUS: { curve: 0.62, launch: 4900, lockSpeed: 40, response: 20, pull: 2.1,  shift: 7500 },
 };
 let manual = false;
 const SIM = { pedal: 0, brake: 0, rpm: 850, speed: 0, gear: 1, parked: true, stopT: 0 };
