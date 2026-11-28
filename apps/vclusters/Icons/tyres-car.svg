@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 54 104">
+<defs>
+<linearGradient id="b" x2="0" y2="100%"><stop stop-color="#aab4ca"/><stop offset=".32" stop-color="#596780"/><stop offset=".68" stop-color="#252d40"/><stop offset="1" stop-color="#626e89"/></linearGradient>
+<linearGradient id="r"><stop stop-color="#444e66"/><stop offset=".18" stop-color="#8190ad"/><stop offset=".52" stop-color="#4b566f"/><stop offset="1" stop-color="#262e42"/></linearGradient>
+<radialGradient id="w" cy=".35" r=".65"><stop stop-color="#48546d"/><stop offset=".65" stop-color="#151e2e"/><stop offset="1" stop-color="#05080d"/></radialGradient>
+<linearGradient id="t"><stop stop-color="#17a900"/><stop offset=".38" stop-color="#b1ff8e"/><stop offset=".69" stop-color="#63e332"/><stop offset="1" stop-color="#14a900"/></linearGradient>
+<path id="a" d="M8 15q1-3 5-3h4q4 0 4 4l-1 12q0 4-4 4H9q-3 0-3-3Z"/>
+<path id="z" d="M8 72h7q4 0 4 4l1 13q0 3-4 3h-5q-4 0-4-4L6 76q0-4 2-4Z"/>
+</defs>
+<path fill="#aeb9cc" d="m9 36-7 3-2 4 4 1 7-4Zm36 0 7 3 2 4-4 1-7-4Z"/>
+<path fill="url(#b)" stroke="#828da7" d="M27 1C14 1 7 7 6 18L5 71l2 15c1 12 7 17 20 17s19-5 20-17l2-15-1-53C47 7 40 1 27 1Z"/>
+<path fill="none" stroke="#bfcbdf" stroke-opacity=".75" d="M8 15Q12 4 27 4t19 11M9 91q2 9 18 9t18-9M10 20 9 75m35-55 1 55"/>
+<path fill="url(#r)" d="M15 9q12-5 24 0l1 21q-13-5-26 0Z"/>
+<path fill="url(#w)" d="M11 33q16-10 32 0l-4 17q-12-5-24 0Z"/>
+<path fill="#111827" d="m11 40 4 13 1 20-6-4Zm32 0-4 13-1 20 6-4Z"/>
+<path fill="url(#r)" stroke="#7c899f" stroke-width=".7" d="M15 50q12-5 24 0l-1 24q-11 4-22 0Z"/>
+<path fill="url(#w)" d="M15 75q12 4 24 0l3 13q-15 8-30 0Z"/>
+<path fill="none" stroke="#b7bfd2" stroke-opacity=".55" d="M13 91q14 7 28 0"/>
+<path fill="#d8485b" d="m9 89 5 2 1 3-5-1Zm36 0-5 2-1 3 5-1Z"/>
+<g fill="url(#t)"><use xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#a"/><use xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#a" transform="translate(54) scale(-1 1)"/><use xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#z"/><use xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#z" transform="translate(54) scale(-1 1)"/></g>
+</svg>

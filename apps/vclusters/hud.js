@@ -303,7 +303,7 @@ const MAX_CONN = 4;              // connections a layout may ask for ("conn"): 3
 const PIXEL_BYTES = 16 * 1024 * 1024;   // cluster-render's pixel memory for every app's images together (CompositorLimits.pixel_bytes)
 const SHEET_AREA_FRAC = 4;       // the first sheet size limit: 1/4 of the target area (see the header)
 const TICK_MS = 50;              // 20 Hz: shift bar and gauges (the "fps60" setting off)
-const FAST_TICK_MS = 17;         // ~60 Hz with "fps60" on: the gauges move as smoothly as the render can draw
+const FAST_TICK_MS = 1000 / 60;
 const TEXT_MS = 200;             // text re-draws at most 5 times a second (what BMW's own readouts do)
 const TARGET_SIZES = { hud: [800, 480], panel: [1920, 720] };
 const MODE_KEY = { comfort: 'inComfort', sport: 'inSport', eco: 'inEco' };
@@ -325,6 +325,8 @@ const G_ENV_TEX = 64;                   // the envelope asset's width (R8, 64 x 
 // warnings (page.js Alerts): a readout of oil / coolant / boost over its limit flashes in the shift red
 const WARN = { oil: 'warnOil', coolant: 'warnCoolant', boost: 'warnBoost' };
 const WARN_FLASH_MS = 300;
+const TYRE_LOW = 1.9, TYRE_FLAT = 1.5;                    // bar: below LOW the mark goes amber, below FLAT red
+const TYRE_TINT = { ok: [22, 196, 90], low: [240, 160, 20], flat: [235, 45, 45], unknown: [110, 115, 125] };
 // a tile's bar (the Dyno theme's "tiles") per sensor (sensors.js id): the raw reading (hud _raw) between min and
 // max, "z" for a zoned bar (blue, dark blue, red past u_at); a sensor not here has no bar. rpm runs to the bar max.
 const TILE_BAR = {
@@ -577,7 +579,7 @@ class HudApp {
             if (['hudLayout', 'inComfort', 'inSport', 'inEco', 'byMode'].indexOf(key) >= 0 && this.screen.yielded) this.screen.release();
             if (PLACE_KEYS.indexOf(key) >= 0) this._guard('place', () => this._place());
             else if (LIVE_KEYS.indexOf(key) >= 0) this.widgets.forEach((x) => { x.last = null; });
-            else if (key === 'fps60' && this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = setInterval(() => this._guard('tick', () => this._tick()), this._tickMs()); }
+            else if (key === 'fps60' && this.tickTimer) this._startTicks();
             else if (key !== 'demo') this._rebuild(); else this._status();
         });
     }
@@ -697,6 +699,25 @@ class HudApp {
     /** A setting's value, or its default when the saved value isn't one the schema allows. */
     /** The gauge tick: 60 Hz while the "fps60" setting is on, the battery-friendly 20 Hz off. */
     _tickMs() { return this.setting('fps60') ? FAST_TICK_MS : TICK_MS; }
+
+    _startTicks() {
+        clearTimeout(this.tickTimer);
+        const period = this._tickMs();
+        let next = process.uptime() * 1000 + period;
+        const schedule = () => {
+            const delay = Math.max(1, Math.ceil(next - process.uptime() * 1000));
+            const timer = setTimeout(() => {
+                if (this.tickTimer !== timer) return;
+                this._guard('tick', () => this._tick());
+                if (this.tickTimer !== timer) return;
+                const now = process.uptime() * 1000;
+                next += period * Math.max(1, Math.floor((now - next) / period) + 1);
+                schedule();
+            }, delay);
+            this.tickTimer = timer;
+        };
+        schedule();
+    }
 
     setting(key) {
         // "mapUp": not saved, the Waze map is showing inside the theme now (the setting on, waze.js says so)
@@ -919,7 +940,7 @@ class HudApp {
         this.log.info('connecting to cluster-render at ' + this.socketPath);
         this.started = true;
         this.clients.forEach((c) => c.connect());
-        this.tickTimer = setInterval(() => this._guard('tick', () => this._tick()), this._tickMs());
+        this._startTicks();
         // Auto theme: check for sunrise / sunset once a minute; the status line too
         this.themeTimer = setInterval(() => this._guard('theme check', () => {
             if (this._themeName() !== this.themeName || this._nightDim() !== this.nightOn || this._hudHoliday() !== (this.hudHoliday || null) ||
@@ -1002,7 +1023,8 @@ class HudApp {
     }
 
     stop() {
-        clearInterval(this.tickTimer);
+        clearTimeout(this.tickTimer);
+        this.tickTimer = null;
         clearInterval(this.themeTimer);
         clearInterval(this.statusTimer);
         clearInterval(this.dmeTimer);
@@ -1448,6 +1470,27 @@ class HudApp {
     }
 
     _barMax(w) { return Math.ceil(this.setting('redline') / 1000) * 1000 + ((w && w.over) || 0); }
+
+    /** "tint": the colour the white+alpha artwork pixels multiply by this frame (tyre status below). */
+    _tintArtwork(w, base) {
+        const c = w.tint === 'tyre' ? this._tyreTint(w.tyre) : null;
+        if (!c) return base;
+        const buf = Buffer.alloc(base.length);
+        for (let i = 0; i < base.length; i += 4) {
+            buf[i] = base[i] * c[0] / 255 | 0;
+            buf[i + 1] = base[i + 1] * c[1] / 255 | 0;
+            buf[i + 2] = base[i + 2] * c[2] / 255 | 0;
+            buf[i + 3] = base[i + 3];
+        }
+        return buf;
+    }
+
+    /** TPMS status colour for a corner: green ok, amber low, red flat, grey when the sensor is silent. */
+    _tyreTint(corner) {
+        const v = this._tyre('p', corner);
+        if (!isNum(v)) return TYRE_TINT.unknown;
+        return v < TYRE_FLAT ? TYRE_TINT.flat : v < TYRE_LOW ? TYRE_TINT.low : TYRE_TINT.ok;
+    }
 
     /** The shift point now ({ rpm, cold }) and whether the rpm is at or past it. */
     _shift() {
@@ -2122,7 +2165,8 @@ class HudApp {
             if (!asset || typeof asset.rgba !== 'string') throw new Error('Missing artwork ' + w.asset);
             const pixels = inflateSync(Buffer.from(asset.rgba, 'base64'));
             if (pixels.length !== w.w * w.h * 4) throw new Error('Artwork dimensions do not match ' + w.asset);
-            this._blit(x, null, pixels);
+            x.base = w.tint ? pixels : null;   // the untinted copy: x.px is _blitDiff's last-sent frame
+            this._blit(x, null, w.tint ? this._tintArtwork(w, pixels) : pixels);
         }
         else if (w.type === 'icon') this._blit(x, null, paintIcon(w.icon, w.w, w.h, color(t, w.color || 'fg')));
         else if (w.type === 'sdash') {
@@ -2568,6 +2612,7 @@ class HudApp {
     _smoothRpm(now) {
         const test = this._testRpm(now);
         const raw = isNum(test) ? test : this.car.data().rpm;
+        this.rpmInput = raw;
         const dt = this.lastTickT ? Math.min(500, now - this.lastTickT) : 0;
         this.lastTickT = now;
         if (!isNum(raw)) { this.rpmF = null; this.rpmShown = null; return; }
@@ -2585,6 +2630,14 @@ class HudApp {
             x.c.uniform(x.ref, 'u_text', this._atlasCodes(x, s), { type: 'vec4' });
         } else if (w.type === 'nav') this._navUpdate(x, now, force);
         else if (w.type === 'garland') this._garlandTick(x, now);
+        else if (w.type === 'artwork') {
+            if (!w.tint || !x.base) return;
+            const c = w.tint === 'tyre' ? this._tyreTint(w.tyre) : null;
+            const key = c ? c.join() : '-';
+            if (!force && key === x.last) return;
+            x.last = key;
+            this._blitDiff(x, this._tintArtwork(w, x.base));
+        }
         else if (w.type === 'text') {
             if (!force && now - x.lastPaint < (w.rate || TEXT_MS)) return;
             let s = (w.navHide && this.navShown) || smartTemps.hidden(this, w) || !this._shownNow(w) ? '' : this._resolve(w.text);   // nav turn showing / "showWhen"
@@ -2815,19 +2868,24 @@ class HudApp {
             x.c.uniform(x.ref, 'u_segLit', lit);
             if (x.lvls && x.lvls.length) x.c.uniform(x.ref, 'u_lvlV', lv);
         } else if (w.type === 'mtach') {
-            const rpm = this._raw('rpm'), sp = this._shift();
+            const photo = w.finish === 'photo';
+            const rpm = photo && this.setting('fps60') ? this.rpmInput : this._raw('rpm');
             const v = isNum(rpm) ? Math.min(1, Math.max(0, rpm / (w.max || 8000))) : 0;
-            const key = Math.round(v * 600) + '|' + sp.now;
+            const shift = !photo && this._shift().now;
+            const key = photo ? v : Math.round(v * 600) + '|' + shift;
             if (!force && key === x.last) return;
             x.last = key;
             x.c.uniform(x.ref, 'u_value', [v]);
-            x.c.uniform(x.ref, 'u_shiftNow', [sp.now ? 1 : 0]);
+            if (!photo) x.c.uniform(x.ref, 'u_shiftNow', [shift ? 1 : 0]);
         } else if (w.type === 'segbar') {
             const v = this._raw(w.signal);
             const lit = isNum(v) ? Math.max(0, Math.min(w.max, Math.round(v))) : 0;
-            if (!force && lit === x.last) return;
-            x.last = lit;
+            const onC = lit <= 1 ? rgba(w.coldColor || [80, 170, 255, 255]) : rgba(color(this.theme, w.color || 'hot'));
+            const key = lit + '|' + onC.join(',');
+            if (!force && key === x.last) return;
+            x.last = key;
             x.c.uniform(x.ref, 'u_lit', [lit]);
+            x.c.uniform(x.ref, 'u_on', onC);
         } else if (w.type === 'revbar') {
             const rpm = this._raw('rpm'), sp = this._shift();
             const v = isNum(rpm) ? Math.round(Math.max(0, rpm) / 10) * 10 : 0;

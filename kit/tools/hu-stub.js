@@ -268,6 +268,10 @@ function liveSignals(hu) {
     const subs = hu.subs = {};
     const eventHandlers = Object.create(null);
     const liveProxies = new Set([LIGHT, FES, TASU]);
+    // extra "car answers" providers an emulator run can ask for (MGU_EMU_PROVIDES, comma list). The
+    // manual-signal feed only reaches a watch if its interface is in here; opt-in so the plain
+    // emulator keeps its demo-driven behaviour.
+    (process.env.MGU_EMU_PROVIDES || '').split(',').forEach((i) => { if (i.trim()) liveProxies.add(i.trim()); });
     const no = () => Promise.reject(new Error('emulator: unsupported SOME/IP interface'));
     const removeSub = (list, entry) => { const i = list.indexOf(entry); if (i >= 0) list.splice(i, 1); };
     const byteList = (value) => value && (Buffer.isBuffer(value) || value instanceof Uint8Array || Array.isArray(value))
@@ -509,12 +513,12 @@ function runLive(stage, dataDir) {
         g.sock.destroy();
     };
 
-    // manual signals: raw values (README section 7) through the stub, 20 a second as the car sends them
+    // The cluster preview supplies fast samples directly. Other emulators keep their periodic replay.
     const S = Object.assign({}, SCALE, (spec.config && spec.config.scaling) || {});
     const raw = (k, v) => Math.round((v - (S[k].offset || 0)) / S[k].factor);
     let manual = null;
-    setInterval(() => {
-        const v = manual;
+    const direct = process.env.CLUSTER_PREVIEW_DIRECT_SIGNALS === '1';
+    function replay(v) {
         if (!v) return;
         const gear = v.gear === 'P' || v.gear === 'N' ? 'N_OR_P' : v.gear === 'R' ? 'R' : 'G' + String(v.gear).replace(/^D/, '');
         hu.feed('de.bmw.infotainment.vehicle.CDS', 'statusEngineSpeed2', { actualValueRPMEngineCrankshaft: raw('rpm', v.rpm) });
@@ -524,7 +528,22 @@ function runLive(stage, dataDir) {
         hu.feed('de.bmw.infotainment.vehicle.CDS', 'statusEngineTemperature', { temperatureEngineDrive: raw('temp', v.coolant), temperatureEngineOilDrive: raw('temp', v.oil) });
         hu.feed('de.bmw.infrastructure.VehicleInformation', 'statusGearboxDrive', { statusActualGearDrive: gear, statusActualStageDrive: /^D/.test(v.gear) ? 'D' : v.gear });
         hu.feed('de.bmw.infotainment.drivingexcitement.FES', 'statusActualValueTorque2', { actualValueTorqueCrankshaft: raw('torque', v.torque) });
-    }, 50);
+        if (v.fuelL !== undefined || v.rangeKm !== undefined)
+            hu.feed('de.bmw.infotainment.KombiIF', 'statusRangeTankStatus', { fluidLevelFuelTank: v.fuelL, range: v.rangeKm });
+        if (v.ambient !== undefined)
+            hu.feed('de.bmw.infrastructure.EnvironmentalInformation', 'ExteriorTemperature', { temperatureExterior: (v.ambient + 40) * 2 });
+        // tyre pressures as 0.1 psi raws and temps as (F + 40) raws - psi pressures set psiSeen, so
+        // the F scale is what the reader expects with them
+        if (v.tyreP) hu.feed('de.bmw.infotainment.vehicle.TPMS', 'statusTyrePressure', {
+            actualValuePressureTyreFLH: Math.round(v.tyreP.FL * 10), actualValuePressureTyreFRH: Math.round(v.tyreP.FR * 10),
+            actualValuePressureTyreRLH: Math.round(v.tyreP.RL * 10), actualValuePressureTyreRRH: Math.round(v.tyreP.RR * 10),
+        });
+        if (v.tyreT) hu.feed('de.bmw.infotainment.vehicle.TPMS', 'statusTyreTemperature', {
+            actualValueTemperatureTyreFLH: Math.round(v.tyreT.FL * 9 / 5 + 32 + 40), actualValueTemperatureTyreFRH: Math.round(v.tyreT.FR * 9 / 5 + 32 + 40),
+            actualValueTemperatureTyreRLH: Math.round(v.tyreT.RL * 9 / 5 + 32 + 40), actualValueTemperatureTyreRRH: Math.round(v.tyreT.RR * 9 / 5 + 32 + 40),
+        });
+    }
+    if (!direct) setInterval(() => replay(manual), 50);
 
     process.on('message', (m) => {
         if (m.t === 'set') settings.set(m.k, m.v);
@@ -540,6 +559,7 @@ function runLive(stage, dataDir) {
                 hu.simAmbient(m.v.ambientOn, m.v.ambientSlot);
             const want = m.mode === 'manual' ? 'auto' : 'on';
             if (settings.get('demo') !== want) settings.set('demo', want);
+            if (direct) replay(manual);
         } else if (m.t === 'ccu') {
             const e = m.ev;
             // FrontCCU as the SDK hands it over (enums by name); the HMI acts on it unless the app holds the controller

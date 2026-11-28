@@ -1773,20 +1773,98 @@ uniform float u_side;
 uniform vec4 u_geoA;
 uniform float u_value;
 uniform vec3 u_red;
+
+vec4 interval(float y, float a, float b, vec4 from, vec4 to) {
+    return mix(from, to, clamp((y - a) / (b - a), 0.0, 1.0));
+}
+
+// Outer inset and inner edge of both blades, traced against the M340i artwork.
+vec4 blade(float y) {
+    if (y < 35.0) return interval(y, 15.0, 35.0, vec4(179, 201, 171, 203), vec4(152, 192, 151, 195));
+    if (y < 50.0) return interval(y, 35.0, 50.0, vec4(152, 192, 151, 195), vec4(138, 182, 138, 185));
+    if (y < 66.0) return interval(y, 50.0, 66.0, vec4(138, 182, 138, 185), vec4(123, 171, 123, 174));
+    if (y < 85.0) return interval(y, 66.0, 85.0, vec4(123, 171, 123, 174), vec4(107, 160, 109, 162));
+    if (y < 103.0) return interval(y, 85.0, 103.0, vec4(107, 160, 109, 162), vec4(93, 147, 93, 150));
+    if (y < 121.0) return interval(y, 103.0, 121.0, vec4(93, 147, 93, 150), vec4(81, 137, 81, 140));
+    if (y < 145.0) return interval(y, 121.0, 145.0, vec4(81, 137, 81, 140), vec4(64, 126, 62, 127));
+    if (y < 183.0) return interval(y, 145.0, 183.0, vec4(64, 126, 62, 127), vec4(40, 106, 40, 106));
+    if (y < 210.0) return interval(y, 183.0, 210.0, vec4(40, 106, 40, 106), vec4(31, 97, 30, 97));
+    if (y < 244.0) return interval(y, 210.0, 244.0, vec4(31, 97, 30, 97), vec4(27, 94, 25, 92));
+    if (y < 275.0) return interval(y, 244.0, 275.0, vec4(27, 94, 25, 92), vec4(32, 97, 30, 94));
+    if (y < 307.0) return interval(y, 275.0, 307.0, vec4(32, 97, 30, 94), vec4(42, 105, 40, 104));
+    if (y < 369.0) return interval(y, 307.0, 369.0, vec4(42, 105, 40, 104), vec4(64, 122, 62, 123));
+    if (y < 431.0) return interval(y, 369.0, 431.0, vec4(64, 122, 62, 123), vec4(90, 143, 85, 143));
+    return interval(y, 431.0, 493.0, vec4(90, 143, 85, 143), vec4(118, 164, 112, 165));
+}
+
+vec2 leftBlade(float y) {
+    if (y < 35.0) return mix(vec2(179, 205), vec2(151, 195), clamp((y - 16.0) / 19.0, 0.0, 1.0));
+    if (y < 50.0) return mix(vec2(151, 195), vec2(138, 185), clamp((y - 35.0) / 15.0, 0.0, 1.0));
+    if (y < 66.0) return mix(vec2(138, 185), vec2(123, 174), clamp((y - 50.0) / 16.0, 0.0, 1.0));
+    if (y < 85.0) return mix(vec2(123, 174), vec2(107, 162), clamp((y - 66.0) / 19.0, 0.0, 1.0));
+    if (y < 103.0) return mix(vec2(107, 162), vec2(93, 151), clamp((y - 85.0) / 18.0, 0.0, 1.0));
+    if (y < 121.0) return mix(vec2(93, 151), vec2(81, 140), clamp((y - 103.0) / 18.0, 0.0, 1.0));
+    if (y < 145.0) return mix(vec2(81, 140), vec2(64, 126), clamp((y - 121.0) / 24.0, 0.0, 1.0));
+    if (y < 166.0) return mix(vec2(64, 126), vec2(50, 115), clamp((y - 145.0) / 21.0, 0.0, 1.0));
+    if (y < 183.0) return mix(vec2(50, 115), vec2(42, 107), clamp((y - 166.0) / 17.0, 0.0, 1.0));
+    if (y < 210.0) return mix(vec2(42, 107), vec2(28, 98), clamp((y - 183.0) / 27.0, 0.0, 1.0));
+    if (y < 244.0) return mix(vec2(28, 98), vec2(25, 95), clamp((y - 210.0) / 34.0, 0.0, 1.0));
+    if (y < 275.0) return mix(vec2(25, 95), vec2(29, 98), clamp((y - 244.0) / 31.0, 0.0, 1.0));
+    if (y < 307.0) return mix(vec2(29, 98), vec2(41, 106), clamp((y - 275.0) / 32.0, 0.0, 1.0));
+    if (y < 338.0) return mix(vec2(41, 106), vec2(50, 114), clamp((y - 307.0) / 31.0, 0.0, 1.0));
+    if (y < 375.0) return mix(vec2(50, 114), vec2(64, 125), clamp((y - 338.0) / 37.0, 0.0, 1.0));
+    if (y < 400.0) return mix(vec2(64, 125), vec2(74, 133), clamp((y - 375.0) / 25.0, 0.0, 1.0));
+    if (y < 431.0) return mix(vec2(74, 133), vec2(87, 144), clamp((y - 400.0) / 31.0, 0.0, 1.0));
+    if (y < 455.0) return mix(vec2(87, 144), vec2(98, 152), clamp((y - 431.0) / 24.0, 0.0, 1.0));
+    if (y < 473.0) return mix(vec2(98, 152), vec2(110, 158), clamp((y - 455.0) / 18.0, 0.0, 1.0));
+    return mix(vec2(110, 158), vec2(121, 165), clamp((y - 473.0) / 18.0, 0.0, 1.0));
+}
+
 void main() {
     vec2 p = v_uv * u_size;
-    if (u_side > 0.0) p.x = u_size.x - p.x;
-    float t = clamp((u_geoA.x - p.y) / (u_geoA.x - u_geoA.y), 0.0, 1.0);
-    float d = (p.y - u_geoA.z) / (u_geoA.x - u_geoA.y);
-    float edge = u_geoA.w + (d < 0.0 ? 480.0 : 320.0) * d * d;
-    float width = mix(41.0, 18.0, t) + 28.0 * sin(t * 3.14159);
-    float x = p.x - edge;
-    float mask = smoothstep(3.0, 11.0, x) * (1.0 - smoothstep(width - 8.0, width, x));
-    float amp = step(0.002, u_value) * step(u_geoA.y, p.y) * step(p.y, u_geoA.x - 8.0);
-    float delta = (u_value - t) * (u_geoA.x - u_geoA.y);
-    float glow = 0.40 * exp(-abs(delta) / 38.0) * step(0.0, delta);
-    float stripe = 0.85 * (1.0 - smoothstep(2.0, 4.0, abs(delta)));
-    gl_FragColor = vec4(u_red, mask * amp * max(stripe, glow));
+    float y = p.y + 3.0;
+    vec2 band = u_side > 0.0 ? blade(y).zw : leftBlade(y);
+    float x = u_side > 0.0 ? u_size.x - p.x : p.x;
+    float across = clamp((x - band.x) / (band.y - band.x), 0.0, 1.0);
+    float inset = smoothstep(band.x, band.x + 2.0, x) *
+                  (1.0 - smoothstep(band.y - 1.0, band.y, x));
+    float n = clamp(u_value * 4.0, 0.0, 4.0);
+    // Align the moving edge with the 0 / 2 / 4 / 6 / 8 marks in the photo.
+    float tip = 493.0 - 124.0 * min(n, 2.0) -
+                124.0 * clamp(n - 2.0, 0.0, 1.0) - 105.0 * max(n - 3.0, 0.0);
+    if (u_side < 0.0) {
+        // Position the live cap on the photographed left scale's 0 / 2 / 4 / 6 / 8 ticks.
+        tip = 491.0 - 116.0 * min(n, 1.0) - 132.0 * clamp(n - 1.0, 0.0, 1.0)
+              - 121.0 * clamp(n - 2.0, 0.0, 1.0) - 101.0 * max(n - 3.0, 0.0);
+    }
+    float fill = smoothstep(tip - 0.75, tip + 0.75, y) *
+                 (1.0 - smoothstep(490.0, 493.0, y));
+    float cap = 1.0 - smoothstep(4.0, 7.0, y - tip);
+    float rpm = u_value * 8000.0;
+    float heightLight = 1.0 - smoothstep(170.0, 510.0, y);
+    float hotGlass = smoothstep(3000.0, 5750.0, rpm);
+    float gloss = pow(1.0 - across, 1.65);
+    vec3 smoked = mix(vec3(0.065, 0.074, 0.095), vec3(0.12, 0.13, 0.15), heightLight);
+    vec3 steel = mix(vec3(0.24, 0.26, 0.30), vec3(0.34, 0.35, 0.38), heightLight);
+    vec3 pearl = mix(smoked, steel, 0.22 + 0.55 * gloss);
+    pearl = mix(pearl, vec3(0.23, 0.22, 0.22), hotGlass * heightLight * 0.50);
+    float groove = (across - 0.085) / 0.045;
+    float channel = 1.0 - 0.62 * exp(-groove * groove);
+    pearl *= channel;
+    float bevel = smoothstep(0.88, 0.98, across);
+    pearl = mix(pearl, steel * 1.11, bevel * 0.72);
+    float fadeStrength = 1.0 - smoothstep(6000.0, 7000.0, rpm);
+    float fadeLength = mix(4.0, 42.0, fadeStrength);
+    float ahead = tip - y;
+    float fade = 1.0 - smoothstep(5.0, fadeLength + 5.0, ahead);
+    float bodyAlpha = fill * mix(0.86, 0.98, heightLight);
+    float fadeAlpha = (1.0 - fill) * fade * fadeStrength * 0.58 * step(0.0, ahead);
+    vec3 warmRed = vec3(0.88, 0.055, 0.045);
+    vec3 highlight = mix(pearl, warmRed, fadeStrength * 0.90);
+    vec3 body = mix(pearl, highlight, cap);
+    float alpha = bodyAlpha + fadeAlpha;
+    vec3 paint = mix(body, warmRed, fadeAlpha / max(alpha, 0.001));
+    gl_FragColor = vec4(paint, inset * alpha * step(0.001, u_value));
 }
 `;
 module.exports = { mtachPhoto: MTACH_PHOTO, shiftbar: SHIFTBAR, arc: ARC, revbar: REVBAR, lights: LIGHTS, fill: FILL, box: BOX, grid: GRID, segbar: SEGBAR, mdash: MDASH, mtach: MTACH, sdash: SDASH, boxes: BOXES, atext: ATEXT, meter: METER, gmeter: GMETER, revarc: REVARC, tiles: TILES, ribbon: RIBBON, deco: DECO, mview: MVIEW, vdash: VDASH };

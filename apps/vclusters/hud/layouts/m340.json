@@ -9,7 +9,7 @@
       "x": 0,
       "y": 26,
       "w": 1920,
-      "h": 636,
+      "h": 540,
       "z": 0,
       "color": "bg"
     },
@@ -69,38 +69,82 @@
       "max": 8000
     },
     {
-      "id": "gear",
+      "id": "gear_number",
       "type": "text",
-      "x": 839,
-      "y": 244,
-      "w": 267,
-      "h": 125,
-      "text": "{{gear}}",
-      "font": "m_gear",
+      "x": 872,
+      "y": 290.0,
+      "w": 66,
+      "h": 78,
+      "text": "{{gearInD}}",
+      "font": "sq_speed",
       "align": "center",
       "conn": 1,
       "z": 4,
-      "color": "fg"
+      "color": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "own": true
+    },
+    {
+      "id": "gear_stage",
+      "type": "text",
+      "x": 923,
+      "y": 255,
+      "w": 133,
+      "h": 165,
+      "text": "{{stage}}",
+      "font": "sq_gear",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "own": true
+    },
+    {
+      "id": "gear_bars",
+      "type": "artwork",
+      "asset": "gear_bars",
+      "own": true,
+      "x": 1058,
+      "y": 301,
+      "w": 44,
+      "h": 39,
+      "z": 4
     },
     {
       "id": "speed",
       "type": "text",
       "x": 870,
-      "y": 398,
+      "y": 374.8,
       "w": 204,
       "h": 85,
       "text": "{{speed}}",
-      "font": "m_speed",
+      "rate": 1,
+      "font": "sq_speed",
       "align": "center",
       "conn": 1,
       "z": 4,
-      "color": "fg"
+      "color": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "own": true
     },
     {
       "id": "speed_u",
       "type": "text",
       "x": 1069,
-      "y": 398,
+      "y": 388.4,
       "w": 117,
       "h": 30,
       "text": "{{u:speedLc}}",
@@ -108,77 +152,8 @@
       "align": "center",
       "conn": 1,
       "z": 4,
-      "color": "fg"
-    },
-    {
-      "id": "range",
-      "type": "text",
-      "x": 173,
-      "y": 607,
-      "w": 164,
-      "h": 38,
-      "text": "{{range}} {{u:distLc}}",
-      "font": "m_tiny",
-      "align": "center",
-      "conn": 1,
-      "z": 4,
-      "color": "fg"
-    },
-    {
-      "id": "clock",
-      "type": "text",
-      "x": 371,
-      "y": 607,
-      "w": 128,
-      "h": 38,
-      "text": "{{time}}",
-      "font": "m_mid",
-      "align": "center",
-      "conn": 1,
-      "z": 4,
-      "color": "fg"
-    },
-    {
-      "id": "ambient",
-      "type": "text",
-      "x": 1468,
-      "y": 607,
-      "w": 123,
-      "h": 38,
-      "text": "{{ambient}}",
-      "font": "m_mid",
-      "align": "right",
-      "conn": 1,
-      "z": 4,
-      "color": "fg"
-    },
-    {
-      "id": "fuel_live",
-      "type": "text",
-      "x": 122,
-      "y": 439,
-      "w": 83,
-      "h": 27,
-      "text": "{{fuelPct}}%",
-      "font": "m_label",
-      "align": "center",
-      "conn": 2,
-      "z": 4,
-      "color": "fg"
-    },
-    {
-      "id": "oil_live",
-      "type": "text",
-      "x": 1692,
-      "y": 454,
-      "w": 106,
-      "h": 27,
-      "text": "{{oil}} {{u:temp}}",
-      "font": "m_label",
-      "align": "center",
-      "conn": 2,
-      "z": 4,
-      "color": "fg"
+      "color": "fg",
+      "own": true
     },
     {
       "id": "setup_engine",
@@ -186,13 +161,14 @@
       "x": 1487,
       "y": 190,
       "w": 233,
-      "h": 26,
+      "h": 30,
       "text": "{{setup:engine}}",
-      "font": "head",
+      "font": "rc_bold",
       "align": "left",
       "conn": 2,
       "z": 4,
-      "color": "fg"
+      "color": "fg",
+      "cells": 10
     },
     {
       "id": "setup_bar_engine",
@@ -213,13 +189,14 @@
       "x": 1487,
       "y": 250,
       "w": 233,
-      "h": 26,
+      "h": 30,
       "text": "{{setup:chassis}}",
-      "font": "head",
+      "font": "rc_bold",
       "align": "left",
       "conn": 2,
       "z": 4,
-      "color": "fg"
+      "color": "fg",
+      "cells": 10
     },
     {
       "id": "setup_bar_chassis",
@@ -240,13 +217,14 @@
       "x": 1487,
       "y": 310,
       "w": 233,
-      "h": 26,
+      "h": 30,
       "text": "{{setup:steering}}",
-      "font": "head",
+      "font": "rc_bold",
       "align": "left",
       "conn": 2,
       "z": 4,
-      "color": "fg"
+      "color": "fg",
+      "cells": 10
     },
     {
       "id": "setup_bar_steering",
@@ -267,13 +245,14 @@
       "x": 1487,
       "y": 370,
       "w": 233,
-      "h": 26,
+      "h": 30,
       "text": "{{setup:gearbox}}",
-      "font": "head",
+      "font": "rc_bold",
       "align": "left",
       "conn": 2,
       "z": 4,
-      "color": "fg"
+      "color": "fg",
+      "cells": 10
     },
     {
       "id": "setup_bar_gearbox",
@@ -289,18 +268,329 @@
       "slant": 6
     },
     {
-      "id": "ambient_unit",
+      "id": "tyre_u_press",
       "type": "text",
-      "x": 1601,
-      "y": 611,
-      "w": 70,
-      "h": 38,
-      "text": "{{u:temp}}",
-      "font": "m_tiny",
-      "align": "left",
+      "x": 338,
+      "y": 193,
+      "w": 66,
+      "h": 30,
+      "text": "{{u:pressure}}",
+      "font": "rc_reg",
+      "align": "center",
       "conn": 1,
       "z": 4,
       "color": "fg"
+    },
+    {
+      "id": "tyre_u_temp",
+      "type": "text",
+      "x": 338,
+      "y": 221,
+      "w": 66,
+      "h": 30,
+      "text": "{{u:temp}}",
+      "font": "rc_reg",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": [
+        166,
+        216,
+        245,
+        255
+      ]
+    },
+    {
+      "id": "tyre_icon",
+      "type": "artwork",
+      "asset": "tpms_wheel",
+      "x": 324,
+      "y": 191,
+      "w": 30,
+      "h": 30,
+      "conn": 1,
+      "z": 3
+    },
+    {
+      "id": "tyre_vline_t",
+      "type": "fill",
+      "x": 371,
+      "y": 250,
+      "w": 2,
+      "h": 32,
+      "color": [
+        64,
+        68,
+        76,
+        255
+      ],
+      "conn": 2,
+      "z": 2
+    },
+    {
+      "id": "tyre_vline_b",
+      "type": "fill",
+      "x": 371,
+      "y": 331,
+      "w": 2,
+      "h": 32,
+      "color": [
+        64,
+        68,
+        76,
+        255
+      ],
+      "conn": 2,
+      "z": 2
+    },
+    {
+      "id": "tyre_hline_l",
+      "type": "fill",
+      "x": 301,
+      "y": 305,
+      "w": 51,
+      "h": 2,
+      "color": [
+        64,
+        68,
+        76,
+        255
+      ],
+      "conn": 2,
+      "z": 2
+    },
+    {
+      "id": "tyre_hline_r",
+      "type": "fill",
+      "x": 392,
+      "y": 305,
+      "w": 51,
+      "h": 2,
+      "color": [
+        64,
+        68,
+        76,
+        255
+      ],
+      "conn": 2,
+      "z": 2
+    },
+    {
+      "id": "tyre_car",
+      "type": "artwork",
+      "asset": "tpms_car",
+      "x": 362,
+      "y": 288,
+      "w": 19,
+      "h": 37,
+      "conn": 1,
+      "z": 3
+    },
+    {
+      "id": "tyre_b_fl",
+      "type": "artwork",
+      "asset": "tpms_mark_fl",
+      "x": 364,
+      "y": 293,
+      "w": 6,
+      "h": 7,
+      "conn": 2,
+      "z": 4,
+      "tint": "tyre",
+      "tyre": "FL"
+    },
+    {
+      "id": "tyre_b_fr",
+      "type": "artwork",
+      "asset": "tpms_mark_fr",
+      "x": 374,
+      "y": 293,
+      "w": 6,
+      "h": 7,
+      "conn": 2,
+      "z": 4,
+      "tint": "tyre",
+      "tyre": "FR"
+    },
+    {
+      "id": "tyre_b_rl",
+      "type": "artwork",
+      "asset": "tpms_mark_rl",
+      "x": 364,
+      "y": 314,
+      "w": 7,
+      "h": 8,
+      "conn": 2,
+      "z": 4,
+      "tint": "tyre",
+      "tyre": "RL"
+    },
+    {
+      "id": "tyre_b_rr",
+      "type": "artwork",
+      "asset": "tpms_mark_rr",
+      "x": 373,
+      "y": 314,
+      "w": 7,
+      "h": 8,
+      "conn": 2,
+      "z": 4,
+      "tint": "tyre",
+      "tyre": "RR"
+    },
+    {
+      "id": "tyre_p_fl",
+      "type": "text",
+      "x": 279,
+      "y": 247,
+      "w": 100,
+      "h": 34,
+      "text": "{{tyreP:FL}}",
+      "font": "rc_bold",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": "fg"
+    },
+    {
+      "id": "tyre_t_fl",
+      "type": "text",
+      "x": 279,
+      "y": 274,
+      "w": 100,
+      "h": 29,
+      "text": "{{tyreT:FL}}{{u:temp}}",
+      "font": "rc_reg",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": [
+        166,
+        216,
+        245,
+        255
+      ]
+    },
+    {
+      "id": "tyre_p_fr",
+      "type": "text",
+      "x": 366,
+      "y": 247,
+      "w": 100,
+      "h": 34,
+      "text": "{{tyreP:FR}}",
+      "font": "rc_bold",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": "fg"
+    },
+    {
+      "id": "tyre_t_fr",
+      "type": "text",
+      "x": 366,
+      "y": 274,
+      "w": 100,
+      "h": 29,
+      "text": "{{tyreT:FR}}{{u:temp}}",
+      "font": "rc_reg",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": [
+        166,
+        216,
+        245,
+        255
+      ]
+    },
+    {
+      "id": "tyre_p_rl",
+      "type": "text",
+      "x": 279,
+      "y": 308,
+      "w": 100,
+      "h": 34,
+      "text": "{{tyreP:RL}}",
+      "font": "rc_bold",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": "fg"
+    },
+    {
+      "id": "tyre_t_rl",
+      "type": "text",
+      "x": 279,
+      "y": 335,
+      "w": 100,
+      "h": 29,
+      "text": "{{tyreT:RL}}{{u:temp}}",
+      "font": "rc_reg",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": [
+        166,
+        216,
+        245,
+        255
+      ]
+    },
+    {
+      "id": "tyre_p_rr",
+      "type": "text",
+      "x": 366,
+      "y": 308,
+      "w": 100,
+      "h": 34,
+      "text": "{{tyreP:RR}}",
+      "font": "rc_bold",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": "fg"
+    },
+    {
+      "id": "tyre_t_rr",
+      "type": "text",
+      "x": 366,
+      "y": 335,
+      "w": 100,
+      "h": 29,
+      "text": "{{tyreT:RR}}{{u:temp}}",
+      "font": "rc_reg",
+      "align": "center",
+      "conn": 1,
+      "z": 4,
+      "color": [
+        166,
+        216,
+        245,
+        255
+      ]
+    },
+    {
+      "id": "rpm_trim_left",
+      "type": "artwork",
+      "asset": "rpm_trim_left",
+      "own": true,
+      "x": 489,
+      "y": 59,
+      "w": 233,
+      "h": 504,
+      "z": 3
+    },
+    {
+      "id": "rpm_trim_right",
+      "type": "artwork",
+      "asset": "rpm_trim_right",
+      "own": true,
+      "x": 1200,
+      "y": 59,
+      "w": 233,
+      "h": 504,
+      "z": 3
     }
   ]
 }
